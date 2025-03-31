@@ -132,6 +132,14 @@ void apply_breakpoints_linux() {
             printf("ASAN Deadly Signal\n");
             fuzz_stacktrace();
             });
+    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
+            printf("ASAN GENERIC ERROR\n");
+            fuzz_stacktrace();
+            });
+    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::AsanOnDeadlySignal"), [](bxInstruction_c *i) {
+            printf("ASAN Deadly Signal\n");
+            fuzz_stacktrace();
+            });
     add_breakpoint(sym_to_addr("vmm", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("ld-musl", "__stdio_write"), bp__stdio_write);
     //add_breakpoint(sym_to_addr("ld-musl", "out"), bp__stdio_write);
