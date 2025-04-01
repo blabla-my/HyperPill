@@ -29,6 +29,7 @@ size_t ic_length_until_token(const char* token, size_t len);
 void ic_erase_backwards_until_token(void);
 uint8_t *ic_get_cursor(void);
 void ic_dump();
+void ic_dump_file(const char* prefix);
 
 // Returns the size of the next buffer
 size_t ic_lookahead(const char* token, size_t token_len) ;
@@ -39,6 +40,7 @@ int new_op(uint8_t op, uint32_t start, uint32_t end, uint32_t dma_start, uint32_
 extern "C" {
 void __fuzzer_set_output(uint8_t *data, size_t size);
 void __fuzzer_set_op_log(void *log);
+void __fuzzer_compute_sha1(const uint8_t *Data, size_t Len, uint8_t *Out);
 }
 
 #endif
