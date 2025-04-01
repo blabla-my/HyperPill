@@ -15,6 +15,7 @@
 #include "FuzzerPlatform.h"
 #include "FuzzerRandom.h"
 #include "FuzzerTracePC.h"
+#include "FuzzerSHA1.h"
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -1033,6 +1034,12 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL                   
 void __fuzzer_set_op_log(void *log) {      
     fuzzer::F->SetOpLog((struct fuzzer::op_log*)log);
+}
+
+ATTRIBUTE_INTERFACE
+ATTRIBUTE_NO_SANITIZE_ALL                   
+void __fuzzer_compute_sha1(const uint8_t *Data, size_t Len, uint8_t *Out) {      
+    fuzzer::ComputeSHA1(Data, Len, Out);
 }
 
 } // extern "C"

@@ -407,6 +407,26 @@ void ic_dump(){
     printf("\n");
 }
 
+void ic_dump_file(const char* prefix){
+    uint8_t sha1[20];
+    memset(sha1, 0, sizeof(sha1));
+    __fuzzer_compute_sha1(input, input_len, sha1);
+
+    char sha1_filename[128];
+    snprintf(sha1_filename, sizeof(sha1_filename), "%s-", prefix);
+    for(int i=0; i<20; i++){
+        snprintf(sha1_filename+strlen(sha1_filename), sizeof(sha1_filename)-strlen(sha1_filename), "%02x", sha1[i]);
+    }
+
+    FILE *f = fopen(sha1_filename, "wb");
+    if (f) {
+        fwrite(input, 1, input_len, f);
+        fclose(f);
+    } else {
+        perror("Failed to open file");
+    }
+}
+
 size_t ic_length_until_token(const char* token, size_t len) {
     uint8_t* token_position = (uint8_t*) memmem(input_cursor,
             input + input_len - input_cursor,
