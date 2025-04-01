@@ -48,7 +48,7 @@ void print_stacktrace(){
         return;
     for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend(); ++r)
     {
-        printf("%016lx -> %016lx\n", r->first, r->second);
+        printf("%016lx -> %016lx, %s -> %s\n", r->first, r->second, addr_to_sym(r->first).second.c_str(), addr_to_sym(r->second).second.c_str());
     }
     fflush(stdout);
     fflush(stderr);

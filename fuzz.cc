@@ -92,6 +92,9 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 		if (BX_CPU(id)->fuzztrace || log_ops) {
 			printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
 			       addr, lookup_gpa_by_hpa(addr), len);
+			for (int i = 0; i < len; i++)
+				printf("%02x ", buf[i]);
+			printf("\n");
 		}
 		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, l, (void *)buf);
 		memcpy(data, buf, l);
@@ -104,8 +107,11 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 		BX_MEM(0)->readPhysicalPage(BX_CPU(id), source, len, buf);
 
 		if (BX_CPU(id)->fuzztrace || log_ops) {
-			printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+			printf("!(medium size)dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
 			       addr, lookup_gpa_by_hpa(addr), len);
+			for (int i = 0; i < len; i++)
+				printf("%02x ", buf[i]);
+			printf("\n");
 		}
 		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, buf);
 	}
@@ -173,7 +179,7 @@ bool inject_write(bx_address addr, int size, uint64_t val) {
 	BX_CPU(id)->set_reg64(BX_64BIT_REG_RAX, val);
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!write%d %lx %lx (reason: %lx)\n", size, addr, val,
+		printf("!write inject: %d %lx %lx (reason: %lx)\n", size, addr, val,
 		       exit_reason);
 	}
 	bx_address phy;
@@ -221,7 +227,7 @@ bool inject_read(bx_address addr, int size) {
 	BX_CPU(id)->set_reg64(BX_64BIT_REG_RCX, addr);
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!read%d %lx\n", size, addr);
+		printf("!read inject: %d %lx\n", size, addr);
 	}
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
@@ -267,7 +273,7 @@ bool inject_in(uint16_t addr, uint16_t size) {
 	enum Sizes { Byte, Word, Long, end_sizes };
 	uint64_t field_64 = 0;
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!in%d %x\n", size, addr);
+		printf("!in inject: %d %x\n", size, addr);
 	}
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
@@ -314,7 +320,7 @@ bool inject_out(uint16_t addr, uint16_t size, uint32_t value) {
 	enum Sizes { Byte, Word, Long, end_sizes };
 	uint64_t field_64 = 0;
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!out%d %x %x\n", size, addr, value);
+		printf("!out inject: %d %x %x\n", size, addr, value);
 	}
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
@@ -625,7 +631,7 @@ bool op_msr_write() {
 		return false;
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!wrmsr %lx = %lx\n", msr, value);
+		printf("!wrmsr inject: %lx = %lx\n", msr, value);
 	}
 	return inject_wrmsr(msr, value);
 }
@@ -715,7 +721,7 @@ bool op_vmcall() {
 	uint8_t *dma_start = ic_get_cursor();
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!hypercall %lx\n", vmcall_gpregs[BX_64BIT_REG_RCX]);
+		printf("!hypercall inject: %lx\n", vmcall_gpregs[BX_64BIT_REG_RCX]);
 	}
 	start_cpu();
 	/* printf("Hypercall %lx Result: %lx\n",vmcall_gpregs[BX_64BIT_REG_RCX],
