@@ -140,6 +140,14 @@ void apply_breakpoints_linux() {
             printf("ASAN Deadly Signal\n");
             fuzz_emu_stop_crash("asan-deadly-signal");
             });
+    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
+            printf("ASAN GENERIC ERROR\n");
+            fuzz_emu_stop_crash("asan-generic-error");
+            });
+    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](bxInstruction_c *i) {
+            printf("ASAN Deadly Signal\n");
+            fuzz_emu_stop_crash("asan-deadly-signal");
+            });
     add_breakpoint(sym_to_addr("vmm", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("ld-musl", "__stdio_write"), bp__stdio_write);
     //add_breakpoint(sym_to_addr("ld-musl", "out"), bp__stdio_write);
