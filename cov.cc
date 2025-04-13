@@ -1,8 +1,10 @@
 #include "fuzz.h"
 #include "time.h"
 #include "conveyor.h"
+#include <cstdio>
 #include <tsl/robin_map.h>
 #include <tsl/robin_set.h> 
+#include <unistd.h> 
 
 tsl::robin_map<bx_address, bool> ignore_edges;
 tsl::robin_set<bx_address> seen_edges;
@@ -145,4 +147,30 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
 
     if (what == BX_INSTR_IS_IRET && (new_rip >> 63) == 0)
         add_edge(prev_rip, new_rip);
+}
+
+void dump_libfuzzer_coverage_to_file() {
+    char filename[64] = {0};
+    // add time to filename
+    time_t t = time(NULL);
+    snprintf(filename, sizeof(filename), "libfuzzer_cov_%d_%lu", getpid(), t);
+    FILE *f = fopen(filename, "w");
+    if (!f) {
+        printf("Failed to open %s\n", filename);
+        return;
+    }
+    fwrite(libfuzzer_coverage, sizeof(libfuzzer_coverage), 1, f);
+    printf("Dumped libfuzzer coverage to %s\n", filename);
+    fclose(f); 
+}
+
+/* Add a signal handler to dump libfuzzer coverage */
+void signal_handler(int signum) {
+    if (signum == SIGUSR1){
+        char linkpath[100];
+        readlink("/proc/self/fd/1", linkpath, 100);
+        if (strstr(linkpath, "fuzz-")){
+            dump_libfuzzer_coverage_to_file();
+        }
+    }
 }

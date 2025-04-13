@@ -407,5 +407,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	init_regions(icp_db_path);
 	fuzzenum = false;
 
+	/* Init a signal handler for SIGUSR1 */
+	signal(SIGUSR1, signal_handler);
+
 	return 0;
 }

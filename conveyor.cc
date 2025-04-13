@@ -420,6 +420,7 @@ void ic_dump_file(const char* prefix){
 
     FILE *f = fopen(sha1_filename, "wb");
     if (f) {
+        printf("Dumping input to %s\n", sha1_filename);
         fwrite(input, 1, input_len, f);
         fclose(f);
     } else {

@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <cstring>
+#include <signal.h>
 #include <tsl/robin_set.h>
 
 #include "bochs.h"
@@ -136,6 +137,7 @@ void print_stacktrace();
 bool ignore_pc(bx_address pc);
 bool found_pc(uint64_t pc);
 void add_pc_range(size_t base, size_t len);
+void add_opt_infer_range(size_t base, size_t len);
 
 void fuzz_emu_stop_normal();
 void fuzz_emu_stop_unhealthy();
@@ -235,5 +237,8 @@ void apply_breakpoints_linux();
 
 //stacktrace
 void fuzz_stacktrace();
+
+//signal
+void signal_handler(int signum);
 
 #endif
