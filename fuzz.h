@@ -175,6 +175,8 @@ unsigned long int get_icount();
 unsigned long int get_pio_icount();
 void reset_bx_vm();
 
+#include "conveyor.h"
+
 void walk_ept(bool enum_mmio);
 void fuzz_walk_ept();
 void fuzz_walk_cr3();
