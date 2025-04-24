@@ -1,11 +1,15 @@
+#include "bochs.h"
+#include "config.h"
 #include "fuzz.h"
 #include "time.h"
 #include "conveyor.h"
+#include <cstddef>
 #include <cstdio>
 #include <fstream>
 #include <tsl/robin_map.h>
 #include <tsl/robin_set.h> 
 #include <unistd.h> 
+#include <asm/ptrace.h>
 
 tsl::robin_map<bx_address, bool> ignore_edges;
 tsl::robin_set<bx_address> seen_edges;
@@ -119,6 +123,37 @@ void fuzz_stacktrace(){
     print_stacktrace();
 
 }
+
+void print_page_fault_pt_regs(){
+    bx_address pt_regs_addr = BX_CPU(0)->gen_reg[BX_64BIT_REG_RDI].rrx;
+    printf("pt_regs_addr: %lx\n", pt_regs_addr);
+    struct pt_regs regs;
+    BX_CPU(0)->access_read_linear(pt_regs_addr, sizeof(regs), 0, BX_READ, 0x0, &regs);
+    // dump pt_regs with name
+    printf("pt_regs:\n");
+    printf("r15: %lx\n", regs.r15);
+    printf("r14: %lx\n", regs.r14);
+    printf("r13: %lx\n", regs.r13);
+    printf("r12: %lx\n", regs.r12);
+    printf("r11: %lx\n", regs.r11);
+    printf("r10: %lx\n", regs.r10);
+    printf("r9: %lx\n", regs.r9);
+    printf("r8: %lx\n", regs.r8);
+    printf("rbp: %lx\n", regs.rbp);
+    printf("rdi: %lx\n", regs.rdi);
+    printf("rsi: %lx\n", regs.rsi);
+    printf("rdx: %lx\n", regs.rdx);
+    printf("rax: %lx\n", regs.rax);
+    printf("rcx: %lx\n", regs.rcx);
+    printf("rbx: %lx\n", regs.rbx);
+    printf("orig_rax: %lx\n", regs.orig_rax);
+    printf("rip: %lx %s\n", regs.rip, addr_to_sym(regs.rip).second.c_str());
+    printf("cs: %lx\n", regs.cs);
+    printf("eflags: %lx\n", regs.eflags);
+    printf("rsp: %lx\n", regs.rsp);
+    printf("ss: %lx\n", regs.ss);
+}
+
 void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
                               bx_address new_rip) {
     if (what == BX_INSTR_IS_SYSRET)

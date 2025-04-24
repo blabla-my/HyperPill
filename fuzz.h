@@ -252,4 +252,7 @@ void fuzz_stacktrace();
 //signal
 void signal_handler(int signum);
 
+//debug
+void print_page_fault_pt_regs();
+
 #endif

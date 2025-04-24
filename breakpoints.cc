@@ -150,8 +150,10 @@ void apply_breakpoints_linux() {
             BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
             BX_CPU(id)->async_event = 1;
     });
-    add_breakpoint(sym_to_addr("vmlinux", "asm_exc_page_fault"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("vmlinux", "exc_page_fault"), [](bxInstruction_c *i) {
             printf("page fault at: 0x%lx\n", BX_CPU(id)->cr2);
+            print_page_fault_pt_regs();
+            print_stacktrace();
             // fuzz_emu_stop_crash("page fault");
     });
 }
