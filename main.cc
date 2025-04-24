@@ -117,8 +117,8 @@ void fuzz_emu_stop_crash(const char *type){
 	} else {
 		printf(".crash\n");
 	}
+	print_stacktrace();
     if(master_fuzzer) {
-        print_stacktrace();
         ic_dump();
 		ic_dump_file(type);
     }
