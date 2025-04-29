@@ -64,11 +64,14 @@ void print_stacktrace(){
 void add_edge(bx_address prev_rip, bx_address new_rip) {
     time_t t;
 
-    symbolize(new_rip);
+    if (new_rip)
+        symbolize(new_rip);
+
+    bx_address hash = prev_rip ^ (new_rip >> 1);
     if(fuzzing) {
-        if(cur_input.emplace(new_rip).second)
+        if(cur_input.emplace(hash).second)
             last_new = 0;
-        if(last_new++ > 1000000 && !master_fuzzer ){
+        if(last_new++ > 3000000 && !master_fuzzer ){
             printf("No new edges for over %d..\n", last_new);
             fuzz_emu_stop_unhealthy();
         }
@@ -79,16 +82,18 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
         }
     }
 
-    if (ignore_pc(new_rip))
+    if (ignore_pc(hash))
         return;
-    libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
+    libfuzzer_coverage[hash % sizeof(libfuzzer_coverage)]++;
 
 
-    if (seen_edges.emplace(new_rip).second) {
+    if (seen_edges.emplace(hash).second) {
         time(&t);
-        auto s = addr_to_sym(new_rip);
-        printf("[%d] NEW_PC: %lx %s (%s)\n", t, new_rip, s.second.c_str(), s.first.c_str());
-        status |= (1 << 1); // new pc
+        if (new_rip){
+            auto s = addr_to_sym(new_rip);
+            printf("[%d] NEW_PC: %lx %s (%s)\n", t, new_rip, s.second.c_str(), s.first.c_str());
+            status |= (1 << 1); // new pc
+        }
     }
 }
 
@@ -106,7 +111,9 @@ void fuzz_instr_cnear_branch_taken(bx_address branch_rip, bx_address new_rip) {
     add_edge(branch_rip, new_rip);
 }
 
-void fuzz_instr_cnear_branch_not_taken(bx_address branch_rip) {}
+void fuzz_instr_cnear_branch_not_taken(bx_address branch_rip) {
+    add_edge(branch_rip, 0);
+}
 
 uint32_t get_sysret_status() { return status; }
 
