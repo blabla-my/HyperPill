@@ -1,5 +1,6 @@
 #include "bochs.h"
 #include "config.h"
+#include "cpu/cpu.h"
 #include "fuzz.h"
 #include "time.h"
 #include "conveyor.h"

@@ -168,7 +168,6 @@ static inline const uint8_t* size_ptr(size_t len){
     if (input_cursor + len > input + input_len)
         return NULL;
     input_cursor += len;
-    /* printf("size_ptr: %lx\n", input_cursor-input-len); */
     return input_cursor - len;
 }
 
@@ -413,7 +412,14 @@ void ic_dump_file(const char* prefix){
     __fuzzer_compute_sha1(input, input_len, sha1);
 
     char sha1_filename[128];
-    snprintf(sha1_filename, sizeof(sha1_filename), "%s-", prefix);
+    // replace space or '\n' in prefix
+    char* p = strdup(prefix);
+    for(int i=0; i<strlen(p); i++){
+        if(p[i] == ' ' || p[i] == '\n')
+            p[i] = '-';
+    }
+
+    snprintf(sha1_filename, sizeof(sha1_filename), "%s-", p);
     for(int i=0; i<20; i++){
         snprintf(sha1_filename+strlen(sha1_filename), sizeof(sha1_filename)-strlen(sha1_filename), "%02x", sha1[i]);
     }
