@@ -79,9 +79,11 @@ rebuild_bochs:
 tests: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
 	$(CXX) $(CFLAGS) -I. tests/cve-2021-3947.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/cve-2021-3947
 	$(CXX) $(CFLAGS) -I. tests/cve-2022-0216.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/cve-2022-0216
+	$(CXX) $(CFLAGS) -I. tests/virtio-net-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/virtio-net-hlt
+	$(CXX) $(CFLAGS) -I. tests/virtio-blk-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/virtio-blk-hlt
 
 clean:
-	rm -rf vendor/bochs-build vendor/lib vendor/include
+	rm -rf vendor/bochs-build vendor/lib vendor/include vendor/libfuzzer-ng/libFuzzer.a
 	rm -rf bochsapi/*.o
 	rm -rf ./*.o
 

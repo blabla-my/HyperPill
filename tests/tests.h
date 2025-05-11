@@ -17,6 +17,13 @@ static void test_mmio_write(uint64_t addr, size_t size, uint64_t value) {
 	start_cpu();
 }
 
+static void test_mmio_read(uint64_t addr, size_t size) {
+	printf("[INJECT MMIO READ] addr: 0x%lx \n", addr);
+	if (!inject_read(addr, size))
+		printf("inject read error/n");
+	start_cpu();
+}
+
 static void test_out(uint16_t addr, uint16_t size, uint32_t value) {
 	printf("[INJECT OUT] addr: 0x%x value: 0x%x \n", addr, size);
 	if (!inject_out(addr, size, value))
