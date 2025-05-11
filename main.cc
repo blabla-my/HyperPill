@@ -433,7 +433,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	/* For symbol - > addr (for breakpoints)*/
 	if (getenv("SYMBOL_MAPPING")) {
-		load_symbol_map(getenv("SYMBOL_MAPPING"));
+		// load_symbol_map(getenv("SYMBOL_MAPPING"));
+		load_symbol_map_from_db(icp_db_path);
 		if (getenv("END_WITH_CLOCK_STEP")) {
 			// see kvm_cpu_exe() in accel/kvm/kvm-all.c
 			clock_step_rip[CLOCK_STEP_NONE] = sym_to_addr("qemu-system", "address_space_rw");

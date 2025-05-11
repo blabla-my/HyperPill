@@ -48,7 +48,7 @@ static std::string executeCommand(const char* cmd) {
 }
 
 // Function to parse the output of 'nm' command and construct map of addresses to symbol names
-static std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath) {
+std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath) {
     std::map<std::string, size_t> symbolMap;
     std::string nmOutput = executeCommand(("nm -n -C -a " + binaryPath + "| grep -e ' t ' -e ' T ' -e ' B '").c_str());
     size_t pos = 0;
@@ -140,4 +140,16 @@ void load_symbol_map(char *path) {
     printf("sym2addr: vmlinux, init_task %lx\n", sym_to_addr("vmlinux", "init_task"));
     printf("sym2addr: vmlinux, dump_stack %lx\n", sym_to_addr("vmlinux", "dump_stack"));
     printf("sym2addr: vmlinux, do_idle %lx\n", sym_to_addr("vmlinux", "do_idle"));
+}
+
+/* Assume the sqlite database specified by  has one table: addr2sym
+    * addr2sym: addr, bin, name
+    * addr2sym: 0x7f8a4c3b0000, vmlinux, init_task
+    * addr2sym: 0x7f8a4c3b0000, vmlinux, dump_stack
+    * addr2sym: 0x7f8a4c3b0000, vmlinux, do_idle
+   construct addr2sym and sym2addr from this table
+*/
+void load_symbol_map_from_db(const char* path) {
+    open_db(path);
+    load_sym(addr2sym, sym2addr);
 }

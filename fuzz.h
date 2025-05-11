@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <map>
+#include <sys/types.h>
 #include <vector>
 #include <cstring>
 #include <signal.h>
@@ -209,8 +210,11 @@ void add_ept_violation_range(bx_address start, bx_address end);
 void open_db(const char* path);
 void insert_mmio(uint64_t addr, uint64_t len);
 void insert_pio(uint16_t addr, uint16_t len);
+void insert_sym(uint64_t addr, const char* bin, const char* sym);
 void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
+void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>>& addr2sym,
+              std::map<std::pair<std::string, std::string>, size_t>& sym2addr);
 void init_regions(const char* path);
 
 void init_register_feedback();
@@ -228,8 +232,10 @@ void symbolize(size_t pc);
 
 // sym2addr_linux.cc
 void load_symbol_map(char *path);
+void load_symbol_map_from_db(const char* path);
 bx_address sym_to_addr(std::string bin, std::string name);
 std::pair<std::string, std::string> addr_to_sym(size_t addr);
+std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath);
 
 // link_map.c
 void load_link_map(char* map_path, char* obj_regex, size_t base);

@@ -144,4 +144,19 @@ void symbolize(size_t pc) {
     size_t vstart = match_addr - voffset;
     ranges[std::make_pair(vstart, size)] = match;
     printf("Symbolization Range: %lx - %lx size: %lx file: %s section: %s sh_addr: %lx \n", vstart, vstart+size, size, match.c_str(), name, shaddr);
+    /* load all symbol into database */
+    static bool db_opened = false;
+    if(!db_opened && getenv("ICP_DB_PATH")) {
+        open_db(getenv("ICP_DB_PATH"));
+        db_opened = true;
+    }
+    auto m = get_symbol_map(match);
+    auto offset = vstart - shaddr;
+    for(auto it: m) {
+        if(it.second) {
+            std::string name = it.first;
+            name.erase(std::find(name.begin(), name.end(), '('), name.end());
+            insert_sym(it.second + offset, match.c_str(), name.c_str());
+        }
+    }
 }
