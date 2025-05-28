@@ -1,4 +1,5 @@
 #include "fuzz.h"
+#include "bochs.h"
 #include "config.h"
 #include <tsl/robin_map.h>
 
@@ -228,6 +229,8 @@ bool inject_read(bx_address addr, int size) {
 
 	uint32_t exit_reason =
 		vmcs_translate_guest_physical_ept(addr, NULL, NULL);
+	if (!exit_reason)
+		return false;
 	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
 
 	BX_CPU(id)->VMwrite32(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
@@ -737,7 +740,12 @@ bool op_vmcall() {
 	uint8_t *dma_start = ic_get_cursor();
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!hypercall inject: %lx\n", vmcall_gpregs[BX_64BIT_REG_RCX]);
+		printf("!hypercall inject: [RAX: %lx, RBX: %lx, RCX: %lx, RDX: %lx, RSI: %lx]\n", 
+			vmcall_gpregs[BX_64BIT_REG_RAX], 
+			vmcall_gpregs[BX_64BIT_REG_RBX],
+			vmcall_gpregs[BX_64BIT_REG_RCX],
+			vmcall_gpregs[BX_64BIT_REG_RDX],
+			vmcall_gpregs[BX_64BIT_REG_RSI]);
 	}
 	start_cpu();
 	/* printf("Hypercall %lx Result: %lx\n",vmcall_gpregs[BX_64BIT_REG_RCX],
