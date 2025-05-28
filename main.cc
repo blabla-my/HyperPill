@@ -1,4 +1,7 @@
+#include "bochs.h"
+#include "config.h"
 #include "fuzz.h"
+#include "pc_system.h"
 #include <cstdint>
 
 int in_clock_step = CLOCK_STEP_NONE;
@@ -17,6 +20,8 @@ static bool executing_input;
 
 BOCHSAPI BX_CPU_C bx_cpu = BX_CPU_C(0);
 BOCHSAPI BX_CPU_C shadow_bx_cpu;
+BOCHSAPI bx_pc_system_c shadow_bx_pc_system;
+BOCHSAPI Bit64s shadow_tsc;
 
 uint64_t vmcs_addr;
 uint64_t guest_rip; /* Entrypoint. Reset after each op */
@@ -111,13 +116,14 @@ void fuzz_emu_stop_unhealthy(){
 
 void fuzz_emu_stop_crash(const char *type){
 	fuzz_emu_stop_unhealthy();
-	fuzz_should_abort = 1;
+	// fuzz_should_abort = 1;
 	if (type) {
 		printf(".crash %s\n", type);
 	} else {
 		printf(".crash\n");
 	}
 	print_stacktrace();
+	dump_regs();
     if(master_fuzzer) {
         ic_dump();
 		ic_dump_file(type);
@@ -144,6 +150,7 @@ unsigned long int get_pio_icount() {
 
 void reset_bx_vm() {
 	bx_cpu = shadow_bx_cpu;
+	bx_pc_system = shadow_bx_pc_system;
 	if (BX_CPU(id)->vmcs_map)
 		BX_CPU(id)->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
 	fuzz_reset_memory();
@@ -485,6 +492,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	 * state after each fuzzer input
 	 */
 	shadow_bx_cpu = bx_cpu;
+	shadow_bx_pc_system = bx_pc_system;
 
 	/* Start tracking accesses to the memory so we can roll-back changes
 	 * after each fuzzer input */
