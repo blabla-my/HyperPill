@@ -137,3 +137,15 @@ vendor/include
 /sfsite/tmp
 /sfsite/xcf
 /sfsite/.glimpse*
+
+# /snapshot
+/snapshot
+# /symbols
+/symbols
+# /qemu-*
+/qemu-*
+/VM
+/download
+
+# /.cache
+.cache
