@@ -152,4 +152,7 @@ void load_symbol_map(char *path) {
 void load_symbol_map_from_db(const char* path) {
     open_db(path);
     load_sym(addr2sym, sym2addr);
+    for (const auto& sym : sym2addr){
+        bins.insert(sym.first.first);
+    }
 }
