@@ -1,4 +1,5 @@
 #include "fuzz.h"
+#include "task.h"
 #include <tsl/robin_map.h>
 #include <utility>
 #include <vector>
@@ -153,6 +154,17 @@ void apply_breakpoints_linux() {
     add_breakpoint(sym_to_addr("vmlinux", "exc_page_fault"), [](bxInstruction_c *i) {
             printf("page fault at: 0x%lx\n", BX_CPU(id)->cr2);
             // fuzz_emu_stop_crash("page fault");
+    });
+    add_breakpoint(sym_to_addr("vmlinux", "pick_next_task_fair"), [](bxInstruction_c *i) {
+            unsigned long cr3 = BX_CPU(id)->cr3;
+            if (task_map.find(cr3 >> PAGE_SHIFT) == task_map.end()) {
+                printf("No task found for cr3: %lx\n", cr3);
+                return;
+            }
+            printf("pick_next_task_fair: %s, pid: %d, cr3: %lx, hypervisor_thread: %d\n",
+                   task_map[cr3 >> PAGE_SHIFT]->comm,
+                   task_map[cr3 >> PAGE_SHIFT]->pid,
+                   cr3, task_map[cr3 >> PAGE_SHIFT]->hypervisor_thread);
     });
 }
 
