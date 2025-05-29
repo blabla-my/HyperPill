@@ -93,6 +93,12 @@ void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>>
             std::string sym = (const char*)sqlite3_column_text(res, 2);
             size_t addr = sqlite3_column_int64(res, 0);
             addr2sym[addr].push_back(std::make_pair(bin, sym));
+            auto key = std::make_pair(bin, sym);
+            if (sym2addr.find(key) != sym2addr.end()) {
+                printf("Warning: Symbol %s@%s already exists at address %lx, encountered a new one %lx\n", 
+                        sym.c_str(), bin.c_str(), sym2addr[key], addr);
+                continue;
+            }
             sym2addr[std::make_pair(bin, sym)] = addr;
         }
     }
