@@ -2,6 +2,7 @@
 #include "config.h"
 #include "fuzz.h"
 #include "pc_system.h"
+#include "task.h"
 #include <cstdint>
 
 int in_clock_step = CLOCK_STEP_NONE;
@@ -115,8 +116,12 @@ void fuzz_emu_stop_unhealthy(){
 }
 
 void fuzz_emu_stop_crash(const char *type){
+	// judege whether the crash is from a hypervisor thread
+	unsigned long cr3 = BX_CPU(id)->cr3;
+	if (!is_hypervisor_task(cr3))
+		return;
 	fuzz_emu_stop_unhealthy();
-	// fuzz_should_abort = 1;
+	fuzz_should_abort = 1;
 	if (type) {
 		printf(".crash %s\n", type);
 	} else {
@@ -163,6 +168,7 @@ void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
 }
 
 void fuzz_instr_after_execution(bxInstruction_c *i) {
+	return;
 	if (in_clock_step && (clock_step_rip[CLOCK_STEP_NONE] == BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx)) {
 		// ns = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL);
 		// qtest_clock_warp(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ns);
@@ -493,6 +499,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	 */
 	shadow_bx_cpu = bx_cpu;
 	shadow_bx_pc_system = bx_pc_system;
+
+	/* iterate task list to find hypervisor-related tasks */
+	bx_address init_task = sym_to_addr("vmlinux", "init_task");
+	iterate_tasks(init_task);
 
 	/* Start tracking accesses to the memory so we can roll-back changes
 	 * after each fuzzer input */
