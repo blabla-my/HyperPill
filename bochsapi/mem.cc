@@ -85,7 +85,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
         static void* hv = getenv("HYPERV");
-        if(BX_CPU(0)->user_pl || hv) 
+        // if(BX_CPU(0)->user_pl || hv) 
             fuzz_dma_read_cb(phy, len, data);
       uint8_t data[len];
       BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
