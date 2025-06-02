@@ -15,7 +15,7 @@ INCLUDES    = -I vendor/bochs \
 			  -I vendor/bochs/gui \
 			  -I vendor/include \
 			  -I vendor/robin-map/include
-CFLAGS      = $(INCLUDES) -O3 -lsqlite3 -fPIE #-stdlib=libc++ -fsanitize=address
+CFLAGS      = $(INCLUDES) -O3 -g -lsqlite3 -fPIE #-stdlib=libc++ -fsanitize=address
 CXXFLAGS=-stdlib=libc++
 
 LIBFUZZER_FLAGS = -max_len=8192 -rss_limit_mb=-1 -detect_leaks=0 -use_value_profile=1 ${LIBFUZZER_ARGS}
@@ -82,6 +82,8 @@ tests: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
 	$(CXX) $(CFLAGS) -I. tests/cve-2022-0216.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/cve-2022-0216
 	$(CXX) $(CFLAGS) -I. tests/virtio-net-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/virtio-net-hlt
 	$(CXX) $(CFLAGS) -I. tests/virtio-blk-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/virtio-blk-hlt
+	$(CXX) $(CFLAGS) -I. tests/virtio-balloon-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/virtio-balloon-hlt
+	$(CXX) $(CFLAGS) -I. tests/virtio-ballon-asan-deadly-signal.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o tests/virtio-ballon-asan-deadly-signal
 
 clean:
 	rm -rf vendor/bochs-build vendor/lib vendor/include vendor/libfuzzer-ng/libFuzzer.a
