@@ -5,10 +5,6 @@ static void test_mem_write(uint64_t addr, size_t size, void *data) {
 	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, size, data);
 }
 
-static void test_mem_write_dummy(uint64_t addr, char* data, size_t size) {
-	test_mem_write(addr, size, (void*)data);
-}
-
 static void test_mem_write_up_to_8(uint64_t addr, size_t size, uint64_t value) {
 	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, size, &value);
 }
@@ -32,13 +28,6 @@ static void test_out(uint16_t addr, uint16_t size, uint32_t value) {
 	printf("[INJECT OUT] addr: 0x%x value: 0x%x \n", addr, size);
 	if (!inject_out(addr, size, value))
 		printf("inject out error/n");
-	start_cpu();
-}
-
-static void test_in(uint16_t addr, uint16_t size) {
-	printf("[INJECT IN] addr: 0x%x size: 0x%x \n", addr, size);
-	if (!inject_in(addr, size))
-		printf("inject in error/n");
 	start_cpu();
 }
 
