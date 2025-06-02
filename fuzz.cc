@@ -81,6 +81,9 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 			}
 		} 	
 	}
+
+	// print_stacktrace();
+	// dump_regs();
 	
 	if (seen_dma.find(addr - 1) != seen_dma.end()) {
 		seen_dma[addr + len - 1] = seen_dma[addr - 1] + len;
@@ -788,10 +791,7 @@ bool op_vmcall() {
 }
 
 bool op_clock_step() {
-	if (!getenv("END_WITH_CLOCK_STEP")) {
-		printf("END_WITH_CLOCK_STEP is not set.\n");
-		return false;
-	} else if (in_clock_step < 0) {
+	if (in_clock_step != CLOCK_STEP_NONE) {
 		printf("END_WITH_CLOCK_STEP is not effective because SYMBOL_MAPPING is not well estabilished.\n");
 		return false;
 	}
@@ -871,8 +871,8 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			break;
 	} while (ic_advance_until_token(SEPARATOR, 4));
 
-	if (end_with_clockstep)
-		op_clock_step();
+	// if (end_with_clockstep)
+	// 	op_clock_step();
 
 	size_t dummy;
 	uint8_t *output = ic_get_output(&dummy); // Set the output and op log

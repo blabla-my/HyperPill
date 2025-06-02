@@ -142,6 +142,7 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs,
 void fuzz_instr_before_execution(bxInstruction_c *i);
 void fuzz_instr_after_execution(bxInstruction_c *i);
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector);
+void add_edge_not_taken(bx_address prev_rip);
 void add_edge(bx_address prev_rip, bx_address new_rip);
 void print_stacktrace();
 bool ignore_pc(bx_address pc);
@@ -215,6 +216,10 @@ void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address
 void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>>& addr2sym,
               std::map<std::pair<std::string, std::string>, size_t>& sym2addr);
+void load_kallsyms(const std::string& kallsyms_path, 
+                  std::map<size_t, std::vector<std::pair<std::string, std::string>>> &addr2sym,
+                  std::map<std::pair<std::string, std::string>, size_t> &sym2addr);
+void store_sym(const std::map<std::pair<std::string, std::string>, size_t>& sym2addr); 
 void init_regions(const char* path);
 
 void init_register_feedback();
@@ -233,6 +238,9 @@ void symbolize(size_t pc);
 // sym2addr_linux.cc
 void load_symbol_map(char *path);
 void load_symbol_map_from_db(const char* path);
+void load_symbol_map_from_kallsyms(const char* kallsyms_path);
+void load_symbol_map_from_maps(const char* maps_path);
+void store_sym_back_to_db(const char* db_path);
 bx_address sym_to_addr(std::string bin, std::string name);
 std::pair<std::string, std::string> addr_to_sym(size_t addr);
 std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath);

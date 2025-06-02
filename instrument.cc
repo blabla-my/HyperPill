@@ -54,7 +54,7 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
     fuzz_instr_before_execution(i);
 }
 void bx_instr_after_execution(unsigned cpu, bxInstruction_c *i) {
-    fuzz_instr_after_execution(i);
+    // fuzz_instr_after_execution(i);
 }
 void bx_instr_repeat_iteration(unsigned cpu, bxInstruction_c *i) {}
 
