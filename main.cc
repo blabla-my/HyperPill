@@ -121,7 +121,7 @@ void fuzz_emu_stop_crash(const char *type){
 	if (!is_hypervisor_task(cr3))
 		return;
 	fuzz_emu_stop_unhealthy();
-	fuzz_should_abort = 1;
+	// fuzz_should_abort = 1;
 	if (type) {
 		printf(".crash %s\n", type);
 	} else {
@@ -168,7 +168,6 @@ void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
 }
 
 void fuzz_instr_after_execution(bxInstruction_c *i) {
-	return;
 	if (in_clock_step && (clock_step_rip[CLOCK_STEP_NONE] == BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx)) {
 		// ns = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL);
 		// qtest_clock_warp(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ns);
@@ -439,6 +438,18 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	/* Save guest RIP so that we can restore it after each fuzzer input */
 	guest_rip = BX_CPU(id)->get_rip();
+	
+	/* Load symbols from files */
+	if (getenv("KALLSYMS") and getenv("MAPS")) {
+		/* only in infer stage, these two should be set */
+		/* Load the kallsyms file */
+		load_symbol_map_from_kallsyms(getenv("KALLSYMS"));
+		load_symbol_map_from_maps(getenv("MAPS"));
+
+		/* Since we are in infer stage, after doing this, we write sym back to the db, then exit*/
+		store_sym_back_to_db(icp_db_path);
+		exit(0);
+	}
 
 	/* For addr -> symbol */
 	if (getenv("SYMBOLS_DIR"))

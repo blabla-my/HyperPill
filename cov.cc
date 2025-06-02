@@ -69,7 +69,7 @@ void add_edge_not_taken(bx_address prev_rip) {
 void add_edge(bx_address prev_rip, bx_address new_rip) {
     time_t t;
 
-    symbolize(new_rip);
+    // symbolize(new_rip);
 
     if(fuzzing) {
         if(cur_input.emplace(new_rip).second)

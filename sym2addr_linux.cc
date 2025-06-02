@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <set>
+#include <string.h>
+#include <string>
 
 
 static std::set<std::string> bins;
@@ -155,4 +157,69 @@ void load_symbol_map_from_db(const char* path) {
     for (const auto& sym : sym2addr){
         bins.insert(sym.first.first);
     }
+}
+void load_symbol_map_from_kallsyms(const char* kallsyms_path) {
+    load_kallsyms(kallsyms_path, addr2sym, sym2addr);
+    for (const auto& sym : sym2addr){
+        bins.insert(sym.first.first);
+    }
+}
+void load_symbol_map_from_maps(const char* maps_path) {
+    char* symbols_dir = getenv("SYMBOLS_DIR");
+    if (!symbols_dir) {
+        return;
+    }
+
+    std::ifstream file(maps_path);
+    std::string line;
+    unsigned long start, end, offset, inode;
+    char perm[5];
+    char dev[6];
+    char path[256];
+    char last_path[256] = {0};
+
+    while (std::getline(file, line)) {
+        int ret = sscanf(line.c_str(), "%lx-%lx %4s %lx %5s %lu %255[^\n]", &start, &end, perm, &offset, dev, &inode, path);
+        if (ret < 7){
+            continue; // Skip lines that do not match the expected format
+        }
+        if (inode == 0) {
+            continue; // Skip lines with inode 0
+        }
+        if (!strcmp(path, last_path)) {
+            continue; // Skip if the path is the same as the last one
+        }
+
+        // get the basename of the path
+        std::string s_path = path;
+        std::string basename = s_path.substr(s_path.find_last_of('/') + 1);
+        if (basename.empty()) {
+            basename = s_path; // If no '/' found, use the whole path
+        }
+
+        // check if $SYMBOLS_DIR/basename is a valid file
+        std::string full_path = std::string(symbols_dir) + "/" + basename;
+        if (access(full_path.c_str(), F_OK)) {
+            continue;
+        } 
+
+        auto m = get_symbol_map(full_path);
+        for (auto it : m) {
+            if (it.second) {
+                std::string name = it.first;
+                name.erase(std::find(name.begin(), name.end(), '('), name.end());
+                addr2sym[it.second + start].push_back(std::make_pair(full_path, name));
+                sym2addr[std::make_pair(full_path, name)] = it.second + start;
+            }
+        }
+        bins.insert(full_path);
+
+        strcpy(last_path, path);
+    }
+}
+
+void store_sym_back_to_db(const char* db_path){
+    open_db(db_path);
+    store_sym(sym2addr);
+    printf("store_sym_back_to_db: stored %lu symbols\n", sym2addr.size());
 }

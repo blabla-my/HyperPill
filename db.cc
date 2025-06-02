@@ -82,6 +82,46 @@ void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address
     }
 }
 
+void load_kallsyms(const std::string& kallsyms_path, 
+                  std::map<size_t, std::vector<std::pair<std::string, std::string>>> &addr2sym,
+                  std::map<std::pair<std::string, std::string>, size_t> &sym2addr) {
+    FILE *fp = fopen(kallsyms_path.c_str(), "r");
+    if (!fp) {
+        perror("Failed to open kallsyms file");
+        return;
+    }
+
+    // a line of kallsyms looks like: "ffffffffc0ed4fa0 t kvm_register_perf_callbacks  [kvm]"
+    char line[256];
+    while (fgets(line, sizeof(line), fp)) {
+        size_t addr;
+        char type;
+        char sym[64];
+        char mod[64];
+
+        // Parse the line
+        int ret = sscanf(line, "%lx %c %63s %63s", &addr, &type, sym, mod);
+        if (ret == 3){
+            // If the module is not specified, we assume it's the main binary
+            snprintf(mod, sizeof(mod), "vmlinux");
+        } else if (ret != 4) {
+            fprintf(stderr, "Failed to parse line: %s", line);
+            continue; 
+        }
+
+        // Store the symbol
+        addr2sym[addr].emplace_back(mod, sym);
+        auto key = std::make_pair(mod, sym);
+        if (sym2addr.find(key) == sym2addr.end()) {
+            sym2addr[key] = addr;
+        } else {
+            // printf("Warning: Symbol %s@%s already exists at address %lx, encountered a new one %lx\n", 
+            //         sym, mod, sym2addr[key], addr);
+        }
+    }
+    
+}
+
 void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>> &addr2sym, std::map<std::pair<std::string, std::string>, size_t> &sym2addr){
     sqlite3_stmt *res;
     const char *sql = "SELECT Address, Bin, Symbol from SYM";
@@ -95,12 +135,18 @@ void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>>
             addr2sym[addr].push_back(std::make_pair(bin, sym));
             auto key = std::make_pair(bin, sym);
             if (sym2addr.find(key) != sym2addr.end()) {
-                printf("Warning: Symbol %s@%s already exists at address %lx, encountered a new one %lx\n", 
-                        sym.c_str(), bin.c_str(), sym2addr[key], addr);
+                // printf("Warning: Symbol %s@%s already exists at address %lx, encountered a new one %lx\n", 
+                //         sym.c_str(), bin.c_str(), sym2addr[key], addr);
                 continue;
             }
             sym2addr[std::make_pair(bin, sym)] = addr;
         }
     }
     sqlite3_finalize(res);
+}
+
+void store_sym(const std::map<std::pair<std::string, std::string>, size_t>& sym2addr){
+    for (auto it: sym2addr) {
+        insert_sym(it.second, it.first.first.c_str(), it.first.second.c_str());
+    }
 }
