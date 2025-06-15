@@ -118,8 +118,14 @@ void fuzz_emu_stop_unhealthy(){
 void fuzz_emu_stop_crash(const char *type){
 	// judege whether the crash is from a hypervisor thread
 	unsigned long cr3 = BX_CPU(id)->cr3;
-	if (!is_hypervisor_task(cr3))
-		return;
+	// if (!is_hypervisor_task(cr3))
+	// 	return;
+	struct fuzz_task_struct* task = get_task_by_cr3(cr3);
+	if (task) {
+		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
+			task->pid, task->kernel_thread, task->hypervisor_thread, task->comm,
+			task->cr3, task->pgd);
+	}
 	fuzz_emu_stop_unhealthy();
 	// fuzz_should_abort = 1;
 	if (type) {
@@ -267,8 +273,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		if (!log_writes)
 			log_writes = getenv("LOG_WRITES");
 		if (!getenv("NOCOV")) {
-			init_sourcecov(
-				strtoll(getenv("LINK_OBJ_BASE"), NULL, 16));
+			init_sourcecov(0);
 		}
 		setup_periodic_coverage();
 	}
@@ -451,9 +456,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		exit(0);
 	}
 
-	/* For addr -> symbol */
-	if (getenv("SYMBOLS_DIR"))
-		load_symbolization_files(getenv("SYMBOLS_DIR"));
 
 	/* For symbol - > addr (for breakpoints)*/
 	if (getenv("SYMBOL_MAPPING")) {

@@ -224,12 +224,13 @@ static void sig_handler(int signum) {
 void init_sourcecov(size_t baseaddr) {
     base = baseaddr;
 
-    pdstart = get_addr_of_symbol("__start___llvm_prf_data") + base;
-    pdstop = get_addr_of_symbol("__stop___llvm_prf_data") + base;
-    pcstart = get_addr_of_symbol("__start___llvm_prf_cnts") + base;
-    pcstop = get_addr_of_symbol("__stop___llvm_prf_cnts") + base;
-    pnstart = get_addr_of_symbol("__start___llvm_prf_names") + base;
-    pnstop = get_addr_of_symbol("__stop___llvm_prf_names") + base;
+    // we have already loaded all symbol addresses in the main.cc
+    pdstart = sym_to_addr("qemu-system-x86_64", "__start___llvm_prf_data");
+    pdstop = sym_to_addr("qemu-system-x86_64", "__stop___llvm_prf_data");
+    pcstart = sym_to_addr("qemu-system-x86_64", "__start___llvm_prf_cnts");
+    pcstop = sym_to_addr("qemu-system-x86_64", "__stop___llvm_prf_cnts");
+    pnstart = sym_to_addr("qemu-system-x86_64", "__start___llvm_prf_names");
+    pnstop = sym_to_addr("qemu-system-x86_64", "__stop___llvm_prf_names");
 
     pdsize = pdstop-pdstart;
     pcsize = pcstop-pcstart;

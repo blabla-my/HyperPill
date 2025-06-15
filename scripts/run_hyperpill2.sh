@@ -24,15 +24,15 @@ if [[ -z "$KVM" && -z "$HYPERV" && -z "$MACOS" ]]; then
     exit 1
 fi
 
-if [ -z $LINK_OBJ_BASE ]; then
-    echo "LINK_OBJ_BASE is not set. Exiting."
-    exit 1
-fi
-export LINK_OBJ_PATH="$SNAPSHOT_BASE/symbols/qemu-system-x86_64"
-if [ ! -e "$LINK_OBJ_PATH" ]; then
-    echo "$LINK_OBJ_PATH does not exist. Exiting."
-    exit 1
-fi
+# if [ -z $LINK_OBJ_BASE ]; then
+#     echo "LINK_OBJ_BASE is not set. Exiting."
+#     exit 1
+# fi
+# export LINK_OBJ_PATH="$SNAPSHOT_BASE/symbols/qemu-system-x86_64"
+# if [ ! -e "$LINK_OBJ_PATH" ]; then
+#     echo "$LINK_OBJ_PATH does not exist. Exiting."
+#     exit 1
+# fi
 
 if [ -n "$KVM" ] && [ -z "${FUZZ_ENUM+x}" ]; then
     export END_WITH_CLOCK_STEP=1
