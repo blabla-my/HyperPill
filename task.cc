@@ -112,3 +112,10 @@ bool is_hypervisor_task(unsigned long cr3) {
     return task_map.find(cr3>>PAGE_SHIFT) != task_map.end() &&
            task_map[cr3>>PAGE_SHIFT]->hypervisor_thread;
 }
+
+struct fuzz_task_struct* get_task_by_cr3(unsigned long cr3) {
+    if (task_map.find(cr3>>PAGE_SHIFT) == task_map.end()) {
+        return NULL;
+    }
+    return task_map[cr3>>PAGE_SHIFT];
+}

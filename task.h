@@ -36,6 +36,7 @@ unsigned long pgd2cr3(unsigned long pgd);
 void iterate_tasks(bx_address task_struct_head);
 
 bool is_hypervisor_task(unsigned long cr3);
+struct fuzz_task_struct* get_task_by_cr3(unsigned long cr3);
 
 /* macros for operating struct task_struct */
 /* kernel version 6.0.32 */
