@@ -89,6 +89,13 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
             fuzz_dma_read_cb(phy, len, data);
       uint8_t data[len];
       BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
+      if (log_ops) {
+        printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+                phy, lookup_gpa_by_hpa(phy), len);
+        for (int i = 0; i < len; i++)
+            printf("%02x", data[i]);
+        printf("\n");
+      }
       prioraccess = -1;
     }
 }

@@ -48,6 +48,7 @@ extern size_t maxaddr;
 extern bool master_fuzzer;
 extern bool verbose;
 extern std::vector<size_t> guest_page_scratchlist; 
+extern bool log_ops;
 
 #define verbose_printf(...) if(verbose) printf(__VA_ARGS__)
 

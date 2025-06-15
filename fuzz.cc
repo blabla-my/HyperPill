@@ -1,6 +1,7 @@
 #include "fuzz.h"
 #include "bochs.h"
 #include "config.h"
+#include <cstdint>
 #include <tsl/robin_map.h>
 
 #include <ctime>
@@ -16,7 +17,7 @@ enum cmds {
 	OP_CLOCK_STEP,
 };
 
-static bool log_ops = false;
+bool log_ops;
 
 std::map<bx_address, uint32_t> mmio_regions;
 std::map<uint16_t, uint16_t> pio_regions;
@@ -62,11 +63,13 @@ void clear_seen_dma() {
 
 void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	uint8_t *buf;
+	bx_phy_address origin_addr = addr;
+	bx_phy_address origin_len = len;
 
 	if (!fuzzing)
 		return;
 
-	if (seen_dma[addr + len - 1] == len)
+	if (seen_dma[addr + len - 1] == len) 
 		return;
 
 	for (auto it = seen_dma.begin(); it != seen_dma.end(); it++) {
@@ -103,13 +106,6 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 		if (buf == NULL) {
 	        fuzz_emu_stop_unhealthy();
 			return;
-		}
-		if (BX_CPU(id)->fuzztrace || log_ops) {
-			printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
-			       addr, lookup_gpa_by_hpa(addr), len);
-			for (int i = 0; i < len; i++)
-				printf("%02x", buf[i]);
-			printf("\n");
 		}
 		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, l, (void *)buf);
 		memcpy(data, buf, l);
@@ -246,7 +242,7 @@ bool inject_read(bx_address addr, int size) {
 	BX_CPU(id)->set_reg64(BX_64BIT_REG_RCX, addr);
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!read inject: [GPA: %lx] len: %d\n", addr, size);
+		printf("!read inject: [GPA: %lx] len: %d\n", addr, 1<<size);
 	}
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
