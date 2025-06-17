@@ -55,6 +55,11 @@ void dump_regs() {
 	fflush(stderr);
 }
 
+void dump_instr() {
+	BX_CPU(id)->debug_disasm_instruction(BX_CPU(id)->prev_rip);
+	BX_CPU(id)->debug_disasm_instruction(BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx);
+}
+
 static void init_cpu(void) {
 	BX_CPU(id)->initialize();
 	BX_CPU(id)->reset(BX_RESET_HARDWARE);
@@ -135,6 +140,7 @@ void fuzz_emu_stop_crash(const char *type){
 	}
 	print_stacktrace();
 	dump_regs();
+	dump_instr();
     if(master_fuzzer) {
         ic_dump();
 		ic_dump_file(type);
