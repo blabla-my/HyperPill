@@ -231,6 +231,8 @@ void init_sourcecov(size_t baseaddr) {
     pcstop = sym_to_addr("qemu-system-x86_64", "__stop___llvm_prf_cnts");
     pnstart = sym_to_addr("qemu-system-x86_64", "__start___llvm_prf_names");
     pnstop = sym_to_addr("qemu-system-x86_64", "__stop___llvm_prf_names");
+    printf("pdstart: %lx, pdstop: %lx, pcstart: %lx, pcstop: %lx, pnstart: %lx, pnstop: %lx\n",
+           pdstart, pdstop, pcstart, pcstop, pnstart, pnstop);
 
     pdsize = pdstop-pdstart;
     pcsize = pcstop-pcstart;

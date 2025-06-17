@@ -52,7 +52,7 @@ static std::string executeCommand(const char* cmd) {
 // Function to parse the output of 'nm' command and construct map of addresses to symbol names
 std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath) {
     std::map<std::string, size_t> symbolMap;
-    std::string nmOutput = executeCommand(("nm -n -C -a " + binaryPath + "| grep -e ' t ' -e ' T ' -e ' B ' -e ' D '").c_str());
+    std::string nmOutput = executeCommand(("nm -n -C -a " + binaryPath + "| grep -e ' t ' -e ' T ' -e ' B ' -e ' D ' -e ' R '").c_str());
     size_t pos = 0;
     while ((pos = nmOutput.find("\n")) != std::string::npos) {
         std::string line = nmOutput.substr(0, pos);
@@ -65,7 +65,7 @@ std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath) {
             symbolMap.emplace(name, strtoull(address.c_str(), NULL, 16));
         }
     }
-    nmOutput = executeCommand(("nm -n -C -a -D " + binaryPath + "| grep -e ' t ' -e ' T ' -e ' B ' -e ' D '").c_str());
+    nmOutput = executeCommand(("nm -n -C -a -D " + binaryPath + "| grep -e ' t ' -e ' T ' -e ' B ' -e ' D ' -e ' R '").c_str());
     pos = 0;
     while ((pos = nmOutput.find("\n")) != std::string::npos) {
         std::string line = nmOutput.substr(0, pos);
@@ -203,6 +203,7 @@ void load_symbol_map_from_maps(const char* maps_path) {
             continue;
         } 
 
+        printf("loading symbols from %s\n", full_path.c_str());
         auto m = get_symbol_map(full_path);
         for (auto it : m) {
             if (it.second) {
