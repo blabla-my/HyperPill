@@ -204,6 +204,7 @@ void check_write_coverage(){
     last_coverage_dump=t;
     // following dump
     write_source_cov();
+    dump_seen_edges_to_file();
 }
 
 static void sig_handler(int signum) {
@@ -216,6 +217,7 @@ static void sig_handler(int signum) {
         last_coverage_dump=t;
         // following dump
         write_source_cov();
+        dump_seen_edges_to_file();
         alarm(coverage_dump_precision);
         break;
     }
@@ -272,13 +274,14 @@ void init_sourcecov(size_t baseaddr) {
 extern uint64_t icount_limit_floor;
 extern uint64_t icount_limit;
 void setup_periodic_coverage(){
-    char linkpath[100];
-    readlink("/proc/self/fd/1", linkpath, 100);
-    linkpath[99] = 0;
+    char linkpath[128];
+    readlink("/proc/self/fd/1", linkpath, 128);
+    linkpath[127] = 0;
     if(strstr(linkpath, "fuzz-0.log")){
         if(!getenv("NOCOV")) {
             last_coverage_dump=time(NULL);
             write_source_cov();
+            dump_seen_edges_to_file();
         }
         master_fuzzer = true;
     } else if(strstr(linkpath, "fuzz-") && getenv("PROGRESSIVE_TIMEOUT")){

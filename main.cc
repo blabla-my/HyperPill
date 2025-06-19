@@ -128,7 +128,7 @@ void fuzz_emu_stop_crash(const char *type){
 	struct fuzz_task_struct* task = get_task_by_cr3(cr3);
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
-			task->pid, task->kernel_thread, task->hypervisor_thread, task->comm,
+			task->pid, task->kernel_task, task->hypervisor_task, task->comm,
 			task->cr3, task->pgd);
 	}
 	fuzz_emu_stop_unhealthy();
@@ -535,6 +535,9 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	/* Init a signal handler for SIGUSR1 */
 	signal(SIGUSR1, signal_handler);
+
+	/* write seen edges at exit */
+	std::atexit(dump_seen_edges_to_file);
 
 	return 0;
 }

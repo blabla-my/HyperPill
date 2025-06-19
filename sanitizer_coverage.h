@@ -22,6 +22,7 @@
 #include <time.h>
 #include <signal.h>
 #include <unistd.h>
+#include "fuzz.h"
 
 static int duration = 0;
 static int coverage_dump_precision = 300;
@@ -56,6 +57,7 @@ static void sig_handler(int signum) {
     case SIGALRM:
         // following dump
         llvm_profile_dump();
+        dump_seen_edges_to_file();
         alarm(coverage_dump_precision);
         break;
     }
