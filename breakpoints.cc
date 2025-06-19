@@ -1,5 +1,6 @@
 #include "fuzz.h"
 #include "task.h"
+#include <string>
 #include <tsl/robin_map.h>
 #include <utility>
 #include <vector>
@@ -41,7 +42,7 @@ void handle_breakpoints(bxInstruction_c *insn) {
     auto rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
     if(rip < min_bp || rip > max_bp)
         return;
-    for (unsigned int i =1; i<bp_index; i++){
+    for (unsigned int i =0; i<bp_index; i++){
         if(breakpoints[i].first  == rip)
             breakpoints[i].second(insn);
     }
@@ -108,6 +109,20 @@ void apply_breakpoints_linux() {
             BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
             BX_CPU(id)->async_event = 1;
             });
+    add_breakpoint(sym_to_addr("libc", "pthread_rwlock_rdlock"), [](bxInstruction_c *i) {
+            i->execute1 = BX_CPU_C::RETnear64_Iw;
+            i->modRMForm.Iw[0] = 0;
+            i->modRMForm.Iw[1] = 0;
+            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+            BX_CPU(id)->async_event = 1;
+            });
+    add_breakpoint(sym_to_addr("libc", "pthread_rwlock_unlock"), [](bxInstruction_c *i) {
+            i->execute1 = BX_CPU_C::RETnear64_Iw;
+            i->modRMForm.Iw[0] = 0;
+            i->modRMForm.Iw[1] = 0;
+            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+            BX_CPU(id)->async_event = 1;
+            });
     add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](bxInstruction_c *i) {
             printf("Skipping __asan::CheckUnwind");
             print_stacktrace();
@@ -138,11 +153,11 @@ void apply_breakpoints_linux() {
             fuzz_emu_stop_crash("asan-deadly-signal");
             });
     add_breakpoint(sym_to_addr("vmm", "__stdio_write"), bp__stdio_write);
+    add_breakpoint(sym_to_addr("libc", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("ld-musl", "__stdio_write"), bp__stdio_write);
     //add_breakpoint(sym_to_addr("ld-musl", "out"), bp__stdio_write);
     add_breakpoint(sym_to_addr("vmlinux", "crash_kexec"), [](bxInstruction_c *i) { 
-            printf("kexec crash\n");
-            print_stacktrace();
+        fuzz_emu_stop_crash("crash_kexec");
     });
     add_breakpoint(sym_to_addr("vmlinux", "qi_flush_iec"), [](bxInstruction_c *i) { 
             i->execute1 = BX_CPU_C::RETnear64_Iw;
@@ -164,7 +179,22 @@ void apply_breakpoints_linux() {
             printf("pick_next_task_fair: %s, pid: %d, cr3: %lx, hypervisor_thread: %d\n",
                    task_map[cr3 >> PAGE_SHIFT]->comm,
                    task_map[cr3 >> PAGE_SHIFT]->pid,
-                   cr3, task_map[cr3 >> PAGE_SHIFT]->hypervisor_thread);
+                   cr3, task_map[cr3 >> PAGE_SHIFT]->hypervisor_task);
+    });
+    // hook printk_sprint
+    // add_breakpoint(sym_to_addr("vmlinux", "printk_sprint"), [](bxInstruction_c *i) {
+    //     printf("printk_sprint: %lx, %lx\n", BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx, BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx);
+    //     char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx,
+    //             BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx);
+    //     printf("printk_sprint: %s\n", msg);
+    //     free(msg);
+    // });
+    // hook kasan
+    add_breakpoint(sym_to_addr("vmlinux", "kasan_report"), [](bxInstruction_c *i) {
+        fuzz_emu_stop_crash("kasan-report");
+    });
+    add_breakpoint(sym_to_addr("vmlinux", "kasan_report_invalid_free"), [](bxInstruction_c *i) {
+        fuzz_emu_stop_crash("kasan-report-invalid-free");
     });
 }
 
