@@ -2,6 +2,7 @@
 #include "config.h"
 #include "cpu/cpu.h"
 #include "fuzz.h"
+#include "task.h"
 #include "time.h"
 #include "conveyor.h"
 #include <cstddef>
@@ -48,13 +49,24 @@ bool ignore_pc(bx_address pc) {
     return ignore_edges[pc];
 }
 
+bool ignore_cr3(bx_address cr3, Bit32u CPL) {
+    // qemu trap into kernel, ignore
+    if (is_userspace_vmm_task(cr3) && CPL == 0)
+        return true;
+    // hypervisor task, e.g., qemu, KVM, vhost, not ignore
+    if (is_hypervisor_task(cr3)) 
+        return false;
+    // other tasks, ignore
+    return true;
+}
+
 static size_t last_new = 0;
 
 void print_stacktrace(){
     printf("Stacktrace:\n");
     if(our_stacktrace.empty())
         return;
-    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend(); ++r)
+    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
     {
         printf("%016lx -> %016lx, %s -> %s\n", r->first, r->second, addr_to_sym(r->first).second.c_str(), addr_to_sym(r->second).second.c_str());
     }
@@ -67,6 +79,8 @@ void add_edge_not_taken(bx_address prev_rip) {
 }
 
 void add_edge(bx_address prev_rip, bx_address new_rip) {
+    if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
+        return;
     time_t t;
 
     // symbolize(new_rip);
@@ -85,9 +99,14 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
         }
     }
 
-    if (ignore_pc(new_rip))
-        return;
+    // We now focus on hypervisor related tasks, judge by cr3 but not pc
+    // if (ignore_pc(new_rip))
+    //     return;
+
     libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
+
+    if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
+        return;
 
     bx_address hash = prev_rip ^ (new_rip >> 1);
     if (seen_edges.emplace(hash).second) {
@@ -166,10 +185,10 @@ void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
                               bx_address new_rip) {
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
-    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT) && BX_CPU(0)->user_pl ) {
+    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT) && is_hypervisor_task(BX_CPU(0)->cr3) ) {
         our_stacktrace.push_back(std::make_pair(branch_rip, new_rip));
         /* fuzz_stacktrace(); */
-    } else if (what == BX_INSTR_IS_RET && BX_CPU(0)->user_pl&& !our_stacktrace.empty()) {
+    } else if (what == BX_INSTR_IS_RET && is_hypervisor_task(BX_CPU(0)->cr3) && !our_stacktrace.empty()) {
         our_stacktrace.pop_back();
         /* fuzz_stacktrace(); */
     }
@@ -181,10 +200,10 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
 
-    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT) && BX_CPU(0)->user_pl) {
+    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT) && is_hypervisor_task(BX_CPU(0)->cr3)) {
         our_stacktrace.push_back(std::make_pair(prev_rip, new_rip));
         /* fuzz_stacktrace(); */
-    } else if (what == BX_INSTR_IS_RET && BX_CPU(0)->user_pl && !our_stacktrace.empty()) {
+    } else if (what == BX_INSTR_IS_RET && is_hypervisor_task(BX_CPU(0)->cr3) && !our_stacktrace.empty()) {
         our_stacktrace.pop_back();
         /* fuzz_stacktrace(); */
     }

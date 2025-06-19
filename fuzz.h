@@ -270,4 +270,6 @@ void signal_handler(int signum);
 //debug
 void print_page_fault_pt_regs();
 
+void dump_seen_edges_to_file();
+
 #endif
