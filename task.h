@@ -10,18 +10,12 @@
 
 struct fuzz_task_struct {
     int pid;             /* Process ID */
-    int kernel_thread; /* Is this a kernel thread? */
-    int hypervisor_thread; /* Is this a hypervisor thread? */
+    int kernel_task; /* Is this a kernel task? */
+    int hypervisor_task; /* Is this a hypervisor task? */
+    int userspace_vmm_task; /* Is this a userspace VMM task? E.g., QEMU, VirtualBox, etc. */
     char comm[16];       /* Process name */
     unsigned long cr3;  /* CR3 register */
     unsigned long pgd;  /* Page Global Directory */
-};
-
-static std::string hypervisor_signatures[] = {
-    "qemu-system",
-    "vbox",
-    "kvm",
-    "vhost"
 };
 
 extern tsl::robin_map<unsigned long, struct fuzz_task_struct*> task_map;
@@ -36,6 +30,9 @@ unsigned long pgd2cr3(unsigned long pgd);
 void iterate_tasks(bx_address task_struct_head);
 
 bool is_hypervisor_task(unsigned long cr3);
+bool is_userspace_vmm_task(unsigned long cr3);
+
+bool set_hypervisor_task_by_cr3(unsigned long cr3);
 struct fuzz_task_struct* get_task_by_cr3(unsigned long cr3);
 
 /* macros for operating struct task_struct */

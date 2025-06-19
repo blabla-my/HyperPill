@@ -10,6 +10,18 @@
 tsl::robin_map<unsigned long, struct fuzz_task_struct*> task_map;
 tsl::robin_set<struct fuzz_task_struct*> hypervisor_tasks;
 
+static std::string hypervisor_task_signatures[] = {
+    "qemu-system",
+    "vbox",
+    "kvm",
+    "vhost"
+};
+
+static std::string userspace_vmm_task_signatures[] = {
+    "qemu-system",
+    "vbox",
+};
+
 int read_task_struct(bx_address task_struct, void* buf, size_t len) {
     if (task_struct == 0){
         return -1;
@@ -38,7 +50,7 @@ int task_buf_to_fuzz_task(const uint8_t* task_buf, struct fuzz_task_struct* fuzz
     }
     memset(fuzz_task_ptr, 0, sizeof(struct fuzz_task_struct)); // Clear the struct
     fuzz_task_ptr->pid = task_pid(task_buf);
-    fuzz_task_ptr->kernel_thread = (task_mm(task_buf) == 0);
+    fuzz_task_ptr->kernel_task = (task_mm(task_buf) == 0);
     memcpy(fuzz_task_ptr->comm, task_comm(task_buf), sizeof(fuzz_task_ptr->comm));
 
     unsigned long mm = task_mm(task_buf);
@@ -63,9 +75,15 @@ int task_buf_to_fuzz_task(const uint8_t* task_buf, struct fuzz_task_struct* fuzz
 
     // check if task->comm contains a hypervisor signature
     std::string comm_str(fuzz_task_ptr->comm);
-    for (const auto& signature : hypervisor_signatures) {
+    for (const auto& signature : hypervisor_task_signatures) {
         if (comm_str.find(signature) != std::string::npos) {
-            fuzz_task_ptr->hypervisor_thread = 1;
+            fuzz_task_ptr->hypervisor_task = 1;
+            break;
+        }
+    }
+    for (const auto& signature : userspace_vmm_task_signatures) {
+        if (comm_str.find(signature) != std::string::npos) {
+            fuzz_task_ptr->userspace_vmm_task = 1;
             break;
         }
     }
@@ -96,12 +114,12 @@ void iterate_tasks(bx_address task_struct_head) {
 
         task_map[fuzz_task_ptr->cr3 >> PAGE_SHIFT] = fuzz_task_ptr;
         
-        if (fuzz_task_ptr->hypervisor_thread){
+        if (fuzz_task_ptr->hypervisor_task){
             hypervisor_tasks.insert(fuzz_task_ptr);
         }
 
-        printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
-               fuzz_task_ptr->pid, fuzz_task_ptr->kernel_thread, fuzz_task_ptr->hypervisor_thread, fuzz_task_ptr->comm,
+        printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
+               fuzz_task_ptr->pid, fuzz_task_ptr->kernel_task, fuzz_task_ptr->hypervisor_task, fuzz_task_ptr->userspace_vmm_task, fuzz_task_ptr->comm,
                fuzz_task_ptr->cr3, fuzz_task_ptr->pgd);
 
         task = task_next(task_buf);
@@ -109,8 +127,29 @@ void iterate_tasks(bx_address task_struct_head) {
 }
 
 bool is_hypervisor_task(unsigned long cr3) {
-    return task_map.find(cr3>>PAGE_SHIFT) != task_map.end() &&
-           task_map[cr3>>PAGE_SHIFT]->hypervisor_thread;
+    auto* task = get_task_by_cr3(cr3);
+    if (task == NULL)
+        return false;
+    if (!task->hypervisor_task)
+        return false;
+    if (task->cr3 == 0)
+        return false;
+    return true;
+}
+
+bool is_userspace_vmm_task(unsigned long cr3) {
+    auto* task = get_task_by_cr3(cr3);
+    if (task == NULL)
+        return false;
+    return task->userspace_vmm_task;
+}
+
+bool set_hypervisor_task_by_cr3(unsigned long cr3) {
+    if (task_map.find(cr3>>PAGE_SHIFT) == task_map.end()) {
+        return false;
+    }
+    task_map[cr3>>PAGE_SHIFT]->hypervisor_task = true;
+    return true;
 }
 
 struct fuzz_task_struct* get_task_by_cr3(unsigned long cr3) {
