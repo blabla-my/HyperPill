@@ -7,6 +7,7 @@
 #include "conveyor.h"
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <tsl/robin_map.h>
 #include <tsl/robin_set.h> 
@@ -24,7 +25,7 @@ std::vector<std::pair<size_t, size_t>> pc_ranges;
 std::vector<std::pair<size_t, size_t>> our_stacktrace;
 
 __attribute__((section(
-    "__libfuzzer_extra_counters"))) unsigned char libfuzzer_coverage[32 << 10];
+    "__libfuzzer_extra_counters"))) unsigned char libfuzzer_coverage[32 << 12];
 
 uint32_t status = 0;
 
@@ -34,6 +35,10 @@ void add_pc_range(size_t base, size_t len) {
 }
 
 bool ignore_pc(bx_address pc) {
+    static char* cr3_filter = getenv("PC_FILTER");
+    if (cr3_filter)
+        return ignore_cr3(BX_CPU(x)->cr3, BX_CPU(x)->get_cpl());
+    
     if (pc_ranges.size() == 0) // No ranges = fuzz everthing
         return false;
     if (ignore_edges.find(pc) == ignore_edges.end()) {
@@ -60,6 +65,16 @@ bool ignore_cr3(bx_address cr3, Bit32u CPL) {
     return true;
 }
 
+bool pc_filter(bx_address pc, bx_address cr3, Bit32u CPL) {
+    if (ignore_cr3(cr3, CPL)) return true;
+    auto s = addr_to_sym(pc);
+    auto module = s.first;
+    if (module.empty()) return true;
+    if (CPL == 0 && module.find("vmlinux") != std::string::npos) 
+        return true;
+    return false;
+}
+
 static size_t last_new = 0;
 
 void print_stacktrace(){
@@ -79,8 +94,11 @@ void add_edge_not_taken(bx_address prev_rip) {
 }
 
 void add_edge(bx_address prev_rip, bx_address new_rip) {
-    if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
-        return;
+    
+    // if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
+    //     return;
+    if(ignore_pc(new_rip))
+        goto out;
     time_t t;
 
     // symbolize(new_rip);
@@ -88,7 +106,7 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
     if(fuzzing) {
         if(cur_input.emplace(new_rip).second)
             last_new = 0;
-        if(last_new++ > 3000000 && !master_fuzzer ){
+        if(last_new++ > 1000000 && !master_fuzzer ){
             printf("No new edges for over %d..\n", last_new);
             fuzz_emu_stop_unhealthy();
         }
@@ -100,14 +118,12 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
     }
 
     // We now focus on hypervisor related tasks, judge by cr3 but not pc
-    // if (ignore_pc(new_rip))
-    //     return;
 
     libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
 
+out:
     if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
         return;
-
     bx_address hash = prev_rip ^ (new_rip >> 1);
     if (seen_edges.emplace(hash).second) {
         time(&t);
@@ -208,7 +224,7 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
         /* fuzz_stacktrace(); */
     }
 
-    if (what == BX_INSTR_IS_IRET && (new_rip >> 63) == 0)
+    // if (what == BX_INSTR_IS_IRET)
         add_edge(prev_rip, new_rip);
 }
 

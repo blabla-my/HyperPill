@@ -1,3 +1,4 @@
+#include "bochs.h"
 #include "fuzz.h"
 #include <tsl/robin_set.h>
 #include <unordered_set>
@@ -75,6 +76,7 @@ void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size){
 
     if(!op1 || !op2 || op1 == op2 || size < 2)
         return;
+
     if(ignore_pc(PC))
         return;
 

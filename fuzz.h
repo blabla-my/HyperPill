@@ -147,6 +147,8 @@ void add_edge_not_taken(bx_address prev_rip);
 void add_edge(bx_address prev_rip, bx_address new_rip);
 void print_stacktrace();
 bool ignore_pc(bx_address pc);
+bool ignore_cr3(bx_address cr3, Bit32u CPL);
+bool pc_filter(bx_address pc, bx_address cr3, Bit32u CPL);
 bool found_pc(uint64_t pc);
 void add_pc_range(size_t base, size_t len);
 void add_opt_infer_range(size_t base, size_t len);
