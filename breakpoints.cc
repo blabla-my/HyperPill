@@ -64,7 +64,7 @@ bx_address add_breakpoint(bx_address addr, const breakpoint_handler_t h) {
 static char* copy_string_from_vm(bx_address addr, size_t len) {
     len = len&0xFFF;
     char *buf = (char*)malloc(len);
-    BX_CPU(0)->access_read_linear(addr, len, 3, BX_READ, 0x0, buf);
+    BX_CPU(0)->access_read_linear(addr, len, 0, BX_READ, 0x0, buf);
     buf[len-1] = 0;
     return buf;
 }
@@ -109,20 +109,20 @@ void apply_breakpoints_linux() {
             BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
             BX_CPU(id)->async_event = 1;
             });
-    add_breakpoint(sym_to_addr("libc", "pthread_rwlock_rdlock"), [](bxInstruction_c *i) {
-            i->execute1 = BX_CPU_C::RETnear64_Iw;
-            i->modRMForm.Iw[0] = 0;
-            i->modRMForm.Iw[1] = 0;
-            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-            BX_CPU(id)->async_event = 1;
-            });
-    add_breakpoint(sym_to_addr("libc", "pthread_rwlock_unlock"), [](bxInstruction_c *i) {
-            i->execute1 = BX_CPU_C::RETnear64_Iw;
-            i->modRMForm.Iw[0] = 0;
-            i->modRMForm.Iw[1] = 0;
-            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-            BX_CPU(id)->async_event = 1;
-            });
+    // add_breakpoint(sym_to_addr("libc", "pthread_rwlock_rdlock"), [](bxInstruction_c *i) {
+    //         i->execute1 = BX_CPU_C::RETnear64_Iw;
+    //         i->modRMForm.Iw[0] = 0;
+    //         i->modRMForm.Iw[1] = 0;
+    //         BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+    //         BX_CPU(id)->async_event = 1;
+    //         });
+    // add_breakpoint(sym_to_addr("libc", "pthread_rwlock_unlock"), [](bxInstruction_c *i) {
+    //         i->execute1 = BX_CPU_C::RETnear64_Iw;
+    //         i->modRMForm.Iw[0] = 0;
+    //         i->modRMForm.Iw[1] = 0;
+    //         BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+    //         BX_CPU(id)->async_event = 1;
+    //         });
     add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](bxInstruction_c *i) {
             printf("Skipping __asan::CheckUnwind");
             print_stacktrace();
@@ -181,7 +181,7 @@ void apply_breakpoints_linux() {
                    task_map[cr3 >> PAGE_SHIFT]->pid,
                    cr3, task_map[cr3 >> PAGE_SHIFT]->hypervisor_task);
     });
-    // hook printk_sprint
+    // hook console write
     // add_breakpoint(sym_to_addr("vmlinux", "printk_sprint"), [](bxInstruction_c *i) {
     //     printf("printk_sprint: %lx, %lx\n", BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx, BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx);
     //     char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx,
@@ -189,6 +189,17 @@ void apply_breakpoints_linux() {
     //     printf("printk_sprint: %s\n", msg);
     //     free(msg);
     // });
+    add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](bxInstruction_c *i) {
+        i->execute1 = BX_CPU_C::RETnear64_Iw;
+        i->modRMForm.Iw[0] = 0;
+        i->modRMForm.Iw[1] = 0;
+        BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+        BX_CPU(id)->async_event = 1;
+        char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx,
+                BX_CPU(id)->gen_reg[BX_64BIT_REG_RDX].rrx+1);
+        printf("console write: %s\n", msg);
+        free(msg);
+    });
     // hook kasan
     add_breakpoint(sym_to_addr("vmlinux", "kasan_report"), [](bxInstruction_c *i) {
         fuzz_emu_stop_crash("kasan-report");
