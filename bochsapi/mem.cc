@@ -51,6 +51,7 @@ size_t ndirty=0;
 static bx_address prioraccess;
 void fuzz_hook_memory_access(bx_address phy, unsigned len, 
                              unsigned memtype, unsigned rw, void* data) {
+    static char* kernal_dma = getenv("KERNEL_DMA");
     bx_address aligned = phy&(~0xFFFLL);
 
     /* printf("Memory access to %lx\n", phy); */
@@ -70,7 +71,8 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
       // When we do the actual fuzzing runs on beefier hardware, we should just
       // make a complete shadow-copy on startup.
       if (dirtyset.emplace(aligned).second) {
-          if(ndirty++>10000){
+          // if there is an infinite loop, we need to stop since it will cause a libfuzzer timeout and stop fuzzing.
+          if(ndirty++>300){
               printf("Too many dirty pages. Early stop\n");
               fuzz_emu_stop_unhealthy();
           }
@@ -85,18 +87,19 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
         static void* hv = getenv("HYPERV");
-        // if(BX_CPU(0)->user_pl || hv) 
+        if(BX_CPU(0)->user_pl || hv || kernal_dma) 
             fuzz_dma_read_cb(phy, len, data);
-      uint8_t data[len];
-      BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
-      if (log_ops) {
-        printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
-                phy, lookup_gpa_by_hpa(phy), len);
-        for (int i = 0; i < len; i++)
-            printf("%02x", data[i]);
-        printf("\n");
-      }
-      prioraccess = -1;
+    
+        if (log_ops) {
+            uint8_t data[len];
+            BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
+            printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+                    phy, lookup_gpa_by_hpa(phy), len);
+            for (int i = 0; i < len; i++)
+                printf("%02x", data[i]);
+            printf("\n");
+        }
+        prioraccess = -1;
     }
 }
 
