@@ -125,7 +125,7 @@ void fuzz_emu_stop_crash(const char *type){
 	unsigned long cr3 = BX_CPU(id)->cr3;
 	// if (!is_hypervisor_task(cr3))
 	// 	return;
-	struct fuzz_task_struct* task = get_task_by_cr3(cr3);
+	struct task* task = get_task_by_cr3(cr3);
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
 			task->pid, task->kernel_task, task->hypervisor_task, task->comm,

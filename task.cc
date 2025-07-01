@@ -7,8 +7,8 @@
 #include <string>
 #include <sys/types.h>
 
-tsl::robin_map<unsigned long, struct fuzz_task_struct*> task_map;
-tsl::robin_set<struct fuzz_task_struct*> hypervisor_tasks;
+tsl::robin_map<unsigned long, struct task*> task_map;
+tsl::robin_set<struct task*> hypervisor_tasks;
 
 static std::string hypervisor_task_signatures[] = {
     "qemu-system",
@@ -44,11 +44,11 @@ int read_mm_struct(bx_address mm_struct, void* buf, size_t len){
     return 0; // Success
 }
 
-int task_buf_to_fuzz_task(const uint8_t* task_buf, struct fuzz_task_struct* fuzz_task_ptr) {
+int task_buf_to_fuzz_task(const uint8_t* task_buf, struct task* fuzz_task_ptr) {
     if (!task_buf || !fuzz_task_ptr) {
         return -1; // Invalid buffer
     }
-    memset(fuzz_task_ptr, 0, sizeof(struct fuzz_task_struct)); // Clear the struct
+    memset(fuzz_task_ptr, 0, sizeof(struct task)); // Clear the struct
     fuzz_task_ptr->pid = task_pid(task_buf);
     fuzz_task_ptr->kernel_task = (task_mm(task_buf) == 0);
     memcpy(fuzz_task_ptr->comm, task_comm(task_buf), sizeof(fuzz_task_ptr->comm));
@@ -102,7 +102,7 @@ void iterate_tasks(bx_address task_struct_head) {
     bx_address task = task_struct_head;
     bx_address mm;
     do {
-        struct fuzz_task_struct* fuzz_task_ptr = (struct fuzz_task_struct*)malloc(sizeof(struct fuzz_task_struct));
+        struct task* fuzz_task_ptr = (struct task*)malloc(sizeof(struct task));
         if (read_task_struct(task, task_buf, sizeof(task_buf)) < 0) {
             printf("Failed to read task_struct at %lx\n", task);
             return;
@@ -152,7 +152,7 @@ bool set_hypervisor_task_by_cr3(unsigned long cr3) {
     return true;
 }
 
-struct fuzz_task_struct* get_task_by_cr3(unsigned long cr3) {
+struct task* get_task_by_cr3(unsigned long cr3) {
     if (task_map.find(cr3>>PAGE_SHIFT) == task_map.end()) {
         return NULL;
     }
