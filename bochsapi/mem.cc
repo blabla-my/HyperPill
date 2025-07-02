@@ -72,7 +72,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
       // make a complete shadow-copy on startup.
       if (dirtyset.emplace(aligned).second) {
           // if there is an infinite loop, we need to stop since it will cause a libfuzzer timeout and stop fuzzing.
-          if(ndirty++>300){
+          if(ndirty++>10000){
               printf("Too many dirty pages. Early stop\n");
               fuzz_emu_stop_unhealthy();
           }
