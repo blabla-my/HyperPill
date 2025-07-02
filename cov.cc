@@ -35,9 +35,10 @@ void add_pc_range(size_t base, size_t len) {
 }
 
 bool ignore_pc(bx_address pc) {
-    static char* cr3_filter = getenv("PC_FILTER");
-    if (cr3_filter)
-        return ignore_cr3(BX_CPU(x)->cr3, BX_CPU(x)->get_cpl());
+    static char* pc_filter = getenv("PC_FILTER");
+    if (pc_filter){
+        return task_filter();
+    }
     
     if (pc_ranges.size() == 0) // No ranges = fuzz everthing
         return false;
@@ -54,25 +55,18 @@ bool ignore_pc(bx_address pc) {
     return ignore_edges[pc];
 }
 
-bool ignore_cr3(bx_address cr3, Bit32u CPL) {
-    // qemu trap into kernel, ignore
-    if (is_userspace_vmm_task(cr3) && CPL == 0)
+bool task_filter(bool user_only) {
+    task* cur_task = task_manager.get_current_task();
+    if(cur_task == NULL) {
         return true;
-    // hypervisor task, e.g., qemu, KVM, vhost, not ignore
-    if (is_hypervisor_task(cr3)) 
+    }
+    if (is_userspace_vmm_task(cur_task)){
+        return BX_CPU(id)->get_cpl() == 0;
+    }
+    if (!user_only && is_hypervisor_task(cur_task)){
         return false;
-    // other tasks, ignore
+    }
     return true;
-}
-
-bool pc_filter(bx_address pc, bx_address cr3, Bit32u CPL) {
-    if (ignore_cr3(cr3, CPL)) return true;
-    auto s = addr_to_sym(pc);
-    auto module = s.first;
-    if (module.empty()) return true;
-    if (CPL == 0 && module.find("vmlinux") != std::string::npos) 
-        return true;
-    return false;
 }
 
 static size_t last_new = 0;
@@ -90,18 +84,15 @@ void print_stacktrace(){
 }
 
 void add_edge_not_taken(bx_address prev_rip) {
-    seen_edges.emplace(prev_rip ^ 0);
+    // printf("add_edge_not_taken: %lx -> %lx\n", prev_rip, BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx);
+    bx_address new_rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
+    add_edge(prev_rip, new_rip);
 }
 
 void add_edge(bx_address prev_rip, bx_address new_rip) {
-    
-    // if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
-    //     return;
     if(ignore_pc(new_rip))
         goto out;
     time_t t;
-
-    // symbolize(new_rip);
 
     if(fuzzing) {
         if(cur_input.emplace(new_rip).second)
@@ -116,13 +107,10 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
             fuzz_emu_stop_unhealthy();
         }
     }
-
-    // We now focus on hypervisor related tasks, judge by cr3 but not pc
-
     libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
 
 out:
-    if (ignore_cr3(BX_CPU(0)->cr3, BX_CPU(0)->get_cpl()))
+    if (task_filter(true))
         return;
     bx_address hash = prev_rip ^ (new_rip >> 1);
     if (seen_edges.emplace(hash).second) {
