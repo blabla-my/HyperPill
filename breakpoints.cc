@@ -218,13 +218,13 @@ void handle_syscall_hooks(bxInstruction_c *i)
         switch(BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx) {
             case 231:
             case 60:    // exit
-                fuzz_emu_stop_crash("exit syscall");
+                fuzz_emu_stop_crash("exit-syscall");
                 return;
                 break;
             case 62:    // kill
             case 200:   // tkill
                 if (BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
-                    fuzz_emu_stop_crash("kill syscall");
+                    fuzz_emu_stop_crash("kill-syscall");
                     return;
                 }
                 break;

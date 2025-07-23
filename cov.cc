@@ -104,12 +104,11 @@ std::string stacktrace_to_string(){
 
 uint64_t stacktrace_hash_get() {
     uint64_t hash = 0;
-    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
+    int cnt = 0;
+    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() && cnt<10 ; ++r,++cnt )
     {
         hash ^= r->first ^ r->second;
     }
-    // add rip
-    hash ^= BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
     return hash;
 }
 

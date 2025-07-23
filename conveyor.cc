@@ -406,7 +406,18 @@ void ic_dump(){
     printf("\n");
 }
 
-void ic_dump_file(const char* prefix){
+void ic_dump_file(const char* filepath) {
+    FILE *f = fopen(filepath, "wb");
+    if (f) {
+        printf("Dumping input to %s\n", filepath);
+        fwrite(input, 1, input_len, f);
+        fclose(f);
+    } else {
+        perror("Failed to open file");
+    }
+}
+
+void ic_dump_file_with_sha1(const char* prefix){
     uint8_t sha1[20];
     memset(sha1, 0, sizeof(sha1));
     __fuzzer_compute_sha1(input, input_len, sha1);
@@ -424,14 +435,7 @@ void ic_dump_file(const char* prefix){
         snprintf(sha1_filename+strlen(sha1_filename), sizeof(sha1_filename)-strlen(sha1_filename), "%02x", sha1[i]);
     }
 
-    FILE *f = fopen(sha1_filename, "wb");
-    if (f) {
-        printf("Dumping input to %s\n", sha1_filename);
-        fwrite(input, 1, input_len, f);
-        fclose(f);
-    } else {
-        perror("Failed to open file");
-    }
+    ic_dump_file(sha1_filename);
 }
 
 size_t ic_length_until_token(const char* token, size_t len) {

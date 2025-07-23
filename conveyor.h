@@ -29,7 +29,8 @@ size_t ic_length_until_token(const char* token, size_t len);
 void ic_erase_backwards_until_token(void);
 uint8_t *ic_get_cursor(void);
 void ic_dump();
-void ic_dump_file(const char* prefix);
+void ic_dump_file(const char* filepath);
+void ic_dump_file_with_sha1(const char* prefix);
 
 // Returns the size of the next buffer
 size_t ic_lookahead(const char* token, size_t token_len) ;

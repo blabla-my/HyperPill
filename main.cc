@@ -166,8 +166,8 @@ void fuzz_hook_exception(unsigned vector, unsigned error_code) {
 }
 
 void fuzz_hook_hlt() {
-	// fuzz_emu_stop_crash("hlt\n");
-	fuzz_emu_stop_unhealthy();
+	fuzz_emu_stop_crash("hlt");
+	// fuzz_emu_stop_unhealthy();
 	return;
 }
 
