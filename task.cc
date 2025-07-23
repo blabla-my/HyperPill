@@ -185,7 +185,6 @@ task* TaskManager::get_task(bx_address task_addr){
 bx_address TaskManager::get_current_task_bx_addr(){
     if (!current_task) {
         current_task = sym_to_addr("vmlinux", "current_task");
-        printf("TaskManager: set current_task: %lx\n", current_task);
     }
 
     bx_address taskpp = BX_CPU(id)->get_laddr(BX_SEG_REG_GS, current_task);
