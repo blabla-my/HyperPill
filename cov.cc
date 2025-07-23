@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <tsl/robin_map.h>
 #include <tsl/robin_set.h> 
 #include <unistd.h> 
@@ -23,6 +24,7 @@ tsl::robin_set<bx_address> cur_input;
 
 std::vector<std::pair<size_t, size_t>> pc_ranges;
 std::vector<std::pair<size_t, size_t>> our_stacktrace;
+tsl::robin_set<uint64_t> seen_stacktraces;
 
 __attribute__((section(
     "__libfuzzer_extra_counters"))) unsigned char libfuzzer_coverage[32 << 12];
@@ -77,10 +79,49 @@ void print_stacktrace(){
         return;
     for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
     {
-        printf("%016lx -> %016lx, %s -> %s\n", r->first, r->second, addr_to_sym(r->first).second.c_str(), addr_to_sym(r->second).second.c_str());
+        auto from_sym = addr_to_sym(r->first);
+        auto to_sym = addr_to_sym(r->second);
+        printf("%016lx -> %016lx, [%s] %s -> [%s] %s\n", r->first, r->second, 
+                from_sym.first.c_str(), from_sym.second.c_str(), 
+                to_sym.first.c_str(), to_sym.second.c_str());
     }
     fflush(stdout);
     fflush(stderr);
+}
+
+std::string stacktrace_to_string(){
+    std::stringstream ss;
+    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
+    {
+        auto from_sym = addr_to_sym(r->first);
+        auto to_sym = addr_to_sym(r->second);
+        ss << r->first << " -> " << r->second << ","
+           << " [" << from_sym.first << "] " << from_sym.second << " -> "
+           << " [" << to_sym.first << "] " << to_sym.second << "\n";
+    }
+    return ss.str();
+}
+
+uint64_t stacktrace_hash_get() {
+    uint64_t hash = 0;
+    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
+    {
+        hash ^= r->first ^ r->second;
+    }
+    // add rip
+    hash ^= BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
+    return hash;
+}
+
+bool stacktrace_hash_seen(uint64_t hash) {
+    if (seen_stacktraces.find(hash) == seen_stacktraces.end()) {
+        return false;
+    }
+    return true;
+}
+
+void stacktrace_hash_add(uint64_t hash) {
+    seen_stacktraces.insert(hash);
 }
 
 void add_edge_not_taken(bx_address prev_rip) {
@@ -90,6 +131,7 @@ void add_edge_not_taken(bx_address prev_rip) {
 }
 
 void add_edge(bx_address prev_rip, bx_address new_rip) {
+    static char* NEW_PC_QEMU_ONLY=getenv("NEW_PC_QEMU_ONLY");
     if(ignore_pc(new_rip))
         goto out;
     time_t t;
@@ -110,8 +152,11 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
     libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
 
 out:
-    if (task_filter(true))
+    if (NEW_PC_QEMU_ONLY && task_filter(true))
         return;
+    else if (!NEW_PC_QEMU_ONLY && task_filter())
+        return;
+
     bx_address hash = prev_rip ^ (new_rip >> 1);
     if (seen_edges.emplace(hash).second) {
         time(&t);
@@ -189,10 +234,10 @@ void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
                               bx_address new_rip) {
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
-    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT) && is_hypervisor_task(BX_CPU(0)->cr3) ) {
+    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
         our_stacktrace.push_back(std::make_pair(branch_rip, new_rip));
         /* fuzz_stacktrace(); */
-    } else if (what == BX_INSTR_IS_RET && is_hypervisor_task(BX_CPU(0)->cr3) && !our_stacktrace.empty()) {
+    } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
         our_stacktrace.pop_back();
         /* fuzz_stacktrace(); */
     }
@@ -204,10 +249,10 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
 
-    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT) && is_hypervisor_task(BX_CPU(0)->cr3)) {
+    if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
         our_stacktrace.push_back(std::make_pair(prev_rip, new_rip));
         /* fuzz_stacktrace(); */
-    } else if (what == BX_INSTR_IS_RET && is_hypervisor_task(BX_CPU(0)->cr3) && !our_stacktrace.empty()) {
+    } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
         our_stacktrace.pop_back();
         /* fuzz_stacktrace(); */
     }

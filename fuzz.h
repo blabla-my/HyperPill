@@ -1,6 +1,7 @@
 #ifndef FUZZ_H
 #define FUZZ_H
 
+#include <cstdint>
 #include <stdint.h>
 #include <map>
 #include <sys/types.h>
@@ -146,6 +147,9 @@ void fuzz_instr_interrupt(unsigned cpu, unsigned vector);
 void add_edge_not_taken(bx_address prev_rip);
 void add_edge(bx_address prev_rip, bx_address new_rip);
 void print_stacktrace();
+uint64_t stacktrace_hash_get();
+bool stacktrace_hash_seen(uint64_t hash);
+void stacktrace_hash_add(uint64_t hash);
 bool ignore_pc(bx_address pc);
 bool task_filter(bool user_only=false);
 bool found_pc(uint64_t pc);
@@ -264,6 +268,7 @@ void apply_breakpoints_linux();
 
 //stacktrace
 void fuzz_stacktrace();
+std::string stacktrace_to_string();
 
 //signal
 void signal_handler(int signum);
@@ -272,5 +277,6 @@ void signal_handler(int signum);
 void print_page_fault_pt_regs();
 
 void dump_seen_edges_to_file();
+void dump_instr();
 
 #endif
