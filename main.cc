@@ -4,6 +4,9 @@
 #include "pc_system.h"
 #include "task.h"
 #include <cstdint>
+#include <sstream>
+#include <string>
+#include <sys/types.h>
 
 int in_clock_step = CLOCK_STEP_NONE;
 bool hack_qtest_allowed = false;
@@ -32,6 +35,7 @@ static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
 uint64_t icount_limit = 50000000;
+uint64_t pio_icount_limit = 300000;
 
 static unsigned long int icount, pio_icount;
 
@@ -56,8 +60,9 @@ void dump_regs() {
 }
 
 void dump_instr() {
-	BX_CPU(id)->debug_disasm_instruction(BX_CPU(id)->prev_rip);
-	BX_CPU(id)->debug_disasm_instruction(BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx);
+	auto s = addr_to_sym(BX_CPU(x)->get_rip());
+	printf("0x%lx<< %s %s\n", BX_CPU(x)->get_rip(), s.first.c_str(), s.second.c_str());
+	BX_CPU(id)->debug_disasm_instruction(BX_CPU(x)->get_rip());
 }
 
 static void init_cpu(void) {
@@ -125,7 +130,7 @@ void fuzz_emu_stop_crash(const char *type){
 	unsigned long cr3 = BX_CPU(id)->cr3;
 	// if (!is_hypervisor_task(cr3))
 	// 	return;
-	struct task* task = get_task_by_cr3(cr3);
+	struct task* task = task_manager.get_current_task();
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
 			task->pid, task->kernel_task, task->hypervisor_task, task->comm,
@@ -138,13 +143,21 @@ void fuzz_emu_stop_crash(const char *type){
 	} else {
 		printf(".crash\n");
 	}
-	print_stacktrace();
-	dump_regs();
-	dump_instr();
-    if(master_fuzzer) {
-        ic_dump();
-		ic_dump_file(type);
-    }
+	auto hash = stacktrace_hash_get();
+	if (not stacktrace_hash_seen(hash)) {
+		printf("Stacktrace hash: %lx\n", hash);
+		stacktrace_hash_add(hash);
+		print_stacktrace();
+		dump_regs();
+		dump_instr();
+		// construct a string type-hash, hash is hexadecimal
+		std::stringstream ss;
+		ss << type << "-" << std::hex << hash;
+		ic_dump_file(ss.str().c_str());
+		if(master_fuzzer) {
+			ic_dump();
+		}
+	}
 }
 
 void fuzz_hook_exception(unsigned vector, unsigned error_code) {
@@ -153,7 +166,8 @@ void fuzz_hook_exception(unsigned vector, unsigned error_code) {
 }
 
 void fuzz_hook_hlt() {
-	fuzz_emu_stop_crash("hlt\n");
+	// fuzz_emu_stop_crash("hlt\n");
+	fuzz_emu_stop_unhealthy();
 	return;
 }
 
@@ -256,6 +270,10 @@ void fuzz_instr_before_execution(bxInstruction_c *i) {
 	if (icount > icount_limit && fuzzing) {
 		printf("icount abort %d\n", icount);
 	    fuzz_emu_stop_unhealthy();
+	}
+	if (pio_icount > pio_icount_limit && fuzzenum){
+		printf("pio_icount abort %d\n", pio_icount);
+		fuzz_emu_stop_unhealthy();
 	}
     icount++;
     pio_icount++;
@@ -519,10 +537,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	shadow_bx_cpu = bx_cpu;
 	shadow_bx_pc_system = bx_pc_system;
 
-	/* iterate task list to find hypervisor-related tasks */
-	bx_address init_task = sym_to_addr("vmlinux", "init_task");
-	iterate_tasks(init_task);
-
 	/* Start tracking accesses to the memory so we can roll-back changes
 	 * after each fuzzer input */
 	fuzz_watch_memory_inc();
@@ -532,6 +546,11 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	fuzzenum = true;
 	init_regions(icp_db_path);
 	fuzzenum = false;
+
+	/* iterate task list to find hypervisor-related tasks */
+	bx_address init_task = sym_to_addr("vmlinux", "init_task");
+	iterate_tasks(init_task);
+
 
 	/* Init a signal handler for SIGUSR1 */
 	signal(SIGUSR1, signal_handler);
