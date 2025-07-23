@@ -117,13 +117,13 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 			source -= len;
 		BX_MEM(0)->readPhysicalPage(BX_CPU(id), source, len, buf);
 
-		if (BX_CPU(id)->fuzztrace || log_ops) {
-			printf("!(medium size)dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
-			       addr, lookup_gpa_by_hpa(addr), len);
-			for (int i = 0; i < len; i++)
-				printf("%02x ", buf[i]);
-			printf("\n");
-		}
+		// if (BX_CPU(id)->fuzztrace || log_ops) {
+		// 	printf("!(medium size)dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+		// 	       addr, lookup_gpa_by_hpa(addr), len);
+		// 	for (int i = 0; i < len; i++)
+		// 		printf("%02x ", buf[i]);
+		// 	printf("\n");
+		// }
 		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, buf);
 	}
 }

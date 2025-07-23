@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/ucontext.h>
 #include <unistd.h>
 
 
@@ -87,18 +88,21 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
         static void* hv = getenv("HYPERV");
-        if(BX_CPU(0)->user_pl || hv || kernal_dma) 
+        if(BX_CPU(0)->user_pl || hv || kernal_dma) {
             fuzz_dma_read_cb(phy, len, data);
-    
-        if (log_ops) {
-            uint8_t data[len];
-            BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
-            printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
-                    phy, lookup_gpa_by_hpa(phy), len);
-            for (int i = 0; i < len; i++)
-                printf("%02x", data[i]);
-            printf("\n");
+            if (log_ops) {
+                // dump_instr();
+                // print_stacktrace();
+                uint8_t data[len];
+                BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
+                printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+                        phy, lookup_gpa_by_hpa(phy), len);
+                for (int i = 0; i < len; i++)
+                    printf("%02x", data[i]);
+                printf("\n");
+            }
         }
+    
         prioraccess = -1;
     }
 }
