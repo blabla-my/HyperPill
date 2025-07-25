@@ -52,7 +52,7 @@ size_t ndirty=0;
 static bx_address prioraccess;
 void fuzz_hook_memory_access(bx_address phy, unsigned len, 
                              unsigned memtype, unsigned rw, void* data) {
-    static char* kernal_dma = getenv("KERNEL_DMA");
+    static char* kernel_dma = getenv("KERNEL_DMA");
     bx_address aligned = phy&(~0xFFFLL);
 
     /* printf("Memory access to %lx\n", phy); */
@@ -88,8 +88,21 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
         static void* hv = getenv("HYPERV");
-        if(BX_CPU(0)->user_pl || hv || kernal_dma) {
+        if(BX_CPU(0)->user_pl || hv || kernel_dma) {
+            Task* current_task = task_manager.get_current_task();
+            if (!current_task) 
+                return;
+            if (current_task->CPU_KVM)
+                return;
+            if (!current_task->is_hypervisor_task()) {
+                current_task->hypervisor_task = 1;
+                printf("DMA read by task %d (%s) at %lx\n",
+                       current_task->pid, current_task->comm, phy);
+            }
             fuzz_dma_read_cb(phy, len, data);
+            // printf("DMA hook happen from: %d, %s\n", current_task->pid,
+            //        current_task->comm);
+            // print_stacktrace();
             if (log_ops) {
                 // dump_instr();
                 // print_stacktrace();
