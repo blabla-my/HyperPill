@@ -16,7 +16,7 @@ INCLUDES    = -I vendor/bochs \
 			  -I vendor/include \
 			  -I vendor/robin-map/include
 CFLAGS      = $(INCLUDES) -O3 -lsqlite3 -fPIE #-stdlib=libc++ -fsanitize=address
-CXXFLAGS=-stdlib=libc++
+CXXFLAGS=-std=c++17
 
 LIBFUZZER_FLAGS = -max_len=8192 -rss_limit_mb=-1 -detect_leaks=0 -use_value_profile=1 ${LIBFUZZER_ARGS}
 
@@ -48,10 +48,10 @@ OBJS        = main.o \
 			  bochsapi/apic.o \
               bochsapi/dbg.o
 all: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
-	$(CXX) $(CFLAGS) $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o fuzz
+	$(CXX) $(CFLAGS) $(CXXFLAGS) $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) -o fuzz
 
 %.o: %.cc $(DEPS)
-	$(CXX) $(CFLAGS) $(LDFLAGS) -c -o $@ $< 
+	$(CXX) $(CFLAGS) $(CXXFLAGS) $(LDFLAGS) -c -o $@ $< 
 
 vendor/libfuzzer-ng/libFuzzer.a:
 	cd vendor/libfuzzer-ng/; ./build.sh

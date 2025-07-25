@@ -22,7 +22,7 @@ void open_db(const char* path) {
 
     const char *sql = "CREATE TABLE MMIO(Address INT, Length INT); "
                 "CREATE TABLE PIO(Address INT, Length INT); "
-                "CREATE TABLE SYM(Address INT, Bin TEXT, Symbol Text); ";
+                "CREATE TABLE SYM(Address INT, Bin TEXT, Symbol Text, Pid INT); ";
     rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
 }
 
@@ -46,13 +46,14 @@ void insert_pio(uint16_t addr, uint16_t len){
     sqlite3_finalize(res);
 }
 
-void insert_sym(uint64_t addr, const char* bin, const char* sym){
+void insert_sym(uint64_t addr, const char* bin, const char* sym, int pid){
     sqlite3_stmt *res;
-    const char *sql = "INSERT INTO SYM(Address, Bin, Symbol) VALUES (?, ?, ?);";
+    const char *sql = "INSERT INTO SYM(Address, Bin, Symbol, Pid) VALUES (?, ?, ?, ?);";
     int rc = sqlite3_prepare_v2(db, sql, -1, &res, 0);
     sqlite3_bind_int64(res, 1, addr);
     sqlite3_bind_text(res, 2, bin, -1, SQLITE_STATIC);
     sqlite3_bind_text(res, 3, sym, -1, SQLITE_STATIC);
+    sqlite3_bind_int(res, 4, pid);
     int step = sqlite3_step(res);
     sqlite3_finalize(res);
 }
@@ -82,9 +83,7 @@ void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address
     }
 }
 
-void load_kallsyms(const std::string& kallsyms_path, 
-                  std::map<size_t, std::vector<std::pair<std::string, std::string>>> &addr2sym,
-                  std::map<std::pair<std::string, std::string>, size_t> &sym2addr) {
+void load_kallsyms(const std::string& kallsyms_path) {
     FILE *fp = fopen(kallsyms_path.c_str(), "r");
     if (!fp) {
         perror("Failed to open kallsyms file");
@@ -110,21 +109,21 @@ void load_kallsyms(const std::string& kallsyms_path,
         }
 
         // Store the symbol
-        addr2sym[addr].emplace_back(mod, sym);
-        auto key = std::make_pair(mod, sym);
-        if (sym2addr.find(key) == sym2addr.end()) {
-            sym2addr[key] = addr;
-        } else {
-            // printf("Warning: Symbol %s@%s already exists at address %lx, encountered a new one %lx\n", 
-            //         sym, mod, sym2addr[key], addr);
-        }
+        sym_info_t sym_info {
+            addr,
+            0, // pid is 0 for kernel symbols
+            mod,
+            sym
+        };
+        set_addr2sym(sym_info);
+        set_sym2addr(sym_info);
     }
     
 }
 
-void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>> &addr2sym, std::map<std::pair<std::string, std::string>, size_t> &sym2addr){
+void load_sym() {
     sqlite3_stmt *res;
-    const char *sql = "SELECT Address, Bin, Symbol from SYM";
+    const char *sql = "SELECT Address, Bin, Symbol, Pid from SYM";
     int rc = sqlite3_prepare_v2(db, sql, -1, &res, 0);
     int step;
     while((step = sqlite3_step(res)) == SQLITE_ROW) {
@@ -132,21 +131,26 @@ void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>>
             std::string bin = (const char*)sqlite3_column_text(res, 1);
             std::string sym = (const char*)sqlite3_column_text(res, 2);
             size_t addr = sqlite3_column_int64(res, 0);
-            addr2sym[addr].push_back(std::make_pair(bin, sym));
-            auto key = std::make_pair(bin, sym);
-            if (sym2addr.find(key) != sym2addr.end()) {
-                // printf("Warning: Symbol %s@%s already exists at address %lx, encountered a new one %lx\n", 
-                //         sym.c_str(), bin.c_str(), sym2addr[key], addr);
-                continue;
-            }
-            sym2addr[std::make_pair(bin, sym)] = addr;
+            int pid = sqlite3_column_int(res, 3);
+            
+            sym_info_t sym_info {
+                addr,
+                pid,
+                bin,
+                sym
+            };
+            set_addr2sym(sym_info);
+            set_sym2addr(sym_info);
         }
     }
     sqlite3_finalize(res);
 }
 
-void store_sym(const std::map<std::pair<std::string, std::string>, size_t>& sym2addr){
+void store_sym(const std::map<sym_info_t, unsigned long>& sym2addr) {
     for (auto it: sym2addr) {
-        insert_sym(it.second, it.first.first.c_str(), it.first.second.c_str());
+        sym_info_t sym_info = it.first;
+        unsigned long addr = it.second;
+        // sym_info.show();
+        insert_sym(addr, sym_info.bin.c_str(), sym_info.symbol.c_str(), sym_info.pid);
     }
 }

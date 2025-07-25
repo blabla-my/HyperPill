@@ -1,6 +1,7 @@
 #ifndef FUZZ_H
 #define FUZZ_H
 
+#include "task.h"
 #include <cstdint>
 #include <stdint.h>
 #include <map>
@@ -81,6 +82,35 @@ enum {
   BX_EPT_ENTRY_READ_WRITE_EXECUTE = 0x07
 };
 
+struct sym_name_t {
+  std::string bin;
+  std::string symbol;
+};
+
+struct sym_addr_t {
+  unsigned long addr;
+  int pid;
+  inline bool operator< (const sym_addr_t& rhs) const {
+    return addr < rhs.addr || 
+           (addr == rhs.addr && pid < rhs.pid);
+  }
+};
+
+struct sym_info_t {
+  unsigned long addr;
+  int pid;
+  std::string bin;
+  std::string symbol;
+  inline bool operator< (const sym_info_t& rhs) const {
+    return addr < rhs.addr || 
+           (addr == rhs.addr && pid < rhs.pid) ||
+           (addr == rhs.addr && pid == rhs.pid && bin < rhs.bin) ||
+           (addr == rhs.addr && pid == rhs.pid && bin == rhs.bin && symbol < rhs.symbol);
+  }
+  void show() const {
+    printf("sym_info_t: addr: %lx, pid: %d, bin: %s, symbol: %s\n", addr, pid, bin.c_str(), symbol.c_str());
+  }
+};
 
 uint64_t lookup_gpa_by_hpa(uint64_t hpa);
 
@@ -217,15 +247,12 @@ void add_ept_violation_range(bx_address start, bx_address end);
 void open_db(const char* path);
 void insert_mmio(uint64_t addr, uint64_t len);
 void insert_pio(uint16_t addr, uint16_t len);
-void insert_sym(uint64_t addr, const char* bin, const char* sym);
+void insert_sym(uint64_t addr, const char* bin, const char* sym, int pid=0);
 void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
-void load_sym(std::map<size_t, std::vector<std::pair<std::string, std::string>>>& addr2sym,
-              std::map<std::pair<std::string, std::string>, size_t>& sym2addr);
-void load_kallsyms(const std::string& kallsyms_path, 
-                  std::map<size_t, std::vector<std::pair<std::string, std::string>>> &addr2sym,
-                  std::map<std::pair<std::string, std::string>, size_t> &sym2addr);
-void store_sym(const std::map<std::pair<std::string, std::string>, size_t>& sym2addr); 
+void load_sym();
+void load_kallsyms(const std::string& kallsyms_path);
+void store_sym(const std::map<sym_info_t, unsigned long>& sym2addr); 
 void init_regions(const char* path);
 
 void init_register_feedback();
@@ -246,9 +273,12 @@ void load_symbol_map(char *path);
 void load_symbol_map_from_db(const char* path);
 void load_symbol_map_from_kallsyms(const char* kallsyms_path);
 void load_symbol_map_from_maps(const char* maps_path);
+void load_symbol_map_from_maps(int pid);
 void store_sym_back_to_db(const char* db_path);
-bx_address sym_to_addr(std::string bin, std::string name);
-std::pair<std::string, std::string> addr_to_sym(size_t addr);
+unsigned long sym_to_addr(std::string bin, std::string name, int pid=0);
+sym_name_t addr_to_sym(unsigned long addr, int pid=0);
+void set_addr2sym(sym_info_t sym);
+void set_sym2addr(sym_info_t sym);
 std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath);
 
 // link_map.c

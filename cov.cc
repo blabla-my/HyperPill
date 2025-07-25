@@ -23,7 +23,15 @@ tsl::robin_map<bx_address, uint64_t> edge_to_idx;
 tsl::robin_set<bx_address> cur_input;
 
 std::vector<std::pair<size_t, size_t>> pc_ranges;
-std::vector<std::pair<size_t, size_t>> our_stacktrace;
+
+extern TaskManager task_manager;
+
+struct calltrace_t {
+    bx_address caller;
+    bx_address callee;
+    bx_address CR3;
+};
+std::vector<calltrace_t> our_stacktrace;
 tsl::robin_set<uint64_t> seen_stacktraces;
 
 __attribute__((section(
@@ -58,14 +66,14 @@ bool ignore_pc(bx_address pc) {
 }
 
 bool task_filter(bool user_only) {
-    task* cur_task = task_manager.get_current_task();
+    Task* cur_task = task_manager.get_current_task();
     if(cur_task == NULL) {
         return true;
     }
-    if (is_userspace_vmm_task(cur_task)){
+    if (cur_task->is_userspace_vmm_task()){
         return BX_CPU(id)->get_cpl() == 0;
     }
-    if (!user_only && is_hypervisor_task(cur_task)){
+    if (!user_only && cur_task->is_hypervisor_task()){
         return false;
     }
     return true;
@@ -79,11 +87,20 @@ void print_stacktrace(){
         return;
     for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
     {
-        auto from_sym = addr_to_sym(r->first);
-        auto to_sym = addr_to_sym(r->second);
-        printf("%016lx -> %016lx, [%s] %s -> [%s] %s\n", r->first, r->second, 
-                from_sym.first.c_str(), from_sym.second.c_str(), 
-                to_sym.first.c_str(), to_sym.second.c_str());
+        auto CR3 = r->CR3;
+        auto task = task_manager.get_task_by_cr3(CR3);
+        auto pid = task_manager.get_pid(CR3);
+        auto from_sym = addr_to_sym(r->caller, pid);
+        auto to_sym = addr_to_sym(r->callee, pid);
+
+        if (task)
+            printf("%016lx -> %016lx, %s, [%s] %s -> [%s] %s\n", r->caller, r->callee, task->comm,
+                    from_sym.bin.c_str(), from_sym.symbol.c_str(), 
+                    to_sym.bin.c_str(), to_sym.symbol.c_str());
+        else
+            printf("%016lx -> %016lx, [%s] %s -> [%s] %s\n", r->caller, r->callee, 
+                    from_sym.bin.c_str(), from_sym.symbol.c_str(), 
+                    to_sym.bin.c_str(), to_sym.symbol.c_str());
     }
     fflush(stdout);
     fflush(stderr);
@@ -93,11 +110,13 @@ std::string stacktrace_to_string(){
     std::stringstream ss;
     for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
     {
-        auto from_sym = addr_to_sym(r->first);
-        auto to_sym = addr_to_sym(r->second);
-        ss << r->first << " -> " << r->second << ","
-           << " [" << from_sym.first << "] " << from_sym.second << " -> "
-           << " [" << to_sym.first << "] " << to_sym.second << "\n";
+        auto CR3 = r->CR3;
+        auto pid = task_manager.get_pid(CR3);
+        auto from_sym = addr_to_sym(r->caller, pid);
+        auto to_sym = addr_to_sym(r->callee, pid);
+        ss << r->caller<< " -> " << r->callee<< ","
+           << " [" << from_sym.bin<< "] " << from_sym.symbol<< " -> "
+           << " [" << to_sym.bin << "] " << to_sym.symbol<< "\n";
     }
     return ss.str();
 }
@@ -107,7 +126,7 @@ uint64_t stacktrace_hash_get() {
     int cnt = 0;
     for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() && cnt<10 ; ++r,++cnt )
     {
-        hash ^= r->first ^ r->second;
+        hash ^= r->caller ^ r->callee;
     }
     return hash;
 }
@@ -132,13 +151,15 @@ void add_edge_not_taken(bx_address prev_rip) {
 void add_edge(bx_address prev_rip, bx_address new_rip) {
     static char* NEW_PC_QEMU_ONLY=getenv("NEW_PC_QEMU_ONLY");
     if(ignore_pc(new_rip))
-        goto out;
+        // goto out;
+        return ;
+    
     time_t t;
 
     if(fuzzing) {
         if(cur_input.emplace(new_rip).second)
             last_new = 0;
-        if(last_new++ > 1000000 && !master_fuzzer ){
+        if(last_new++ > 3000000 && !master_fuzzer ){
             printf("No new edges for over %d..\n", last_new);
             fuzz_emu_stop_unhealthy();
         }
@@ -151,16 +172,15 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
     libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
 
 out:
-    if (NEW_PC_QEMU_ONLY && task_filter(true))
-        return;
-    else if (!NEW_PC_QEMU_ONLY && task_filter())
-        return;
-
+    // if (NEW_PC_QEMU_ONLY && task_filter(true))
+    //     return;
+    // else if (!NEW_PC_QEMU_ONLY && task_filter())
+    //     return;
     bx_address hash = prev_rip ^ (new_rip >> 1);
     if (seen_edges.emplace(hash).second) {
         time(&t);
         auto s = addr_to_sym(new_rip);
-        printf("[%d] NEW_PC: %lx %s (%s)\n", t, new_rip, s.second.c_str(), s.first.c_str());
+        printf("[%d] NEW_PC: %lx %s (%s)\n", t, new_rip, s.symbol.c_str(), s.bin.c_str());
         status |= (1 << 1); // new pc
     }
 }
@@ -222,7 +242,7 @@ void print_page_fault_pt_regs(){
     printf("rcx: %lx\n", regs.rcx);
     printf("rbx: %lx\n", regs.rbx);
     printf("orig_rax: %lx\n", regs.orig_rax);
-    printf("rip: %lx %s\n", regs.rip, addr_to_sym(regs.rip).second.c_str());
+    printf("rip: %lx %s\n", regs.rip, addr_to_sym(regs.rip).symbol.c_str());
     printf("cs: %lx\n", regs.cs);
     printf("eflags: %lx\n", regs.eflags);
     printf("rsp: %lx\n", regs.rsp);
@@ -234,7 +254,7 @@ void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
     if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
-        our_stacktrace.push_back(std::make_pair(branch_rip, new_rip));
+        our_stacktrace.push_back({branch_rip, new_rip, BX_CPU(id)->cr3});
         /* fuzz_stacktrace(); */
     } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
         our_stacktrace.pop_back();
@@ -249,7 +269,7 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
         status |= 1; // sysret
 
     if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
-        our_stacktrace.push_back(std::make_pair(prev_rip, new_rip));
+        our_stacktrace.push_back({prev_rip, new_rip, BX_CPU(id)->cr3});
         /* fuzz_stacktrace(); */
     } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
         our_stacktrace.pop_back();

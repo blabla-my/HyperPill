@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 #include <sys/types.h>
+#include <filesystem>
 
 int in_clock_step = CLOCK_STEP_NONE;
 bool hack_qtest_allowed = false;
@@ -61,7 +62,7 @@ void dump_regs() {
 
 void dump_instr() {
 	auto s = addr_to_sym(BX_CPU(x)->get_rip());
-	printf("0x%lx<< %s %s\n", BX_CPU(x)->get_rip(), s.first.c_str(), s.second.c_str());
+	printf("0x%lx<< %s %s\n", BX_CPU(x)->get_rip(), s.bin.c_str(), s.symbol.c_str());
 	BX_CPU(id)->debug_disasm_instruction(BX_CPU(x)->get_rip());
 }
 
@@ -128,9 +129,7 @@ void fuzz_emu_stop_unhealthy(){
 void fuzz_emu_stop_crash(const char *type){
 	// judege whether the crash is from a hypervisor thread
 	unsigned long cr3 = BX_CPU(id)->cr3;
-	// if (!is_hypervisor_task(cr3))
-	// 	return;
-	struct task* task = task_manager.get_current_task();
+	Task* task = task_manager.get_current_task();
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
 			task->pid, task->kernel_task, task->hypervisor_task, task->comm,
@@ -473,7 +472,14 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		/* only in infer stage, these two should be set */
 		/* Load the kallsyms file */
 		load_symbol_map_from_kallsyms(getenv("KALLSYMS"));
-		load_symbol_map_from_maps(getenv("MAPS"));
+		// load_symbol_map_from_maps(getenv("MAPS"));
+		// walk snapshot dir, find all file names that end with '.maps'
+		for (const auto &entry : std::filesystem::directory_iterator(getenv("SNAPSHOT_BASE"))) {
+			if (entry.path().extension() == ".maps") {
+				printf("Loading symbol map from %s\n", entry.path().string().c_str());
+				load_symbol_map_from_maps(entry.path().string().c_str());
+			}
+		}
 
 		/* Since we are in infer stage, after doing this, we write sym back to the db, then exit*/
 		store_sym_back_to_db(icp_db_path);

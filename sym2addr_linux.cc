@@ -2,39 +2,85 @@
 #include <sstream>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <regex>
 #include <cstdlib>
 #include <cstdio>
 #include <set>
 #include <string.h>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
 
 static std::set<std::string> bins;
-static std::map<size_t, std::vector<std::pair<std::string, std::string>>> addr2sym;
-static std::map<std::pair<std::string, std::string>, uint64_t> sym2addr;
 
+
+static std::map<sym_addr_t, sym_name_t> addr2sym;
+static std::map<sym_info_t, unsigned long> sym2addr;
 
 // todo: dynamic libc symbols for stuff like exit etc
 // Strategy: Run objdump on the binary. Load the
-bx_address sym_to_addr(std::string bin, std::string name) {
-    for(auto it: bins) {
-        if(it.find(bin) != std::string::npos){
-            return sym2addr[std::make_pair(std::string(it), name)];
+unsigned long sym_to_addr(std::string bin, std::string name, int pid) {
+    sym_info_t key {0, pid, bin, name};
+    for (const auto & b : bins) {
+        if (b.find(bin) != std::string::npos) {
+            key.bin = b;
+            break;
         }
     }
-    return NULL;
+    if (sym2addr.find(key) != sym2addr.end()) {
+        return sym2addr[key];
+    }
+    return 0UL;
 }
 
-std::pair<std::string, std::string> addr_to_sym(size_t addr) {
-    if(addr2sym.find(addr) != addr2sym.end())
-        return addr2sym[addr][0];
+sym_name_t addr_to_sym(unsigned long addr, int pid) {
+    if (addr & (1UL << 63)) {
+        // kernel address, we assume pid == 0
+        pid = 0;
+    }
+    sym_addr_t key {addr, pid};
+    if(addr2sym.find(key) != addr2sym.end())
+        return addr2sym[key];
     for(int i =0; i<0x1000; i++){
-        if(addr2sym.find(addr-i) != addr2sym.end()){
-            return std::make_pair(addr2sym[addr-i][0].first, addr2sym[addr-i][0].second + " +"+std::to_string(i));
+        key.addr = addr - i;
+        if(addr2sym.find(key) != addr2sym.end()){
+            sym_name_t res = addr2sym[key];
+            res.symbol += "+" + std::to_string(i);
+            return res;
         }
     }
-    return std::make_pair("", "");
+    return {"", ""};
+}
+
+void set_addr2sym(sym_info_t sym) {
+    sym_addr_t addr_key{sym.addr, sym.pid};
+    sym_name_t sym_key{sym.bin, sym.symbol};
+    addr2sym[addr_key] = sym_key;
+    
+    // hacking: we also add an entry for pid==0
+    addr_key.pid = 0;
+    if (addr2sym.find(addr_key) == addr2sym.end()) {
+        addr2sym[addr_key] = sym_key;
+    }
+}
+
+void set_sym2addr(sym_info_t sym) {
+    sym_info_t key {
+        0,
+        sym.pid,
+        sym.bin,
+        sym.symbol
+    };
+    key.addr = 0;
+    sym2addr[key] = sym.addr;
+    
+    // hacking: we also add an entry for pid==0
+    key.pid = 0;
+    if (sym2addr.find(key) == sym2addr.end()) {
+        sym2addr[key] = sym.addr;
+    }
 }
 
 static std::string executeCommand(const char* cmd) {
@@ -128,10 +174,10 @@ void load_symbol_map(char *path) {
                     std::string name = it.first;
                     name.erase(std::find(name.begin(), name.end(), '('), name.end());
                     /* std::replace(name.begin(), name.end(), '(', '\0'); */
-                    addr2sym[it.second + offset].push_back(std::make_pair(binfile, name));
+                    // addr2sym[it.second + offset].push_back(std::make_pair(binfile, name));
                     if(log)
                         printf(".info Symbol Name added: %s@%s %lx\n", name.c_str(), binfile.c_str(), it.second+offset);
-                    sym2addr[std::make_pair(binfile, name)] = it.second + offset;
+                    // sym2addr[std::make_pair(binfile, name)] = it.second + offset;
                     // printf("Looking up %s@%s %lx\n", name.c_str(), binfile.c_str(), sym2addr[std::make_pair(binfile, name)]);
                     /* if(!sym2addr.emplace(std::make_pair(binfile, name), it.second + offset).second) */
                     /*     printf(".warning Symbol Name Collision: %s@%s %lx %lx\n", name.c_str(), binfile.c_str(), it.second+offset, sym2addr[std::make_pair(binfile, name)]); */
@@ -145,23 +191,23 @@ void load_symbol_map(char *path) {
 }
 
 /* Assume the sqlite database specified by  has one table: addr2sym
-    * addr2sym: addr, bin, name
-    * addr2sym: 0x7f8a4c3b0000, vmlinux, init_task
-    * addr2sym: 0x7f8a4c3b0000, vmlinux, dump_stack
-    * addr2sym: 0x7f8a4c3b0000, vmlinux, do_idle
+    * addr2sym: addr, bin, name, pid
+    * addr2sym: 0x7f8a4c3b0000, vmlinux, init_task, 0
+    * addr2sym: 0x7f8a4c3b0000, vmlinux, dump_stack, 0
+    * addr2sym: 0x7f8a4c3b0000, vmlinux, do_idle, 0
    construct addr2sym and sym2addr from this table
 */
 void load_symbol_map_from_db(const char* path) {
     open_db(path);
-    load_sym(addr2sym, sym2addr);
+    load_sym();
     for (const auto& sym : sym2addr){
-        bins.insert(sym.first.first);
+        bins.insert(sym.first.bin);
     }
 }
 void load_symbol_map_from_kallsyms(const char* kallsyms_path) {
-    load_kallsyms(kallsyms_path, addr2sym, sym2addr);
+    load_kallsyms(kallsyms_path);
     for (const auto& sym : sym2addr){
-        bins.insert(sym.first.first);
+        bins.insert(sym.first.bin);
     }
 }
 void load_symbol_map_from_maps(const char* maps_path) {
@@ -171,6 +217,14 @@ void load_symbol_map_from_maps(const char* maps_path) {
     }
 
     std::ifstream file(maps_path);
+    if (!file.is_open()) {
+        fprintf(stderr, "Failed to open maps file: %s\n", maps_path);
+        return;
+    }
+
+    std::filesystem::path maps_file_path(maps_path);
+    int pid = std::stoi(maps_file_path.stem().string());
+
     std::string line;
     unsigned long start, end, offset, inode;
     char perm[5];
@@ -209,14 +263,23 @@ void load_symbol_map_from_maps(const char* maps_path) {
             if (it.second) {
                 std::string name = it.first;
                 name.erase(std::find(name.begin(), name.end(), '('), name.end());
-                addr2sym[it.second + start].push_back(std::make_pair(full_path, name));
-                sym2addr[std::make_pair(full_path, name)] = it.second + start;
+                sym_info_t sym_info = {
+                    it.second + start,
+                    pid,
+                    full_path,
+                    name 
+                };
+                set_addr2sym(sym_info);
+                set_sym2addr(sym_info);
             }
         }
         bins.insert(full_path);
-
         strcpy(last_path, path);
     }
+}
+void load_symbol_map_from_maps(int pid){
+    std::string filename = std::to_string(pid) + "-maps";
+    load_symbol_map_from_maps(filename.c_str());
 }
 
 void store_sym_back_to_db(const char* db_path){

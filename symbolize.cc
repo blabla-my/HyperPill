@@ -156,7 +156,7 @@ void symbolize(size_t pc) {
         if(it.second) {
             std::string name = it.first;
             name.erase(std::find(name.begin(), name.end(), '('), name.end());
-            insert_sym(it.second + offset, match.c_str(), name.c_str());
+            insert_sym(it.second + offset, match.c_str(), name.c_str(), 0);
         }
     }
 }
