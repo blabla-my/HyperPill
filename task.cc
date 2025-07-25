@@ -12,9 +12,6 @@
 #include <string>
 #include <sys/types.h>
 
-tsl::robin_map<unsigned long, struct task*> cr3_task_map;
-tsl::robin_set<struct task*> hypervisor_tasks;
-
 TaskManager task_manager;
 
 static std::string hypervisor_task_signatures[] = {
@@ -51,11 +48,11 @@ int read_mm_struct(bx_address mm_struct, void* buf, size_t len){
     return 0; // Success
 }
 
-int task_buf_to_task(const uint8_t* task_buf, task* task_ptr) {
+int task_buf_to_task(const uint8_t* task_buf, Task* task_ptr) {
     if (!task_buf || !task_ptr) {
         return -1; // Invalid buffer
     }
-    memset(task_ptr, 0, sizeof(struct task)); // Clear the struct
+    // memset(task_ptr, 0, sizeof(Task)); // Clear the struct
     memcpy(task_ptr->comm, task_comm(task_buf), sizeof(task_ptr->comm));
 
     task_ptr->pid = task_pid(task_buf);
@@ -65,6 +62,8 @@ int task_buf_to_task(const uint8_t* task_buf, task* task_ptr) {
     task_ptr->flags = task_flags(task_buf);
     task_ptr->kernel_task = !!(task_ptr->flags & (PF_KTHREAD|PF_VCPU));
     task_ptr->stack = task_stack(task_buf);
+    task_ptr->hypervisor_task = 0;
+    task_ptr->CPU_KVM = false;
 
     unsigned long mm = task_mm(task_buf);
     if (mm == 0) {
@@ -87,19 +86,19 @@ int task_buf_to_task(const uint8_t* task_buf, task* task_ptr) {
     }
 
     // check if task->comm contains a hypervisor signature
-    std::string comm_str(task_ptr->comm);
-    for (const auto& signature : hypervisor_task_signatures) {
-        if (comm_str.find(signature) != std::string::npos) {
-            task_ptr->hypervisor_task = 1;
-            break;
-        }
-    }
-    for (const auto& signature : userspace_vmm_task_signatures) {
-        if (comm_str.find(signature) != std::string::npos) {
-            task_ptr->userspace_vmm_task = 1;
-            break;
-        }
-    }
+    // std::string comm_str(task_ptr->comm);
+    // for (const auto& signature : hypervisor_task_signatures) {
+    //     if (comm_str.find(signature) != std::string::npos) {
+    //         task_ptr->hypervisor_task = 1;
+    //         break;
+    //     }
+    // }
+    // for (const auto& signature : userspace_vmm_task_signatures) {
+    //     if (comm_str.find(signature) != std::string::npos) {
+    //         task_ptr->userspace_vmm_task = 1;
+    //         break;
+    //     }
+    // }
     return 0; // Success
 }
 
@@ -110,9 +109,10 @@ unsigned long pgd2cr3(unsigned long pgd) {
 }
 
 void iterate_tasks(bx_address task_struct_head) {
+    if (task_struct_head == 0UL) return; 
     bx_address task = task_struct_head;
     do {
-        struct task* task_ptr = task_manager.add_task(task);
+        Task* task_ptr = task_manager.add_task(task);
 
         printf("Task at %lx PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx, flags: %x, stack: %lx\n",
                task, task_ptr->pid, task_ptr->kernel_task, task_ptr->hypervisor_task, task_ptr->userspace_vmm_task, task_ptr->comm,
@@ -122,51 +122,7 @@ void iterate_tasks(bx_address task_struct_head) {
     } while (task != task_struct_head);
 }
 
-bool is_hypervisor_task(unsigned long cr3) {
-    auto* task = get_task_by_cr3(cr3);
-    if (task == NULL)
-        return false;
-    if (!task->hypervisor_task)
-        return false;
-    if (task->cr3 == 0)
-        return false;
-    return true;
-}
-
-bool is_hypervisor_task(task* task) {
-    if (!task) return false;
-    return task->hypervisor_task;
-}
-
-bool is_userspace_vmm_task(unsigned long cr3) {
-    auto* task = get_task_by_cr3(cr3);
-    if (task == NULL)
-        return false;
-    return task->userspace_vmm_task;
-}
-
-bool is_userspace_vmm_task(task* task){
-    if (!task) return false;
-    return task->userspace_vmm_task;
-}
-
-bool set_hypervisor_task_by_cr3(unsigned long cr3) {
-    if (cr3_task_map.find(cr3>>PAGE_SHIFT) == cr3_task_map.end()) {
-        return false;
-    }
-    cr3_task_map[cr3>>PAGE_SHIFT]->hypervisor_task = true;
-    return true;
-}
-
-struct task* get_task_by_cr3(unsigned long cr3) {
-    if (cr3_task_map.find(cr3>>PAGE_SHIFT) == cr3_task_map.end()) {
-        return NULL;
-    }
-    return cr3_task_map[cr3>>PAGE_SHIFT];
-}
-
 TaskManager::TaskManager(){
-    // current_task = sym_to_addr("vmlinux", "current_task");
     current_task = 0;
 }
 
@@ -174,7 +130,7 @@ TaskManager::~TaskManager(){
     return;
 }
 
-task* TaskManager::get_task(bx_address task_addr){
+Task* TaskManager::get_task(bx_address task_addr){
     if (!task_addr) return NULL;
     if (task_map.contains(task_addr)){
         return task_map[task_addr];
@@ -199,12 +155,12 @@ bx_address TaskManager::get_current_task_bx_addr(){
     return taskp;
 }
 
-task* TaskManager::get_current_task(){
+Task* TaskManager::get_current_task(){
     // only in kernel mode, GS is not 0
     if (BX_CPU(id)->get_cpl() == 0){
         bx_address current_task_bx_addr = get_current_task_bx_addr();
         if (!current_task_bx_addr) return NULL;
-        task* current_task_fuzz = get_task(current_task_bx_addr);
+        Task* current_task_fuzz = get_task(current_task_bx_addr);
         if (!current_task_fuzz) {
             return add_task(current_task_bx_addr);
         } else {
@@ -219,31 +175,35 @@ task* TaskManager::get_current_task(){
     }
 }
 
-task* TaskManager::get_hypervisor_task(bx_address task_addr){
+Task* TaskManager::get_hypervisor_task(bx_address task_addr){
     if (hypervisor_task_map.contains(task_addr)){
         return hypervisor_task_map.at(task_addr);
     }
     return NULL;
 }
 
-task* TaskManager::add_task(bx_address task_addr){
-    task* already_in = get_task(task_addr);
+Task* TaskManager::add_task(bx_address task_addr){
+    Task* already_in = get_task(task_addr);
     if (!already_in){
-        task* new_task = alloca_task(task_addr);
+        Task* new_task = alloca_task(task_addr);
         if (!new_task) return NULL;
         if (!new_task->kernel_task){
             // if new_task is a userspace task, index it by CR3 as well
             bx_address index = new_task->cr3 >> PAGE_SHIFT;
-            user_task_map[index] = new_task;
-            printf("add_task: index task %s by %lx, flags %x\n", new_task->comm, index, new_task->flags);
-        } 
+            if (user_task_map.find(index) == user_task_map.end()) {
+                user_task_map[index] = new_task;
+                printf("add_task: index task %s by %lx, flags %x\n", new_task->comm, index, new_task->flags);
+            }
+        } else if (strstr(new_task->comm, "CPU 0/KVM") != NULL) {
+            new_task->CPU_KVM = true;
+        }
         task_map[task_addr] = new_task;
         return new_task;
     }
     return already_in;
 }
 
-task* TaskManager::add_task(task* task_addr){
+Task* TaskManager::add_task(Task* task_addr){
     // assume task_addr->vaddr != 0
     if (!task_addr->vaddr){
         return NULL;
@@ -255,10 +215,10 @@ task* TaskManager::add_task(task* task_addr){
     return task_addr;
 }
 
-task* TaskManager::add_hypervisor_task(bx_address task_addr){
-    task* already_in = get_hypervisor_task(task_addr);
+Task* TaskManager::add_hypervisor_task(bx_address task_addr){
+    Task* already_in = get_hypervisor_task(task_addr);
     if (!already_in){
-        task* new_task = add_task(task_addr);
+        Task* new_task = add_task(task_addr);
         hypervisor_task_map[task_addr] = new_task;
         return new_task;
     }
@@ -278,7 +238,7 @@ bool TaskManager::has_hypervisor_task(bx_address task_addr){
     return hypervisor_task_map.contains(task_addr);
 }
 
-task* TaskManager::alloca_task(bx_address task_addr){
+Task* TaskManager::alloca_task(bx_address task_addr){
     uint8_t *task_buf = (uint8_t*)malloc(TASK_SIZE);
     if (!task_buf){
         printf("Error: failed to allocate task_buf\n");
@@ -289,11 +249,29 @@ task* TaskManager::alloca_task(bx_address task_addr){
         free(task_buf);
         return NULL;
     }
-    task* new_task = (task*)malloc(sizeof(task));
+    Task* new_task = new Task();
     if (task_buf_to_task(task_buf, new_task) < 0){
         printf("Error: failed to convert task buf to task\n");
         return NULL;
     }
     new_task->vaddr = task_addr;
     return new_task;
+}
+
+Task* TaskManager::get_task_by_cr3(bx_address CR3) {
+    auto index = CR3 >> PAGE_SHIFT;
+    if (user_task_map.contains(index)) {
+        return user_task_map[index];
+    } else {
+        return nullptr;
+    }
+}
+
+int TaskManager::get_pid(bx_address CR3) {
+    auto index = CR3 >> PAGE_SHIFT;
+    if (user_task_map.contains(index)) {
+        return user_task_map[index]->pid;
+    } else {
+        return 0;
+    }
 }

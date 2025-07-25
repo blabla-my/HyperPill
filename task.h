@@ -9,7 +9,18 @@
 #include "bochs.h"
 #include "cpu/cpu.h"
 
-struct task {
+class Task {
+public:
+    Task() : vaddr(0), pid(0), kernel_task(false), hypervisor_task(false), userspace_vmm_task(false) {
+        memset(comm, 0, sizeof(comm));
+        cr3 = 0;
+        pgd = 0;
+        next = 0;
+        prev = 0;
+        stack = 0;
+        flags = 0;
+    }
+
     int pid;             /* Process ID */
     int kernel_task; /* Is this a kernel task? */
     int hypervisor_task; /* Is this a hypervisor task? */
@@ -17,39 +28,29 @@ struct task {
     char comm[16];       /* Process name */
     unsigned long cr3;  /* CR3 register */
     unsigned long pgd;  /* Page Global Directory */
-
     bx_address vaddr;   /* Kernel space address of the task */
     bx_address next;
     bx_address prev;
-
     bx_address stack;
-
     unsigned int flags;
+
+    bool CPU_KVM;
+    
+    bool is_hypervisor_task() const {
+        return this->hypervisor_task!=0;
+    }
+    bool is_userspace_vmm_task() const {
+        return this->hypervisor_task && not this->kernel_task;
+    }
 };
-
-extern tsl::robin_map<unsigned long, struct task*> cr3_task_map;
-extern tsl::robin_set<struct task*> hypervisor_tasks;
-
-extern bx_phy_address current_task;
-
-/* functions to play with current task */
-bx_address get_current_task_addr();
 
 /* functions to read structures from bx VM */
 int read_task_struct(bx_address task_struct, void* buf, size_t len);
 int read_mm_struct(bx_address mm_struct, void* buf, size_t len);
-int task_buf_to_task(const uint8_t* task_buf, task* task);
+int task_buf_to_task(const uint8_t* task_buf, Task* task);
 unsigned long pgd2cr3(unsigned long pgd);
 
 void iterate_tasks(bx_address task_struct_head);
-
-bool is_hypervisor_task(unsigned long cr3);
-bool is_hypervisor_task(task* task);
-bool is_userspace_vmm_task(unsigned long cr3);
-bool is_userspace_vmm_task(task* task);
-
-bool set_hypervisor_task_by_cr3(unsigned long cr3);
-struct task* get_task_by_cr3(unsigned long cr3);
 
 /* macros for operating struct task_struct */
 /* kernel version 6.0.32 */
@@ -138,27 +139,29 @@ public:
     TaskManager();
     ~TaskManager();
     
-    task* get_task(bx_address task_addr);
-    task* get_current_task();
+    Task* get_task(bx_address task_addr);
+    Task* get_task_by_cr3(unsigned long CR3);
+    Task* get_current_task();
     bx_address get_current_task_bx_addr();
-    task* get_hypervisor_task(bx_address task_addr);
-    task* add_task(bx_address task_addr);
-    task* add_task(task* task_addr); //we should never allocate a task out of TaskManager.
-    task* add_hypervisor_task(bx_address task_addr);
+    Task* get_hypervisor_task(bx_address task_addr);
+    Task* add_task(bx_address task_addr);
+    Task* add_task(Task* task_addr); //we should never allocate a task out of TaskManager.
+    Task* add_hypervisor_task(bx_address task_addr);
     bool has_task(bx_address task_addr);
     bool del_task(bx_address task_addr);
     bool has_hypervisor_task(bx_address task_addr);
-    // bool hypervisor_task(task* task_addr);
+    int get_pid(unsigned long CR3);
+    // bool hypervisor_task(Task* task_addr);
 
 private:
-    tsl::robin_map<bx_address, task*> task_map;
-    tsl::robin_map<bx_address, task*> user_task_map;
-    tsl::robin_map<bx_address, task*> hypervisor_task_map;
+    tsl::robin_map<bx_address, Task*> task_map;
+    tsl::robin_map<bx_address, Task*> user_task_map;
+    tsl::robin_map<bx_address, Task*> hypervisor_task_map;
     bx_address current_task;
 
-    task* alloca_task(bx_address task_addr);
-    // bool add_hypervisor_task(task* task_addr);
-    // bool has_task(task* task_addr);
+    Task* alloca_task(bx_address task_addr);
+    // bool add_hypervisor_task(Task* task_addr);
+    // bool has_task(Task* task_addr);
 };
 
 extern TaskManager task_manager;
