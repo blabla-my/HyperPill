@@ -52,7 +52,7 @@ bx_address add_breakpoint(bx_address addr, const breakpoint_handler_t h) {
     if(!addr)
         return addr;
     assert(bp_index < MAX_BPS);
-    printf("Applying breakpoint to: %lx %s\n", addr, addr_to_sym(addr).second.c_str());
+    printf("Applying breakpoint to: %lx %s\n", addr, addr_to_sym(addr).symbol.c_str());
     breakpoints[bp_index++] = std::make_pair(addr, h);
     if(addr > max_bp)
         max_bp = addr;
@@ -131,10 +131,11 @@ void apply_breakpoints_linux() {
             i->modRMForm.Iw[1] = 0;
             BX_CPU(id)->async_event = 1;
             });
-    add_breakpoint(sym_to_addr("libasan.so", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](bxInstruction_c *i) {
             // every error through asan should reach this
             printf("ASAN error report\n");
             fuzz_stacktrace();
+            fuzz_emu_stop_crash("ASAN");
             });
     add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
             printf("ASAN GENERIC ERROR\n");
@@ -170,25 +171,6 @@ void apply_breakpoints_linux() {
             printf("page fault at: 0x%lx\n", BX_CPU(id)->cr2);
             // fuzz_emu_stop_crash("page fault");
     });
-    // add_breakpoint(sym_to_addr("vmlinux", "pick_next_task_fair"), [](bxInstruction_c *i) {
-    //         unsigned long cr3 = BX_CPU(id)->cr3;
-    //         if (cr3_task_map.find(cr3 >> PAGE_SHIFT) == cr3_task_map.end()) {
-    //             printf("No task found for cr3: %lx\n", cr3);
-    //             return;
-    //         }
-    //         printf("pick_next_task_fair: %s, pid: %d, cr3: %lx, hypervisor_thread: %d\n",
-    //                cr3_task_map[cr3 >> PAGE_SHIFT]->comm,
-    //                cr3_task_map[cr3 >> PAGE_SHIFT]->pid,
-    //                cr3, cr3_task_map[cr3 >> PAGE_SHIFT]->hypervisor_task);
-    // });
-    // hook console write
-    // add_breakpoint(sym_to_addr("vmlinux", "printk_sprint"), [](bxInstruction_c *i) {
-    //     printf("printk_sprint: %lx, %lx\n", BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx, BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx);
-    //     char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx,
-    //             BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx);
-    //     printf("printk_sprint: %s\n", msg);
-    //     free(msg);
-    // });
     add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](bxInstruction_c *i) {
         i->execute1 = BX_CPU_C::RETnear64_Iw;
         i->modRMForm.Iw[0] = 0;
