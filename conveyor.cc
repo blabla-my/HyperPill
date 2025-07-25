@@ -410,7 +410,7 @@ void ic_dump_file(const char* filepath) {
     FILE *f = fopen(filepath, "wb");
     if (f) {
         printf("Dumping input to %s\n", filepath);
-        fwrite(input, 1, input_len, f);
+        fwrite(output, 1, *output_len, f);
         fclose(f);
     } else {
         perror("Failed to open file");
