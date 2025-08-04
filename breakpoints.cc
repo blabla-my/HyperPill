@@ -28,7 +28,7 @@
 /*
  * These breakpoints need to be pretty fast
  */
-#define MAX_BPS 16
+#define MAX_BPS 32 
 using breakpoint_handler_t = void (*)(bxInstruction_c *);
 std::pair<bx_address, breakpoint_handler_t> breakpoints[MAX_BPS]; 
 static unsigned int bp_index;
@@ -179,7 +179,7 @@ void apply_breakpoints_linux() {
         BX_CPU(id)->async_event = 1;
         char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx,
                 BX_CPU(id)->gen_reg[BX_64BIT_REG_RDX].rrx+1);
-        printf("console write: %s\n", msg);
+        printf("#console_write\n%s\n#end_console_write", msg);
         free(msg);
     });
     // hook kasan
@@ -189,6 +189,14 @@ void apply_breakpoints_linux() {
     add_breakpoint(sym_to_addr("vmlinux", "kasan_report_invalid_free"), [](bxInstruction_c *i) {
         fuzz_emu_stop_crash("kasan-report-invalid-free");
     });
+    // abort of all processes
+    // auto abort_addresses = select_sym("abort");
+    // for (auto addr : abort_addresses) {
+    //     printf("Adding breakpoint to abort at: %lx\n", addr);
+    //     add_breakpoint(addr, [](bxInstruction_c *i) {
+    //         fuzz_emu_stop_crash("abort");
+    //     });
+    // }
 }
 
 
@@ -225,7 +233,7 @@ void handle_syscall_hooks(bxInstruction_c *i)
                             .rrx,
                             len, 3, BX_READ, 0x0, buf);
                     buf[len] = 0;
-                    printf("write: %s\n", buf);
+                    printf("#write\n%s\n#end_write\n", buf);
                     BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = len;
                     return;
                 }

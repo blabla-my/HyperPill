@@ -1,7 +1,9 @@
+#include "config.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <map>
 #include "fuzz.h"
+#include <vector>
 
 
 sqlite3 *db;
@@ -153,4 +155,19 @@ void store_sym(const std::map<sym_info_t, unsigned long>& sym2addr) {
         // sym_info.show();
         insert_sym(addr, sym_info.bin.c_str(), sym_info.symbol.c_str(), sym_info.pid);
     }
+}
+
+std::vector<bx_address> select_sym(const char* sym) {
+    std::vector<bx_address> result;
+    sqlite3_stmt *res;
+    const char *sql = "SELECT Address from SYM WHERE Symbol = ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &res, 0);
+    sqlite3_bind_text(res, 1, sym, -1, SQLITE_STATIC);
+    int step;
+    while((step = sqlite3_step(res)) == SQLITE_ROW) {
+        bx_address addr = sqlite3_column_int64(res, 0);
+        result.push_back(addr);
+    }
+    sqlite3_finalize(res);
+    return result;
 }

@@ -1,6 +1,7 @@
 #ifndef FUZZ_H
 #define FUZZ_H
 
+#include "config.h"
 #include "task.h"
 #include <cstdint>
 #include <stdint.h>
@@ -248,6 +249,7 @@ void open_db(const char* path);
 void insert_mmio(uint64_t addr, uint64_t len);
 void insert_pio(uint16_t addr, uint16_t len);
 void insert_sym(uint64_t addr, const char* bin, const char* sym, int pid=0);
+std::vector<bx_address> select_sym(const char* sym);
 void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_sym();
