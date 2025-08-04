@@ -2,12 +2,14 @@
 #define TASK_H
 
 #include "config.h"
+#include "vendor/include/config.h"
 #include <cstdint>
 #include <string>
 #include <tsl/robin_map.h>
 #include <tsl/robin_set.h>
 #include "bochs.h"
 #include "cpu/cpu.h"
+#include <asm/ptrace.h>
 
 class Task {
 public:
@@ -36,17 +38,27 @@ public:
 
     bool CPU_KVM;
     
+    struct pt_regs regs;
+    
     bool is_hypervisor_task() const {
         return this->hypervisor_task!=0;
     }
     bool is_userspace_vmm_task() const {
         return this->hypervisor_task && not this->kernel_task;
     }
+    struct pt_regs* get_regs() {
+        return &this->regs;
+    }
+    bx_address get_pt_regs_rip() {
+        return this->regs.rip;
+    }
+    void dump_regs();
 };
 
 /* functions to read structures from bx VM */
 int read_task_struct(bx_address task_struct, void* buf, size_t len);
 int read_mm_struct(bx_address mm_struct, void* buf, size_t len);
+int read_pt_regs(bx_address pt_regs_addr, struct pt_regs* regs);
 int task_buf_to_task(const uint8_t* task_buf, Task* task);
 unsigned long pgd2cr3(unsigned long pgd);
 
@@ -96,6 +108,7 @@ void iterate_tasks(bx_address task_struct_head);
 #define PF__HOLE__40000000	0x40000000
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
 
+/* task_struct member offset */
 #define TASK_SIZE 0x2640
 #define TASK_OFFSET_MM 0x8e0
 #define TASK_OFFSET_ACTIVE_MM 0x8e8
@@ -121,6 +134,15 @@ void iterate_tasks(bx_address task_struct_head);
 #define task_pid(ts) task_field(ts,TASK_OFFSET_PID,int)
 #define task_flags(ts) task_field(ts,TASK_OFFSET_FLAGS,unsigned int)
 #define task_stack(ts) task_field(ts,TASK_OFFSET_STACK,unsigned long)
+#define PAGE_SIZE (0x1000)
+#define THREAD_SIZE (PAGE_SIZE << 2)
+#define TOP_OF_KERNEL_STACK_PADDING 0
+#define task_pt_regs(task) \
+({									\
+	unsigned long __ptr = (unsigned long)task_stack(task);	\
+	__ptr += THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;		\
+	((struct pt_regs *)__ptr) - 1;					\
+})
 
 /* macros for operating struct mm */
 #define MM_SIZE 0x440

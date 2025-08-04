@@ -82,9 +82,10 @@ bool task_filter(bool user_only) {
 static size_t last_new = 0;
 
 void print_stacktrace(){
-    printf("Stacktrace:\n");
+    printf("#stacktrace\n");
     if(our_stacktrace.empty())
         return;
+    tsl::robin_set<bx_address> seen_cr3;
     for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
     {
         auto CR3 = r->CR3;
@@ -92,6 +93,17 @@ void print_stacktrace(){
         auto pid = task_manager.get_pid(CR3);
         auto from_sym = addr_to_sym(r->caller, pid);
         auto to_sym = addr_to_sym(r->callee, pid);
+        
+        // if a CR3 is unseen before, we dump current_task->rip
+        if (seen_cr3.find(CR3) == seen_cr3.end()) {
+            seen_cr3.insert(CR3);
+            if (task) {
+                auto final_rip_sym = addr_to_sym(task->get_pt_regs_rip(), pid);
+                printf("%016lx -> %016lx, %s, [%s] %s -> [%s] %s\n", r->callee, task->get_pt_regs_rip(), task->comm,
+                        to_sym.bin.c_str(), to_sym.symbol.c_str(), 
+                        final_rip_sym.bin.c_str(), final_rip_sym.symbol.c_str());
+            }
+        }
 
         if (task)
             printf("%016lx -> %016lx, %s, [%s] %s -> [%s] %s\n", r->caller, r->callee, task->comm,
@@ -102,6 +114,7 @@ void print_stacktrace(){
                     from_sym.bin.c_str(), from_sym.symbol.c_str(), 
                     to_sym.bin.c_str(), to_sym.symbol.c_str());
     }
+    printf("#end_stacktrace\n");
     fflush(stdout);
     fflush(stderr);
 }
@@ -121,12 +134,24 @@ std::string stacktrace_to_string(){
     return ss.str();
 }
 
+uint64_t pivot_hash(uint64_t hash){
+    hash ^= hash >> 30;
+    hash *= 0xbf58476d1ce4e5b9U;
+    hash ^= hash >> 27;
+    hash *= 0x94d049bb133111ebU;
+    hash ^= hash >> 31;
+    return hash;
+}
+
 uint64_t stacktrace_hash_get() {
     uint64_t hash = 0;
     int cnt = 0;
-    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() && cnt<10 ; ++r,++cnt )
+    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() && cnt<15 ; ++r,++cnt )
     {
-        hash ^= r->caller ^ r->callee;
+        hash ^= r->callee;
+        hash = pivot_hash(hash);
+        hash ^= r->caller;
+        hash = pivot_hash(hash);
     }
     return hash;
 }

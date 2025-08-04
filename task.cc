@@ -48,6 +48,14 @@ int read_mm_struct(bx_address mm_struct, void* buf, size_t len){
     return 0; // Success
 }
 
+int read_pt_regs(bx_address pt_regs_addr, struct pt_regs *regs){
+    if (pt_regs_addr == 0) {
+        return -1; // Invalid pt_regs address
+    }
+    BX_CPU(x)->access_read_linear(pt_regs_addr, sizeof(struct pt_regs), 0, BX_READ, 0, regs);
+    return 0; // Success
+}
+
 int task_buf_to_task(const uint8_t* task_buf, Task* task_ptr) {
     if (!task_buf || !task_ptr) {
         return -1; // Invalid buffer
@@ -84,21 +92,12 @@ int task_buf_to_task(const uint8_t* task_buf, Task* task_ptr) {
         task_ptr->pgd = mm_pgd(mm_buf);
         task_ptr->cr3 = pgd2cr3(task_ptr->pgd);
     }
+    
+    bx_address task_pt_regs_addr = (bx_address)task_pt_regs(task_buf);
+    if (read_pt_regs(task_pt_regs_addr, &task_ptr->regs) < 0) {
+        return -1; // Failed to read pt_regs
+    }
 
-    // check if task->comm contains a hypervisor signature
-    // std::string comm_str(task_ptr->comm);
-    // for (const auto& signature : hypervisor_task_signatures) {
-    //     if (comm_str.find(signature) != std::string::npos) {
-    //         task_ptr->hypervisor_task = 1;
-    //         break;
-    //     }
-    // }
-    // for (const auto& signature : userspace_vmm_task_signatures) {
-    //     if (comm_str.find(signature) != std::string::npos) {
-    //         task_ptr->userspace_vmm_task = 1;
-    //         break;
-    //     }
-    // }
     return 0; // Success
 }
 
@@ -114,9 +113,9 @@ void iterate_tasks(bx_address task_struct_head) {
     do {
         Task* task_ptr = task_manager.add_task(task);
 
-        printf("Task at %lx PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx, flags: %x, stack: %lx\n",
+        printf("Task at %lx PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx, flags: %x, stack: %lx, RIP: %lx\n",
                task, task_ptr->pid, task_ptr->kernel_task, task_ptr->hypervisor_task, task_ptr->userspace_vmm_task, task_ptr->comm,
-               task_ptr->cr3, task_ptr->pgd, task_ptr->flags, task_ptr->stack);
+               task_ptr->cr3, task_ptr->pgd, task_ptr->flags, task_ptr->stack, task_ptr->get_pt_regs_rip());
 
         task = task_ptr->next;
     } while (task != task_struct_head);
@@ -223,6 +222,16 @@ Task* TaskManager::add_hypervisor_task(bx_address task_addr){
         return new_task;
     }
     return already_in;
+}
+
+void Task::dump_regs() {
+    struct pt_regs* regs = get_regs();
+    printf("RIP: %lx, CS: %lx, EFLAGS: %lx, RSP: %lx, SS: %lx\n",
+           regs->rip, regs->cs, regs->eflags, regs->rsp, regs->ss);
+    printf("RAX: %lx, RBX: %lx, RCX: %lx, RDX: %lx\n",
+           regs->rax, regs->rbx, regs->rcx, regs->rdx);
+    printf("RDI: %lx, RSI: %lx, RBP: %lx\n",
+           regs->rdi, regs->rsi, regs->rbp);
 }
 
 bool TaskManager::has_task(bx_address task_addr){
