@@ -38,6 +38,7 @@ OBJS        = main.o \
 			  enum.o \
 			  sourcecov.o \
 			  task.o \
+			  vqueue.cc \
               bochsapi/logfunctions.o \
 			  devices.o \
 			  bochsapi/system.o \
