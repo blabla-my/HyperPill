@@ -40,4 +40,11 @@ export ICP_REGS_PATH="$SNAPSHOT_BASE/regs"
 export ICP_DB_PATH="$SNAPSHOT_BASE/snap.sqlite"
 
 cp "$PROJECT_ROOT/fuzz" .
+
+if [ ! -z $GDB ]; then
+    gdb --args \
+    ./fuzz $LIBFUZZER_FLAGS
+    exit 0
+fi
+
 ./fuzz $LIBFUZZER_FLAGS
