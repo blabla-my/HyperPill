@@ -126,7 +126,7 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 		printf("Common config space not set for device %s, cannot enumerate queues.\n", name);
 		return;
 	}
-	size_t queue_num = common_cfg.get_queue_num();
+	queue_num = common_cfg.get_queue_num();
 	size_t old_queue_sel = common_cfg.get_queue_sel();
 	if (queue_num > VIRTIO_QUEUE_MAX) {
 		printf("Warning: Queue number %lx exceeds maximum %u, clamping to max.\n", queue_num, VIRTIO_QUEUE_MAX);
@@ -145,7 +145,7 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 			queues[i].desc = {queue_size, desc_ring_addr, VRing::VRING_DESC};
 			queues[i].avail = {queue_size, avail_ring_addr, VRing::VRING_AVAIL};
 			queues[i].used = {queue_size, used_ring_addr, VRing::VRING_USED};
-			printf("#QUEUE_ENUM: {dev: \"%s\", queue_sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx}\n", 
+			printf("#QUEUE_ENUM dev: %s, queue sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx\n", 
 				   name, i, queue_size, desc_ring_addr, avail_ring_addr, used_ring_addr);
 		} else {
 			printf("Warning: Queue %lx exceeds maximum %u, skipping.\n", i, VIRTIO_QUEUE_MAX);
@@ -159,6 +159,7 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 
 /* VQueueManager */
 tsl::robin_map<std::string, VirtioDev> VQueueManager::virtio_devs;
+tsl::robin_map<bx_address, VQueueManager::VRingSet> VQueueManager::rings_grouped_by_page;
 
 bool VQueueManager::create_virtio_device(const std::string& name) {
 	if (virtio_devs.find(name) != virtio_devs.end()) {
@@ -196,4 +197,36 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 			printf("Unknown config space type %d for device %s.\n", type, name.c_str());
 			return;
 	}
+}
+
+void VQueueManager::group_vrings_by_page() {
+	for (const auto& it : virtio_devs) {
+		const auto& vdev = it.second;
+		for (size_t i = 0; i < vdev.queue_num; i++ ) {
+			const auto& queue = vdev.queues[i];
+			group_vring_by_page(queue.avail);
+			group_vring_by_page(queue.used);
+			group_vring_by_page(queue.desc);
+		}
+	}
+}
+
+void VQueueManager::group_vring_by_page(const VRing& vring) {
+	for (auto pn = vring.start_pagenum(); pn <= vring.end_pagenum(); pn++){
+		if (!rings_grouped_by_page.contains(pn)) {
+			rings_grouped_by_page[pn] = {};
+		}
+		rings_grouped_by_page[pn].insert(&vring);
+	}
+}
+
+const VRing* VQueueManager::get_belonging_vring(bx_address address){
+	if (rings_grouped_by_page.contains(PAGE_NUM(address))) {
+		for (const VRing* vring : rings_grouped_by_page[PAGE_NUM(address)]) {
+			if (vring->in_ring(address)){
+				return vring;
+			}
+		}	
+	}
+	return NULL;
 }

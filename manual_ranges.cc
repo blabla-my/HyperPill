@@ -56,4 +56,5 @@ void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, 
             printf("Will fuzz: %s\n", line.c_str());
         }
     }
+    VQueueManager::group_vrings_by_page();
 }

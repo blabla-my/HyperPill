@@ -108,8 +108,14 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                 // print_stacktrace();
                 uint8_t data[len];
                 BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
-                printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
-                        phy, lookup_gpa_by_hpa(phy), len);
+                bx_address gpa = lookup_gpa_by_hpa(phy);
+                const VRing* vring = VQueueManager::get_belonging_vring(gpa);
+                if (vring)
+                    printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s] len: %lx data: ",
+                            phy, gpa, vring->type_str(), len);
+                else
+                    printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+                            phy, gpa, len);
                 for (int i = 0; i < len; i++)
                     printf("%02x", data[i]);
                 printf("\n");

@@ -2,11 +2,13 @@
 #define VQUEUE_H
 
 #include "config.h"
+#include <sstream>
 #include <stddef.h>
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include <map>
 #include "tsl/robin_map.h"
+#include "tsl/robin_set.h"
 
 #define VIRTIO_PCI_COMMON_DFSELECT	0
 #define VIRTIO_PCI_COMMON_DF		4
@@ -34,6 +36,9 @@
 
 #define VIRTIO_QUEUE_MAX 1024
 
+#define PAGE_SHIFT 12
+#define PAGE_NUM(x) ((x)>>PAGE_SHIFT)
+
 struct ConfigSpace;
 
 #define VRING_AVAIL_HEADER_SIZE 4
@@ -45,6 +50,39 @@ struct VRing {
         VRING_AVAIL,
         VRING_USED 
     } type; // Type of the ring
+    bx_address start() const {
+        return addr;
+    }
+    bx_address end() const {
+        if (type == VRING_DESC) {
+            return addr + size*0x10 - 1;
+        }
+        else{
+            return addr + 4 + size*2 - 1;
+        }
+    }
+    bx_address start_pagenum() const {
+        return PAGE_NUM(start());
+    }
+    bx_address end_pagenum() const {
+        return PAGE_NUM(end());
+    }
+    bool in_ring(bx_address address) const {
+        return address >= start() && address <= end();
+    }
+    const char* type_str() const {
+        switch (type) {
+        case VRING_AVAIL:
+            return "avail";
+            break;
+        case VRING_USED:
+            return "used";
+            break;
+        case VRING_DESC:
+            return "desc";  
+            break;
+        }
+    }
 };
 
 struct VQueue {
@@ -83,6 +121,7 @@ struct VirtioDev {
     VirtioDev();
     char name[VIRTIO_NAME_MAX]; // Name of the device
     VQueue queues[VIRTIO_QUEUE_MAX];
+    size_t queue_num;
     unsigned long features; // Device features
     ConfigSpace common_cfg; // Common configuration space
     ConfigSpace isr_cfg;
@@ -93,10 +132,15 @@ struct VirtioDev {
 
 class VQueueManager {
 public:
+    typedef tsl::robin_set<const VRing*> VRingSet;
     static bool create_virtio_device(const std::string& name);
     static void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
+    static void group_vrings_by_page();
+    static const VRing* get_belonging_vring(bx_address address);
 private:
+    static void group_vring_by_page(const VRing& vring);
     static tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
+    static tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
 };
 
 #endif
