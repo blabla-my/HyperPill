@@ -3,9 +3,10 @@
 
 #include "config.h"
 #include <stddef.h>
-#include "fuzz.h"
 #include "bochs.h"
 #include "cpu/cpu.h"
+#include <map>
+#include "tsl/robin_map.h"
 
 #define VIRTIO_PCI_COMMON_DFSELECT	0
 #define VIRTIO_PCI_COMMON_DF		4
@@ -33,13 +34,16 @@
 
 #define VIRTIO_QUEUE_MAX 1024
 
+struct ConfigSpace;
+
+#define VRING_AVAIL_HEADER_SIZE 4
 struct VRing {
     size_t size; // Size of the ring
     size_t addr; // Address of the ring
-    enum {
-        VRING_DESC = 0,
-        VRING_AVAIL = 1,
-        VRING_USED = 2
+    enum Type {
+        VRING_DESC = 1,
+        VRING_AVAIL,
+        VRING_USED 
     } type; // Type of the ring
 };
 
@@ -55,21 +59,44 @@ struct VQueue {
 struct ConfigSpace {
     unsigned long address; // Address of the config space
     size_t size;        // Size of the config space
-    unsigned readw(size_t offset);
-    bx_address avail_ring_addr();
-    bx_address used_ring_addr();
-    bx_address desc_ring_addr();
-    size_t queue_size();
-    bool writew(size_t offset, unsigned value);
+    enum ConfigSpaceType {
+        COMMON=1,
+        ISR,
+        DEVICE,
+        NOTIFY
+    } type;
+    unsigned long read(size_t offset, size_t size) const;
+    bx_address get_avail_ring_addr() const;
+    bx_address get_used_ring_addr() const;
+    bx_address get_desc_ring_addr() const;
+    size_t get_queue_size() const;
+    size_t get_queue_num() const;
+    size_t get_queue_sel() const;
+    void set_queue_num(size_t num) const;
+    void set_queue_sel(size_t sel) const;
+
+    bool write(size_t offset, size_t size, unsigned long value) const;
 };
 
+#define VIRTIO_NAME_MAX 64
 struct VirtioDev {
+    VirtioDev();
+    char name[VIRTIO_NAME_MAX]; // Name of the device
     VQueue queues[VIRTIO_QUEUE_MAX];
     unsigned long features; // Device features
     ConfigSpace common_cfg; // Common configuration space
     ConfigSpace isr_cfg;
     ConfigSpace device_cfg; // Device-specific configuration space
     ConfigSpace notify_cfg; // Notification configuration space
+    void enumerate_queues_from_common_cfg();
+};
+
+class VQueueManager {
+public:
+    static bool create_virtio_device(const std::string& name);
+    static void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
+private:
+    static tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
 };
 
 #endif

@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "task.h"
+#include "vqueue.h"
 #include <cstdint>
 #include <stdint.h>
 #include <map>

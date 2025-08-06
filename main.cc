@@ -549,9 +549,12 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	reset_bx_vm();
 
 	/* Enumerate or Load the cached list of PIO and MMIO Regions */
+	/* Also, enumerate virtio queues */
+	/* Since virtio queue enumeration would inject MMIOs, reset bx vm. */
 	fuzzenum = true;
 	init_regions(icp_db_path);
 	fuzzenum = false;
+	reset_bx_vm();
 
 	/* iterate task list to find hypervisor-related tasks */
 	bx_address init_task = sym_to_addr("vmlinux", "init_task");

@@ -41,17 +41,16 @@ void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, 
                 add_mmio_region(start, end-start);
             
             if (line.find("virtio-pci-common") != std::string::npos) {
-                ConfigSpace common_cfg {
-                    .address = start,
-                    .size = end - start
-                };
-                printf("virtio-pci-common: addr %lx, size %lx\n", common_cfg.address, common_cfg.size);
-                bx_address avail_addr = common_cfg.avail_ring_addr();
-                bx_address used_addr = common_cfg.used_ring_addr();
-                bx_address desc_addr = common_cfg.desc_ring_addr();
-                size_t queue_size = common_cfg.queue_size();
-                printf("virtio-pci-common: avail %lx, used %lx, desc %lx, queue size %lx\n",
-                       avail_addr, used_addr, desc_addr, queue_size);
+                // line will be "virtio-pci-common-virtio-xxx"
+                // use regex to extract the device name
+                std::regex dev_regex("virtio-pci-common-(virtio-.*)");
+                std::smatch dev_match;
+                if(std::regex_search(line, dev_match, dev_regex)){
+                    std::string dev_name = dev_match[1].str();
+                    printf("Found virtio device: %s\n", dev_name.c_str());
+                    if (VQueueManager::create_virtio_device(dev_name))
+                        VQueueManager::add_config_space(dev_name, ConfigSpace::COMMON, start, end-start);
+                }
             }
 
             printf("Will fuzz: %s\n", line.c_str());
