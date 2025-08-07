@@ -584,11 +584,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDPMC(bxInstruction_c *i)
 
   if (BX_CPUID_SUPPORT_ISA_EXTENSION(BX_ISA_SSE2)) { // Pentium 4 processor (see cpuid.cc)
     if ((ECX & 0x7fffffff) >= 18)
-      exception(BX_GP_EXCEPTION, 0);
+      BX_DEBUG(("Invalid PMC Index %d\n", ECX));
   }
   else {
     if ((ECX & 0xffffffff) >= 2)
-      exception(BX_GP_EXCEPTION, 0);
+      BX_DEBUG(("Invalid PMC Index %d\n", ECX));
   }
 
   // Most counters are for hardware specific details, which
@@ -601,7 +601,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDPMC(bxInstruction_c *i)
   RAX = 0;
   RDX = 0; // if P4 and ECX & 0x10000000, then always 0 (short read 32 bits)
 
-  BX_ERROR(("RDPMC: Performance Counters Support not implemented yet"));
+  // we don't abort
+  // BX_ERROR(("RDPMC: Performance Counters Support not implemented yet"));
 #endif
 
   BX_NEXT_INSTR(i);
@@ -611,8 +612,12 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDPMC(bxInstruction_c *i)
 
 Bit64u BX_CPU_C::get_TSC(void)
 {
+  int tsc_factor = 1;
+  if (getenv("TSC_FACTOR")) {
+	tsc_factor = strtol(getenv("TSC_FACTOR"), NULL, 10);
+  }
   Bit64u tsc = bx_pc_system.time_ticks() + BX_CPU_THIS_PTR tsc_adjust;
-  return 0x441168e0000 + tsc * 100;
+  return 0x441168e0000 + tsc * tsc_factor;
 }
 
 #if BX_SUPPORT_VMX || BX_SUPPORT_SVM

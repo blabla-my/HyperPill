@@ -43,6 +43,7 @@ void handle_breakpoints(bxInstruction_c *insn) {
     if(rip < min_bp || rip > max_bp)
         return;
     for (unsigned int i =0; i<bp_index; i++){
+    for (unsigned int i =0; i<bp_index; i++){
         if(breakpoints[i].first  == rip)
             breakpoints[i].second(insn);
     }
@@ -153,6 +154,10 @@ void apply_breakpoints_linux() {
             printf("ASAN Deadly Signal\n");
             fuzz_emu_stop_crash("asan-deadly-signal");
             });
+    add_breakpoint(sym_to_addr("libc.so", "abort@@GLIBC_2.2.5"), [](bxInstruction_c *i) {
+            fuzz_emu_stop_crash("abort");
+    });
+
     add_breakpoint(sym_to_addr("vmm", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("libc", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("ld-musl", "__stdio_write"), bp__stdio_write);
