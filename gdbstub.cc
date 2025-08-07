@@ -565,7 +565,7 @@ static void debug_loop(void)
         {
           write_signal(&buf[1], SIGTRAP);
           auto s = addr_to_sym(RIP);
-          const char *current_binary = s.first.c_str();
+          const char *current_binary = s.bin.c_str();
           if ((strlen(current_binary) > 1) && strncmp(last_seen_binary, current_binary, strlen(current_binary))) {
             memcpy(last_seen_binary, current_binary, strlen(current_binary));
             buf[0] = 'T';
@@ -604,7 +604,7 @@ static void debug_loop(void)
           write_signal(&buf[1], SIGTRAP);
         }
         auto s = addr_to_sym(RIP);
-        const char *current_binary = s.first.c_str();
+        const char *current_binary = s.bin.c_str();
         if ((strlen(current_binary) > 1) && strncmp(last_seen_binary, current_binary, strlen(current_binary))) {
           memcpy(last_seen_binary, current_binary, strlen(current_binary));
           buf[0] = 'T';
@@ -832,7 +832,7 @@ static void debug_loop(void)
         else if (strncmp(&buffer[1], "Xfer:exec-file:read::", strlen("Xfer:exec-file:read::")) == 0)
         {
           auto s = addr_to_sym(RIP);
-          const char *current_binary = s.first.c_str();
+          const char *current_binary = s.bin.c_str();
           sprintf(obuf, "l%s", current_binary);
           memcpy(last_seen_binary, current_binary, strlen(current_binary));
           put_reply(obuf);

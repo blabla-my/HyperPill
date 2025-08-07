@@ -43,7 +43,6 @@ void handle_breakpoints(bxInstruction_c *insn) {
     if(rip < min_bp || rip > max_bp)
         return;
     for (unsigned int i =0; i<bp_index; i++){
-    for (unsigned int i =0; i<bp_index; i++){
         if(breakpoints[i].first  == rip)
             breakpoints[i].second(insn);
     }
