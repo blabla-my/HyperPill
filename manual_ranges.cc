@@ -4,7 +4,7 @@
 #include "fuzz.h"
 #include "conveyor.h"
 
-#include "vqueue.h"
+#include "virtio.h"
 #include <cstdio>
 #include <fstream>
 #include <regex>

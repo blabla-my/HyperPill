@@ -72,7 +72,7 @@ static void init_cpu(void) {
 	BX_CPU(id)->sanity_checks();
 }
 
-void start_cpu() {
+void start_cpu(bool enumerating) {
 	if (fuzzing && (fuzz_unhealthy_input || fuzz_do_not_continue))
 		return;
 
@@ -87,7 +87,7 @@ void start_cpu() {
 	reset_op_cov();
 
 	BX_CPU(id)->fuzz_executing_input = true;
-	if (bx_dbg.gdbstub_enabled)
+	if (bx_dbg.gdbstub_enabled && !enumerating)
 		hp_gdbstub_debug_loop();
 	while (BX_CPU(id)->fuzz_executing_input) {
 		BX_CPU(id)->cpu_loop();

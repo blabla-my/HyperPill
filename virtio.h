@@ -2,6 +2,7 @@
 #define VQUEUE_H
 
 #include "config.h"
+#include <cstdint>
 #include <sstream>
 #include <stddef.h>
 #include "bochs.h"
@@ -39,28 +40,37 @@
 #define PAGE_SHIFT 12
 #define PAGE_NUM(x) ((x)>>PAGE_SHIFT)
 
+#define GUEST_MEM_SIZE 0x100000000UL 
+
 struct ConfigSpace;
+
+struct vring_desc {
+	uint64_t addr;
+	uint32_t len;
+	uint16_t flags;
+	uint16_t next;
+};
+
+typedef uint16_t vring_avail_elem;
+
+struct vring_used_elem {
+	/* Index of start of used descriptor chain. */
+	uint32_t id;
+	/* Total length of the descriptor chain which was used (written to) */
+	uint32_t len;
+};
 
 #define VRING_AVAIL_HEADER_SIZE 4
 struct VRing {
-    size_t size; // Size of the ring
+    size_t size; // the number of items in the ring
     size_t addr; // Address of the ring
     enum Type {
         VRING_DESC = 1,
         VRING_AVAIL,
         VRING_USED 
     } type; // Type of the ring
-    bx_address start() const {
-        return addr;
-    }
-    bx_address end() const {
-        if (type == VRING_DESC) {
-            return addr + size*0x10 - 1;
-        }
-        else{
-            return addr + 4 + size*2 - 1;
-        }
-    }
+    bx_address start() const {return addr;}
+    bx_address end() const {return addr;} 
     bx_address start_pagenum() const {
         return PAGE_NUM(start());
     }
@@ -68,27 +78,39 @@ struct VRing {
         return PAGE_NUM(end());
     }
     bool in_ring(bx_address address) const {
-        return address >= start() && address <= end();
+        return address >= start() && address < end();
     }
-    const char* type_str() const {
-        switch (type) {
-        case VRING_AVAIL:
-            return "avail";
-            break;
-        case VRING_USED:
-            return "used";
-            break;
-        case VRING_DESC:
-            return "desc";  
-            break;
-        }
+    const char* type_str() const;
+};
+
+struct AvailRing: VRing {
+    bx_address end() {
+        return addr + 2*sizeof(uint16_t) + size*sizeof(vring_avail_elem);
     }
+    int ingest_elem(vring_avail_elem*) const;
+    const char* type_str() const {return "avail";}
+};
+
+struct UsedRing: VRing {
+    bx_address end() {
+        return addr + 2*sizeof(uint16_t) + size*sizeof(vring_used_elem);
+    }
+    int ingest_elem(vring_used_elem*) const;
+    const char* type_str() const {return "used";}
+};
+
+struct DescRing: VRing {
+    bx_address end() {
+        return addr + size*sizeof(vring_desc);
+    }
+    int ingest_elem(vring_desc*) const;
+    const char* type_str() const {return "used";}
 };
 
 struct VQueue {
-    VRing desc;  // Descriptor ring
-    VRing avail; // Available ring
-    VRing used;  // Used ring
+    DescRing desc_ring;  // Descriptor ring
+    AvailRing avail_ring; // Available ring
+    UsedRing used_ring;  // Used ring
     size_t num;         // Number of descriptors
     size_t last_avail_idx; // Last available index processed
     size_t last_used_idx;  // Last used index processed

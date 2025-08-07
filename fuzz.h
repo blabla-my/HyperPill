@@ -3,7 +3,7 @@
 
 #include "config.h"
 #include "task.h"
-#include "vqueue.h"
+#include "virtio.h"
 #include <cstdint>
 #include <stdint.h>
 #include <map>
@@ -199,7 +199,7 @@ void ept_mark_page_table();
 void ept_locate_pc();
 void mark_page_not_guest(bx_phy_address addr, int level);
 bool frame_is_guest(bx_phy_address addr);
-void start_cpu();
+void start_cpu(bool enumerating = false);
 void dump_regs();
 unsigned long int get_icount();
 unsigned long int get_pio_icount();

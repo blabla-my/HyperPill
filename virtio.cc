@@ -1,10 +1,40 @@
-#include "vqueue.h"
+#include "virtio.h"
 #include "bochs.h"
 #include "config.h"
 #include "cpu/vmx.h"
 #include "fuzz.h"
 #include <cstddef>
 #include <cstdint>
+#include "conveyor.h"
+
+/* VRing */
+/* AvailRing */
+int AvailRing::ingest_elem(vring_avail_elem* avail_elem_ptr) const {
+	return ic_ingest16(avail_elem_ptr, 0, size);
+}
+
+/* UsedRing */
+int UsedRing::ingest_elem(vring_used_elem* used_elem_ptr) const {
+	assert(sizeof(vring_used_elem) == sizeof(uint64_t));
+	return ic_ingest64((uint64_t*)used_elem_ptr, 0, -1);
+}
+
+/* DescRing */
+int DescRing::ingest_elem(vring_desc* desc_ptr) const {
+	if (!ic_ingest64(&desc_ptr->addr, 0, GUEST_MEM_SIZE)){
+		return -1;	
+	}
+	if (!ic_ingest32(&desc_ptr->len, 0, -1)){
+		return -1;	
+	}
+	if (!ic_ingest16(&desc_ptr->flags, 0, -1)){
+		return -1;
+	}
+	if (!ic_ingest16(&desc_ptr->next, 0, size)){
+		return -1;
+	}
+	return 0;
+}
 
 /* VQueue */
 
@@ -28,7 +58,7 @@ unsigned long ConfigSpace::read(size_t offset, size_t size) const {
 		printf("Unsupported read size %zu in ConfigSpace::read\n", size);
 		return 0;
 	}
-    start_cpu();
+    start_cpu(true);
     
 	unsigned long mask = (1ULL << (size * 8)) - 1;
     unsigned long value = BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
@@ -111,7 +141,7 @@ bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
 	if (!inject_ok) 
 		return false;
 
-    start_cpu();
+    start_cpu(true);
     
     return true;
 }
@@ -142,9 +172,9 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 		bx_address used_ring_addr = common_cfg.get_used_ring_addr();
 		bx_address desc_ring_addr = common_cfg.get_desc_ring_addr();
 		if (i < VIRTIO_QUEUE_MAX) {
-			queues[i].desc = {queue_size, desc_ring_addr, VRing::VRING_DESC};
-			queues[i].avail = {queue_size, avail_ring_addr, VRing::VRING_AVAIL};
-			queues[i].used = {queue_size, used_ring_addr, VRing::VRING_USED};
+			queues[i].desc_ring = {queue_size, desc_ring_addr, VRing::VRING_DESC};
+			queues[i].avail_ring = {queue_size, avail_ring_addr, VRing::VRING_AVAIL};
+			queues[i].used_ring = {queue_size, used_ring_addr, VRing::VRING_USED};
 			printf("#QUEUE_ENUM dev: %s, queue sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx\n", 
 				   name, i, queue_size, desc_ring_addr, avail_ring_addr, used_ring_addr);
 		} else {
@@ -204,9 +234,9 @@ void VQueueManager::group_vrings_by_page() {
 		const auto& vdev = it.second;
 		for (size_t i = 0; i < vdev.queue_num; i++ ) {
 			const auto& queue = vdev.queues[i];
-			group_vring_by_page(queue.avail);
-			group_vring_by_page(queue.used);
-			group_vring_by_page(queue.desc);
+			group_vring_by_page(queue.avail_ring);
+			group_vring_by_page(queue.used_ring);
+			group_vring_by_page(queue.desc_ring);
 		}
 	}
 }
