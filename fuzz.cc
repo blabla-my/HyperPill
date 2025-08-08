@@ -100,6 +100,8 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	if (sectionlen < 0x100) {
 		// if DMA read is a reasonable size, obtain fuzz input for the
 		// entire DMA read
+		bx_address gpa = lookup_gpa_by_hpa(addr);
+		const VRing* vring = VQueueManager::get_belonging_vring(gpa);
 		size_t l = len;
 		buf = ic_ingest_buf(&l, SEPARATOR, SEPARATOR_LEN, -1, 0);
 		if (buf == NULL) {

@@ -60,57 +60,83 @@ struct vring_used_elem {
 	uint32_t len;
 };
 
-#define VRING_AVAIL_HEADER_SIZE 4
 struct VRing {
     size_t size; // the number of items in the ring
-    size_t addr; // Address of the ring
+    bx_address addr; // Address of the ring
     enum Type {
+        VRING_BASE = 0,
         VRING_DESC = 1,
         VRING_AVAIL,
         VRING_USED 
     } type; // Type of the ring
+    enum Align {
+        VRING_BASE_ALIGN = 1,
+        VRING_AVAIL_ALIGN = 2,
+        VRING_USED_ALIGN = 4,
+        VRING_DESC_ALIGN = 16
+    } align;
+    VRing() {}
+    VRing(size_t size, bx_address addr): size(size), addr(addr), type(VRING_BASE), align(VRING_BASE_ALIGN) {}
     bx_address start() const {return addr;}
-    bx_address end() const {return addr;} 
+    virtual bx_address end() const {return addr;} 
     bx_address start_pagenum() const {
         return PAGE_NUM(start());
     }
     bx_address end_pagenum() const {
-        return PAGE_NUM(end());
+        return PAGE_NUM(end()-1);
     }
     bool in_ring(bx_address address) const {
         return address >= start() && address < end();
     }
-    const char* type_str() const;
+    virtual int ingest_elem(void*) const {return 0;};
+    virtual const char* type_str() const {return "base";};
 };
 
 struct AvailRing: VRing {
-    bx_address end() {
-        return addr + 2*sizeof(uint16_t) + size*sizeof(vring_avail_elem);
+    using VRing::VRing;
+    AvailRing(size_t size, bx_address addr): VRing(size,addr) {
+        type = VRING_AVAIL;
+        align = VRING_AVAIL_ALIGN;
     }
-    int ingest_elem(vring_avail_elem*) const;
-    const char* type_str() const {return "avail";}
+    bx_address end() const override {
+        return addr + 3*sizeof(uint16_t) + size*sizeof(vring_avail_elem);
+    }
+    int ingest_elem(void*) const override;
+    const char* type_str() const override {return "avail";}
 };
 
 struct UsedRing: VRing {
-    bx_address end() {
+    using VRing::VRing;
+    UsedRing(size_t size, bx_address addr): VRing(size,addr) {
+        type = VRING_USED;
+        align = VRING_USED_ALIGN;
+    }
+    bx_address end() const override {
         return addr + 2*sizeof(uint16_t) + size*sizeof(vring_used_elem);
     }
-    int ingest_elem(vring_used_elem*) const;
-    const char* type_str() const {return "used";}
+    int ingest_elem(void*) const override;
+    const char* type_str() const override {return "used";}
 };
 
 struct DescRing: VRing {
-    bx_address end() {
+    using VRing::VRing;
+    DescRing(size_t size, bx_address addr): VRing(size,addr) {
+        type = VRING_DESC;
+        align = VRING_DESC_ALIGN;
+    }
+    bx_address end() const override {
         return addr + size*sizeof(vring_desc);
     }
-    int ingest_elem(vring_desc*) const;
-    const char* type_str() const {return "used";}
+    int ingest_elem(void*) const override;
+    const char* type_str() const override {return "used";}
 };
 
 struct VQueue {
-    DescRing desc_ring;  // Descriptor ring
-    AvailRing avail_ring; // Available ring
-    UsedRing used_ring;  // Used ring
+    VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL),
+        num(0), last_avail_idx(0), last_used_idx(0) {}
+    DescRing* desc_ring;  // Descriptor ring
+    AvailRing* avail_ring; // Available ring
+    UsedRing* used_ring;  // Used ring
     size_t num;         // Number of descriptors
     size_t last_avail_idx; // Last available index processed
     size_t last_used_idx;  // Last used index processed
@@ -134,7 +160,6 @@ struct ConfigSpace {
     size_t get_queue_sel() const;
     void set_queue_num(size_t num) const;
     void set_queue_sel(size_t sel) const;
-
     bool write(size_t offset, size_t size, unsigned long value) const;
 };
 
@@ -142,7 +167,7 @@ struct ConfigSpace {
 struct VirtioDev {
     VirtioDev();
     char name[VIRTIO_NAME_MAX]; // Name of the device
-    VQueue queues[VIRTIO_QUEUE_MAX];
+    VQueue* queues[VIRTIO_QUEUE_MAX];
     size_t queue_num;
     unsigned long features; // Device features
     ConfigSpace common_cfg; // Common configuration space
@@ -160,7 +185,7 @@ public:
     static void group_vrings_by_page();
     static const VRing* get_belonging_vring(bx_address address);
 private:
-    static void group_vring_by_page(const VRing& vring);
+    static void group_vring_by_page(const VRing* vring);
     static tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
     static tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
 };

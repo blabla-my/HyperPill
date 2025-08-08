@@ -9,18 +9,20 @@
 
 /* VRing */
 /* AvailRing */
-int AvailRing::ingest_elem(vring_avail_elem* avail_elem_ptr) const {
+int AvailRing::ingest_elem(void* opaque) const {
+	auto* avail_elem_ptr = (vring_avail_elem*)opaque;
 	return ic_ingest16(avail_elem_ptr, 0, size);
 }
 
 /* UsedRing */
-int UsedRing::ingest_elem(vring_used_elem* used_elem_ptr) const {
-	assert(sizeof(vring_used_elem) == sizeof(uint64_t));
+int UsedRing::ingest_elem(void* opaque) const {
+	auto* used_elem_ptr = (vring_used_elem*)opaque;
 	return ic_ingest64((uint64_t*)used_elem_ptr, 0, -1);
 }
 
 /* DescRing */
-int DescRing::ingest_elem(vring_desc* desc_ptr) const {
+int DescRing::ingest_elem(void* opaque) const {
+	auto* desc_ptr = (vring_desc*)opaque;
 	if (!ic_ingest64(&desc_ptr->addr, 0, GUEST_MEM_SIZE)){
 		return -1;	
 	}
@@ -33,6 +35,8 @@ int DescRing::ingest_elem(vring_desc* desc_ptr) const {
 	if (!ic_ingest16(&desc_ptr->next, 0, size)){
 		return -1;
 	}
+	// desc_ptr->addr should be page-aligned
+	desc_ptr->addr = desc_ptr->addr & (~((1<<PAGE_SHIFT) - 1));
 	return 0;
 }
 
@@ -148,7 +152,8 @@ bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
 
 /* VirtioDev */
 VirtioDev::VirtioDev() {
-	memset(this, 0, sizeof(VirtioDev));
+	// memset(this, 0, sizeof(VirtioDev));
+	memset(this, 0, sizeof(name));
 }
 
 void VirtioDev::enumerate_queues_from_common_cfg() {
@@ -172,9 +177,10 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 		bx_address used_ring_addr = common_cfg.get_used_ring_addr();
 		bx_address desc_ring_addr = common_cfg.get_desc_ring_addr();
 		if (i < VIRTIO_QUEUE_MAX) {
-			queues[i].desc_ring = {queue_size, desc_ring_addr, VRing::VRING_DESC};
-			queues[i].avail_ring = {queue_size, avail_ring_addr, VRing::VRING_AVAIL};
-			queues[i].used_ring = {queue_size, used_ring_addr, VRing::VRING_USED};
+			queues[i] = new VQueue{};
+			queues[i]->desc_ring = new DescRing{queue_size, desc_ring_addr};
+			queues[i]->avail_ring = new AvailRing{queue_size, avail_ring_addr};
+			queues[i]->used_ring = new UsedRing{queue_size, used_ring_addr};
 			printf("#QUEUE_ENUM dev: %s, queue sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx\n", 
 				   name, i, queue_size, desc_ring_addr, avail_ring_addr, used_ring_addr);
 		} else {
@@ -233,20 +239,22 @@ void VQueueManager::group_vrings_by_page() {
 	for (const auto& it : virtio_devs) {
 		const auto& vdev = it.second;
 		for (size_t i = 0; i < vdev.queue_num; i++ ) {
-			const auto& queue = vdev.queues[i];
-			group_vring_by_page(queue.avail_ring);
-			group_vring_by_page(queue.used_ring);
-			group_vring_by_page(queue.desc_ring);
+			const auto* queue = vdev.queues[i];
+			group_vring_by_page(queue->avail_ring);
+			group_vring_by_page(queue->used_ring);
+			group_vring_by_page(queue->desc_ring);
 		}
 	}
 }
 
-void VQueueManager::group_vring_by_page(const VRing& vring) {
-	for (auto pn = vring.start_pagenum(); pn <= vring.end_pagenum(); pn++){
+void VQueueManager::group_vring_by_page(const VRing* vring) {
+	for (auto pn = vring->start_pagenum(); pn <= vring->end_pagenum(); pn++){
+		if (!pn) continue;
 		if (!rings_grouped_by_page.contains(pn)) {
 			rings_grouped_by_page[pn] = {};
 		}
-		rings_grouped_by_page[pn].insert(&vring);
+		printf("group vring: %lx -> (%lx, %lx)\n", pn, vring->start(), vring->end());
+		rings_grouped_by_page[pn].insert(vring);
 	}
 }
 
