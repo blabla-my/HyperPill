@@ -282,7 +282,9 @@ void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
         our_stacktrace.push_back({branch_rip, new_rip, BX_CPU(id)->cr3});
         /* fuzz_stacktrace(); */
     } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
+        calltrace_t last_call = our_stacktrace.back();
         our_stacktrace.pop_back();
+        handle_breakpoints_func_call(last_call.callee, new_rip);
         /* fuzz_stacktrace(); */
     }
     add_edge(branch_rip, new_rip);
@@ -297,7 +299,9 @@ void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
         our_stacktrace.push_back({prev_rip, new_rip, BX_CPU(id)->cr3});
         /* fuzz_stacktrace(); */
     } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
+        calltrace_t last_call = our_stacktrace.back();
         our_stacktrace.pop_back();
+        handle_breakpoints_func_call(last_call.callee, new_rip);
         /* fuzz_stacktrace(); */
     }
 

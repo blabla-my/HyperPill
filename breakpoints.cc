@@ -1,3 +1,7 @@
+#include "bochs.h"
+#include "config.h"
+#include "cpu/decoder/decoder.h"
+#include "cpu/decoder/instr.h"
 #include "fuzz.h"
 #include "task.h"
 #include <string>
@@ -28,9 +32,14 @@
 /*
  * These breakpoints need to be pretty fast
  */
-#define MAX_BPS 32 
+#define MAX_BPS 16 
 using breakpoint_handler_t = void (*)(bxInstruction_c *);
-std::pair<bx_address, breakpoint_handler_t> breakpoints[MAX_BPS]; 
+struct breakpoint_info_t {
+    bx_address addr;
+    bool after_ret;
+    breakpoint_handler_t handler;
+};
+breakpoint_info_t breakpoints[MAX_BPS]; 
 static unsigned int bp_index;
 
 bx_address min_bp = -1;
@@ -43,17 +52,25 @@ void handle_breakpoints(bxInstruction_c *insn) {
     if(rip < min_bp || rip > max_bp)
         return;
     for (unsigned int i =0; i<bp_index; i++){
-        if(breakpoints[i].first  == rip)
-            breakpoints[i].second(insn);
+        if(!breakpoints[i].after_ret && breakpoints[i].addr == rip)
+            breakpoints[i].handler(insn);
+    }
+}
+void handle_breakpoints_func_call(bx_address func, bx_address rip){
+    if (rip < min_bp || rip>max_bp)
+        return;
+    for (unsigned int i =0; i<bp_index; i++){
+        if(breakpoints[i].after_ret && breakpoints[i].addr == func)
+            breakpoints[i].handler(NULL);
     }
 }
 
-bx_address add_breakpoint(bx_address addr, const breakpoint_handler_t h) {
+bx_address add_breakpoint(bx_address addr, const breakpoint_handler_t h, bool after_ret = false) {
     if(!addr)
         return addr;
     assert(bp_index < MAX_BPS);
     printf("Applying breakpoint to: %lx %s\n", addr, addr_to_sym(addr).symbol.c_str());
-    breakpoints[bp_index++] = std::make_pair(addr, h);
+    breakpoints[bp_index++] = {.addr = addr, .after_ret = after_ret, .handler = h};
     if(addr > max_bp)
         max_bp = addr;
     if(addr< min_bp)
@@ -201,6 +218,12 @@ void apply_breakpoints_linux() {
     //         fuzz_emu_stop_crash("abort");
     //     });
     // }
+
+    /* breakpoints after the function finish */
+    add_breakpoint(sym_to_addr("qemu-system", "virtqueue_pop"), [](bxInstruction_c *i) {
+        printf("Breakpoint: virtqueue_pop finished, RIP: %lx, RAX: %lx\n", 
+            BX_CPU(x)->get_rip(), BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx);
+    }, true);
 }
 
 

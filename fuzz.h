@@ -286,6 +286,7 @@ void check_write_coverage();
 
 // breakpoints.cc
 void handle_breakpoints(bxInstruction_c *i);
+void handle_breakpoints_func_call(bx_address func, bx_address rip);
 void handle_syscall_hooks(bxInstruction_c *i);
 void apply_breakpoints_linux();
 
