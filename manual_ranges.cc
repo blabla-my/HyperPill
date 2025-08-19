@@ -43,7 +43,7 @@ void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, 
             if (line.find("virtio-pci-common") != std::string::npos) {
                 // line will be "virtio-pci-common-virtio-xxx"
                 // use regex to extract the device name
-                std::regex dev_regex("virtio-pci-common-(virtio-.*)");
+                std::regex dev_regex("virtio-pci-common-(.*)");
                 std::smatch dev_match;
                 if(std::regex_search(line, dev_match, dev_regex)){
                     std::string dev_name = dev_match[1].str();

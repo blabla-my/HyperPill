@@ -1,6 +1,7 @@
 #include "virtio.h"
 #include "bochs.h"
 #include "config.h"
+#include "cpu/cpu.h"
 #include "cpu/vmx.h"
 #include "fuzz.h"
 #include <cstddef>
@@ -8,35 +9,103 @@
 #include "conveyor.h"
 
 /* VRing */
+VRing::VRing(size_t size, bx_address addr_gpa): size(size), addr_gpa(addr_gpa), 
+										type(VRING_BASE), align(VRING_BASE_ALIGN) {
+	// gpa -> hpa
+	addr_hpa = 0UL;
+	vmcs_translate_guest_physical_ept(addr_gpa, &addr_hpa, NULL);
+	printf("VRing: hpa %lx\n", addr_hpa);
+}
+
+int VRing::ingest_idx(uint16_t *idx) const {
+	// read last index
+	if (!addr_hpa) return -2;
+	uint16_t last_idx;
+	BX_CPU(x)->access_read_physical(addr_hpa + sizeof(uint16_t), sizeof(last_idx), &last_idx);
+	if(ic_ingest16(idx, last_idx, last_idx + 0x30) < 0) {
+		printf("failed to inject vring index!\n");
+		return -1;
+	}
+	printf("!virtio: inject vring %s index %.2x\n", type_str(), *idx);
+	return 0;
+}
+
 /* AvailRing */
 int AvailRing::ingest_elem(void* opaque) const {
 	auto* avail_elem_ptr = (vring_avail_elem*)opaque;
-	return ic_ingest16(avail_elem_ptr, 0, size);
+	if(ic_ingest16(avail_elem_ptr, 0, size) < 0){
+		return -1;
+	}
+	printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
+	for (int i = 0; i < element_size(); i++){
+		printf("%.2x", *((uint8_t*)opaque + i));
+	}
+	printf("\n");
+	return 0;
+}
+VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
+	bx_address offset = address - start();
+	if (offset < sizeof(uint16_t)){
+		return VRing::FILED_TYPE::FLAGS;
+	}
+	else if (offset < sizeof(uint16_t)*2) {
+		return VRing::FILED_TYPE::INDEX;
+	} else {
+		return VRing::FILED_TYPE::VRING_ELEM;
+	}
 }
 
 /* UsedRing */
 int UsedRing::ingest_elem(void* opaque) const {
 	auto* used_elem_ptr = (vring_used_elem*)opaque;
-	return ic_ingest64((uint64_t*)used_elem_ptr, 0, -1);
+	if(ic_ingest64((uint64_t*)used_elem_ptr, 0, -1) < 0){
+		return -1;
+	}
+	printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
+	for (int i = 0; i < element_size(); i++){
+		printf("%.2x", *((uint8_t*)opaque + i));
+	}
+	printf("\n");
+	return 0;
+}
+VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
+	bx_address offset = address - start();
+	if (offset < sizeof(uint16_t)){
+		return VRing::FILED_TYPE::FLAGS;
+	}
+	else if (offset < sizeof(uint16_t)*2) {
+		return VRing::FILED_TYPE::INDEX;
+	} else {
+		return VRing::FILED_TYPE::VRING_ELEM;
+	}
 }
 
 /* DescRing */
 int DescRing::ingest_elem(void* opaque) const {
 	auto* desc_ptr = (vring_desc*)opaque;
-	if (!ic_ingest64(&desc_ptr->addr, 0, GUEST_MEM_SIZE)){
+	if (ic_ingest64(&desc_ptr->addr, 0x10000, GUEST_MEM_SIZE) < 0){
 		return -1;	
 	}
-	if (!ic_ingest32(&desc_ptr->len, 0, -1)){
+	// this upperbound and lowerbound are just for testing
+	if (ic_ingest32(&desc_ptr->len, 0x10, 0x1000) < 0){
 		return -1;	
 	}
-	if (!ic_ingest16(&desc_ptr->flags, 0, -1)){
+	if (ic_ingest16(&desc_ptr->flags, 0, -1) < 0){
 		return -1;
 	}
-	if (!ic_ingest16(&desc_ptr->next, 0, size)){
+	if (ic_ingest16(&desc_ptr->next, 0, size) < 0){
 		return -1;
 	}
 	// desc_ptr->addr should be page-aligned
 	desc_ptr->addr = desc_ptr->addr & (~((1<<PAGE_SHIFT) - 1));
+	// desc_ptr->len should be 0x10-aligned
+	desc_ptr->len = desc_ptr->len & (~0xf);
+	printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x\n", type_str(), element_size(),
+		desc_ptr->addr, desc_ptr->len, desc_ptr->next);
+	for (int i = 0; i < element_size(); i++){
+		printf("%.2x", *((uint8_t*)opaque + i));
+	}
+	printf("\n");
 	return 0;
 }
 

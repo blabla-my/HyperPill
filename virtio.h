@@ -1,5 +1,5 @@
-#ifndef VQUEUE_H
-#define VQUEUE_H
+#ifndef VIRTIO_H
+#define VIRTIO_H
 
 #include "config.h"
 #include <cstdint>
@@ -53,7 +53,7 @@ struct vring_desc {
 
 typedef uint16_t vring_avail_elem;
 
-struct vring_used_elem {
+struct alignas(8) vring_used_elem {
 	/* Index of start of used descriptor chain. */
 	uint32_t id;
 	/* Total length of the descriptor chain which was used (written to) */
@@ -62,7 +62,8 @@ struct vring_used_elem {
 
 struct VRing {
     size_t size; // the number of items in the ring
-    bx_address addr; // Address of the ring
+    bx_address addr_gpa; // Address of the ring
+    bx_address addr_hpa;
     enum Type {
         VRING_BASE = 0,
         VRING_DESC = 1,
@@ -76,9 +77,9 @@ struct VRing {
         VRING_DESC_ALIGN = 16
     } align;
     VRing() {}
-    VRing(size_t size, bx_address addr): size(size), addr(addr), type(VRING_BASE), align(VRING_BASE_ALIGN) {}
-    bx_address start() const {return addr;}
-    virtual bx_address end() const {return addr;} 
+    VRing(size_t size, bx_address addr_gpa);
+    bx_address start() const {return addr_gpa;}
+    virtual bx_address end() const {return addr_gpa;} 
     bx_address start_pagenum() const {
         return PAGE_NUM(start());
     }
@@ -88,47 +89,66 @@ struct VRing {
     bool in_ring(bx_address address) const {
         return address >= start() && address < end();
     }
+    virtual size_t element_size() const {return 0;}
+    virtual size_t ring_offset() const {return 0;}
     virtual int ingest_elem(void*) const {return 0;};
     virtual const char* type_str() const {return "base";};
+
+    enum FILED_TYPE {
+        FLAGS, 
+        INDEX,
+        VRING_ELEM
+    };
+    virtual FILED_TYPE filed_type(bx_address address) const {return FILED_TYPE::VRING_ELEM;};
+
+    virtual int ingest_idx(uint16_t* idx) const ;
 };
 
 struct AvailRing: VRing {
     using VRing::VRing;
-    AvailRing(size_t size, bx_address addr): VRing(size,addr) {
+    AvailRing(size_t size, bx_address addr_gpa): VRing(size,addr_gpa) {
         type = VRING_AVAIL;
         align = VRING_AVAIL_ALIGN;
     }
     bx_address end() const override {
-        return addr + 3*sizeof(uint16_t) + size*sizeof(vring_avail_elem);
+        return addr_gpa + 3*sizeof(uint16_t) + size*sizeof(vring_avail_elem);
     }
+    size_t element_size() const override {return sizeof(vring_avail_elem);}
+    size_t ring_offset() const override {return sizeof(uint16_t)*2;}
     int ingest_elem(void*) const override;
     const char* type_str() const override {return "avail";}
+    virtual FILED_TYPE filed_type(bx_address address) const override;
 };
 
 struct UsedRing: VRing {
     using VRing::VRing;
-    UsedRing(size_t size, bx_address addr): VRing(size,addr) {
+    UsedRing(size_t size, bx_address addr_gpa): VRing(size,addr_gpa) {
         type = VRING_USED;
         align = VRING_USED_ALIGN;
     }
     bx_address end() const override {
-        return addr + 2*sizeof(uint16_t) + size*sizeof(vring_used_elem);
+        return addr_gpa + 2*sizeof(uint16_t) + size*sizeof(vring_used_elem);
     }
+    size_t element_size() const override {return sizeof(vring_used_elem);}
+    size_t ring_offset() const override {return sizeof(uint16_t)*2;}
     int ingest_elem(void*) const override;
     const char* type_str() const override {return "used";}
+    virtual FILED_TYPE filed_type(bx_address address) const override;
 };
 
 struct DescRing: VRing {
     using VRing::VRing;
-    DescRing(size_t size, bx_address addr): VRing(size,addr) {
+    DescRing(size_t size, bx_address addr_gpa): VRing(size,addr_gpa) {
         type = VRING_DESC;
         align = VRING_DESC_ALIGN;
     }
     bx_address end() const override {
-        return addr + size*sizeof(vring_desc);
+        return addr_gpa + size*sizeof(vring_desc);
     }
+    size_t element_size() const override  {return sizeof(vring_desc);}
+    size_t ring_offset() const override {return 0;}
     int ingest_elem(void*) const override;
-    const char* type_str() const override {return "used";}
+    const char* type_str() const override {return "desc";}
 };
 
 struct VQueue {
