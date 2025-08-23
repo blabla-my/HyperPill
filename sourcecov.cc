@@ -203,8 +203,13 @@ void check_write_coverage(){
         return;
     last_coverage_dump=t;
     // following dump
-    write_source_cov();
-    dump_seen_edges_to_file();
+    static char* no_cov = getenv("NOCOV");
+    if (!no_cov)
+        write_source_cov();
+
+    static char* dump_seen_edges = getenv("SEEN_EDGES");
+    if (dump_seen_edges)
+        dump_seen_edges_to_file();
 }
 
 static void sig_handler(int signum) {
@@ -281,6 +286,9 @@ void setup_periodic_coverage(){
         if(!getenv("NOCOV")) {
             last_coverage_dump=time(NULL);
             write_source_cov();
+        }
+        if(getenv("SEEN_EDGES")) {
+            last_coverage_dump=time(NULL);
             dump_seen_edges_to_file();
         }
         master_fuzzer = true;
