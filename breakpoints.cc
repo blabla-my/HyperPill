@@ -221,7 +221,7 @@ void apply_breakpoints_linux() {
 
     /* breakpoints after the function finish */
     add_breakpoint(sym_to_addr("qemu-system", "virtqueue_pop"), [](bxInstruction_c *i) {
-        printf("Breakpoint: virtqueue_pop finished, RIP: %lx, RAX: %lx\n", 
+        printf("#virtqueue_pop: RIP: %lx, RAX: %lx\n", 
             BX_CPU(x)->get_rip(), BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx);
     }, true);
 }
