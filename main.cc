@@ -98,7 +98,10 @@ void start_cpu(bool enumerating) {
 
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
-	assert(res == 1); // Guest page table should be guarded
+	// assert(res == 1); // Guest page table should be guarded
+	if (res != 1){
+		fuzz_emu_stop_unhealthy();
+	}
 	if (phy > maxaddr || !res) {
 		fuzz_do_not_continue = true;
 	}
@@ -525,7 +528,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	signal(SIGUSR1, signal_handler);
 
 	/* write seen edges at exit */
-	std::atexit(dump_seen_edges_to_file);
+	// std::atexit(dump_seen_edges_to_file);
 
 	return 0;
 }
