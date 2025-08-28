@@ -153,7 +153,7 @@ void apply_breakpoints_linux() {
             printf("ASAN error report\n");
             fuzz_stacktrace();
             fuzz_emu_stop_crash("ASAN");
-            });
+            }, true);
     add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
             printf("ASAN GENERIC ERROR\n");
             fuzz_emu_stop_crash("asan-generic-error");
@@ -165,11 +165,11 @@ void apply_breakpoints_linux() {
     add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
             printf("ASAN GENERIC ERROR\n");
             fuzz_emu_stop_crash("asan-generic-error");
-            });
+            }, true);
     add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](bxInstruction_c *i) {
             printf("ASAN Deadly Signal\n");
             fuzz_emu_stop_crash("asan-deadly-signal");
-            });
+            }, true);
     add_breakpoint(sym_to_addr("libc.so", "abort@@GLIBC_2.2.5"), [](bxInstruction_c *i) {
             fuzz_emu_stop_crash("abort");
     });
@@ -221,8 +221,16 @@ void apply_breakpoints_linux() {
 
     /* breakpoints after the function finish */
     add_breakpoint(sym_to_addr("qemu-system", "virtqueue_pop"), [](bxInstruction_c *i) {
+        bx_address elem_ptr = BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx;
         printf("#virtqueue_pop: RIP: %lx, RAX: %lx\n", 
-            BX_CPU(x)->get_rip(), BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx);
+            BX_CPU(x)->get_rip(), elem_ptr);
+        VirtQueueElement elem;
+        if (read_virtqueue_element(elem_ptr, &elem) == 0) {
+            printf("#virtqueue_pop: index: %u, len: %u, ndescs: %u, out_num: %u, in_num: %u\n",
+                elem.index, elem.len, elem.ndescs, elem.out_num, elem.in_num);
+            printf("#virtqueue_pop: in_sgl_size: %zu, out_sgl_size: %zu\n",
+                elem.in_sgl_size(), elem.out_sgl_size());
+        }
     }, true);
 }
 
