@@ -267,7 +267,7 @@ void init_sourcecov(size_t baseaddr) {
         bx_phy_address phystart = 
             BX_CPU(0)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_READ);
 
-        BX_CPU(0)->access_write_linear(start, len, 0, BX_WRITE, 0x0, pc);
+        // BX_CPU(0)->access_write_linear(start, len, 0, BX_WRITE, 0x0, pc);
         phystart = (phystart & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
         add_persistent_memory_range(phystart, len);
     }
