@@ -34,6 +34,12 @@
 #define VIRTIO_PCI_COMMON_Q_RESET	58
 #define VIRTIO_PCI_COMMON_ADM_Q_IDX	60
 #define VIRTIO_PCI_COMMON_ADM_Q_NUM	62
+/* This marks a buffer as continuing via the next field. */
+#define VRING_DESC_F_NEXT	1
+/* This marks a buffer as write-only (otherwise read-only). */
+#define VRING_DESC_F_WRITE	2
+/* This means the buffer contains a list of buffer descriptors. */
+#define VRING_DESC_F_INDIRECT	4
 
 #define VIRTIO_QUEUE_MAX 1024
 
@@ -43,6 +49,41 @@
 #define GUEST_MEM_SIZE 0x100000000UL 
 
 struct ConfigSpace;
+struct VQueue;
+/* desc chaining FSM */
+#define DESC_CHAIN_MAX_LEN 64
+class DescChainFSM {
+public:
+    enum State {
+        WAIT, 
+        INITED,
+        RUNNING,
+        DONE
+    };
+    enum SGType {
+        OUT,
+        IN,
+        TAIL,
+        NONE
+    };
+
+    DescChainFSM() : state(WAIT), sg_num_in(0), sg_num_out(0), used_index() {}
+    void init(unsigned max_len);
+    SGType consume();
+    void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
+    void add_used_index(uint16_t idx) {used_index.insert(idx);}
+    void remove_used_index(uint16_t idx) {used_index.erase(idx);}
+    bool has_used_index(uint16_t idx) {return used_index.contains(idx);}
+    bool is_wait() const {return state == WAIT;}
+    bool is_done() const {return state == DONE;}
+    bool is_running() const {return state == RUNNING;}
+    bool is_inited() const {return state == INITED or state == RUNNING;}
+private:
+    State state;
+    tsl::robin_set<uint16_t> used_index;
+    uint8_t sg_num_in;
+    uint8_t sg_num_out;
+};
 
 struct vring_desc {
 	uint64_t addr;
@@ -60,10 +101,12 @@ struct alignas(8) vring_used_elem {
 	uint32_t len;
 };
 
+#define VQUEUE(vring) ((vring)->queue)
 struct VRing {
     size_t size; // the number of items in the ring
     bx_address addr_gpa; // Address of the ring
     bx_address addr_hpa;
+    VQueue* queue;
     enum Type {
         VRING_BASE = 0,
         VRING_DESC = 1,
@@ -77,7 +120,7 @@ struct VRing {
         VRING_DESC_ALIGN = 16
     } align;
     VRing() {}
-    VRing(size_t size, bx_address addr_gpa);
+    VRing(size_t size, bx_address addr_gpa, VQueue* vqueue);
     bx_address start() const {return addr_gpa;}
     virtual bx_address end() const {return addr_gpa;} 
     bx_address start_pagenum() const {
@@ -106,7 +149,7 @@ struct VRing {
 
 struct AvailRing: VRing {
     using VRing::VRing;
-    AvailRing(size_t size, bx_address addr_gpa): VRing(size,addr_gpa) {
+    AvailRing(size_t size, bx_address addr_gpa, VQueue* queue): VRing(size, addr_gpa, queue) {
         type = VRING_AVAIL;
         align = VRING_AVAIL_ALIGN;
     }
@@ -122,7 +165,7 @@ struct AvailRing: VRing {
 
 struct UsedRing: VRing {
     using VRing::VRing;
-    UsedRing(size_t size, bx_address addr_gpa): VRing(size,addr_gpa) {
+    UsedRing(size_t size, bx_address addr_gpa, VQueue* queue): VRing(size, addr_gpa, queue) {
         type = VRING_USED;
         align = VRING_USED_ALIGN;
     }
@@ -138,7 +181,7 @@ struct UsedRing: VRing {
 
 struct DescRing: VRing {
     using VRing::VRing;
-    DescRing(size_t size, bx_address addr_gpa): VRing(size,addr_gpa) {
+    DescRing(size_t size, bx_address addr_gpa, VQueue* queue): VRing(size,addr_gpa,queue) {
         type = VRING_DESC;
         align = VRING_DESC_ALIGN;
     }
@@ -153,13 +196,15 @@ struct DescRing: VRing {
 
 struct VQueue {
     VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL),
-        num(0), last_avail_idx(0), last_used_idx(0) {}
+        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm() {}
+    void reset();
     DescRing* desc_ring;  // Descriptor ring
     AvailRing* avail_ring; // Available ring
     UsedRing* used_ring;  // Used ring
     size_t num;         // Number of descriptors
     size_t last_avail_idx; // Last available index processed
     size_t last_used_idx;  // Last used index processed
+    DescChainFSM desc_chain_fsm;
 };
 
 struct ConfigSpace {
@@ -204,10 +249,32 @@ public:
     static void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
     static void group_vrings_by_page();
     static const VRing* get_belonging_vring(bx_address address);
+    static void reset_all_queue();
 private:
     static void group_vring_by_page(const VRing* vring);
     static tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
     static tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
 };
+
+typedef uint64_t hwaddr;
+typedef struct VirtQueueElement
+{
+    unsigned int index;
+    unsigned int len;
+    unsigned int ndescs;
+    unsigned int out_num;
+    unsigned int in_num;
+    /* Element has been processed (VIRTIO_F_IN_ORDER) */
+    bool in_order_filled;
+    hwaddr *in_addr;
+    hwaddr *out_addr;
+    struct iovec *in_sg;
+    struct iovec *out_sg;
+    size_t in_sgl_size();
+    size_t out_sgl_size();
+} VirtQueueElement;
+
+int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem);
+
 
 #endif
