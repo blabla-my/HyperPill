@@ -19,6 +19,7 @@ int ic_ingest8(uint8_t *result, uint8_t min, uint8_t max);
 int ic_ingest16(uint16_t *result, uint16_t min, uint16_t max);
 int ic_ingest32(uint32_t *result, uint32_t min, uint32_t max);
 int ic_ingest64(uint64_t *result, uint64_t min, uint64_t max);
+int ic_ingest_uint(void *result, size_t len, unsigned long min, unsigned long max);
 uint8_t* ic_ingest_len(size_t len);
 uint8_t* ic_ingest_buf(size_t *len, const char* token, size_t token_len, int minlen, int string);
 void *ic_advance_until_token(const char* token, size_t len);

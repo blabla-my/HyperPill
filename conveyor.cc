@@ -1,7 +1,9 @@
+#include <cstdint>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
 #include "conveyor.h"
+#include <sys/types.h>
 #include <x86intrin.h>
 #include <stdio.h>
 
@@ -171,6 +173,10 @@ static inline const uint8_t* size_ptr(size_t len){
     return input_cursor - len;
 }
 
+static inline const size_t remaining_input_len(){
+    return input + input_len - input_cursor;
+}
+
 // Return a "cannonical input": one with extraneous bytes removed, and missing
 // bytes inserted (where needed).
 
@@ -299,6 +305,43 @@ uint8_t* ic_ingest_len(size_t len) {
             return NULL;
     }
     return result;
+}
+
+#define round(ptr, min, max) \
+    do { \
+        if(max>min && max - min + 1 != 0) \
+            *ptr = ((*ptr) % (max - min+1)); \
+        else if (max > min) \
+            *ptr = (*ptr); \
+        else \
+            *ptr = 0; \
+        *ptr += min; \
+    } while(0)
+
+int ic_ingest_uint(void*result, size_t len, unsigned long min, unsigned long max) {
+    uint8_t *src = ic_ingest_len(len);
+    if(src == NULL)
+        return -1;
+    memcpy(result, src, len);
+    switch(len) {
+        case sizeof(uint8_t):
+            round((uint8_t*)result, min, max);
+            break;
+        case sizeof(uint16_t):
+            round((uint16_t*)result, min, max);
+            break;
+        case sizeof(uint32_t):
+            round((uint32_t*)result, min, max);
+            break;
+        case sizeof(uint64_t):
+            round((uint64_t*)result, min, max);
+            break;
+        default:
+            return -1;
+    }
+    if(!append(result, len))
+        return -1;
+    return 0;
 }
 
 // Reads len bytes up until the token.

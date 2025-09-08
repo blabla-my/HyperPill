@@ -90,19 +90,19 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 /* DescRing */
 int DescRing::ingest_elem(void* opaque) const {
 	auto* desc_ptr = (vring_desc*)opaque;
-	if (ic_ingest64(&desc_ptr->addr, 0x10000, GUEST_MEM_SIZE-1) < 0){
+	if (ic_ingest_uint(&desc_ptr->addr, sizeof(desc_ptr->addr) ,0x10000, GUEST_MEM_SIZE-1) < 0){
 		return -1;	
 	}
 	// this upperbound and lowerbound are just for testing
-	if (ic_ingest32(&desc_ptr->len, 0x10, 0x1000) < 0){
+	if (ic_ingest_uint(&desc_ptr->len, sizeof(desc_ptr->len), 0x10, 0x1000) < 0){
 		return -1;	
 	}
 	/* TODO: flags should not be randomized(?) */
-	if (ic_ingest16(&desc_ptr->flags, 0, -1) < 0){
-		return -1;
-	}
+	// if (ic_ingest16(&desc_ptr->flags, 0, -1) < 0){
+	// 	return -1;
+	// }
 	while (true){
-		if (ic_ingest16(&desc_ptr->next, 0, size-1) < 0){
+		if (ic_ingest_uint(&desc_ptr->next, sizeof(desc_ptr->next), 0, size-1) < 0){
 			return -1;
 		}
 		if (!queue->desc_chain_fsm.has_used_index(desc_ptr->next)){
