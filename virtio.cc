@@ -90,11 +90,11 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 /* DescRing */
 int DescRing::ingest_elem(void* opaque) const {
 	auto* desc_ptr = (vring_desc*)opaque;
-	if (ic_ingest_uint(&desc_ptr->addr, sizeof(desc_ptr->addr) ,0x10000, GUEST_MEM_SIZE-1) < 0){
+	if (ic_ingest64(&desc_ptr->addr, 0x2000UL, GUEST_MEM_SIZE-1) < 0){
 		return -1;	
 	}
 	// this upperbound and lowerbound are just for testing
-	if (ic_ingest_uint(&desc_ptr->len, sizeof(desc_ptr->len), 0x10, 0x1000) < 0){
+	if (ic_ingest32(&desc_ptr->len, 0, 0x1000U) < 0){
 		return -1;	
 	}
 	/* TODO: flags should not be randomized(?) */
@@ -102,7 +102,7 @@ int DescRing::ingest_elem(void* opaque) const {
 	// 	return -1;
 	// }
 	while (true){
-		if (ic_ingest_uint(&desc_ptr->next, sizeof(desc_ptr->next), 0, size-1) < 0){
+		if (ic_ingest16(&desc_ptr->next, 0, size-1) < 0){
 			return -1;
 		}
 		if (!queue->desc_chain_fsm.has_used_index(desc_ptr->next)){
@@ -114,7 +114,7 @@ int DescRing::ingest_elem(void* opaque) const {
 	desc_ptr->addr = desc_ptr->addr & (~((1<<PAGE_SHIFT) - 1));
 	// desc_ptr->addr = desc_ptr->addr & (~0xf);
 	// desc_ptr->len should be 0x10-aligned
-	desc_ptr->len = desc_ptr->len & (~0xf);
+	// desc_ptr->len = desc_ptr->len & (~0xf);
 	// desc_ptr->flag should be set according to desc FSM
 	desc_ptr->flags = 0;
 	if (queue->desc_chain_fsm.is_done()){
@@ -126,16 +126,13 @@ int DescRing::ingest_elem(void* opaque) const {
 		DescChainFSM::SGType sg_type = queue->desc_chain_fsm.consume();
 		switch (sg_type) {
 			case DescChainFSM::SGType::OUT:
-				printf("Setting desc as OUT\n");
 				desc_ptr->flags |= VRING_DESC_F_NEXT;
 				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
 				break;
 			case DescChainFSM::SGType::IN:
-				printf("Setting desc as IN\n");
 				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
 				break;
 			case DescChainFSM::SGType::TAIL:
-				printf("Setting desc as TAIL\n");
 				desc_ptr->flags |= VRING_DESC_F_WRITE;
 				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
 				break;
@@ -430,17 +427,23 @@ size_t VirtQueueElement::out_sgl_size() {
 }
 
 /* DescChainFSM */
+#define CHAINING_DESC_MAX 16
 void DescChainFSM::init(unsigned max_len) {
 	/* ingest random number as the length of chaining desc */	
+	max_len = max_len < CHAINING_DESC_MAX ? max_len : CHAINING_DESC_MAX;
 	if (state == DescChainFSM::State::WAIT){
-		if (ic_ingest8(&sg_num_out, 1, max_len-1) < 0) {
-			printf("failed to ingest desc chaining out length!\n");
-			sg_num_out = 1;
-		}
-		if (ic_ingest8(&sg_num_in, 1, max_len-sg_num_out) < 0) {
-			printf("failed to ingest desc chaining in length!\n");
-			sg_num_in = 1;
-		}
+		printf("init desc chaining FSM, max len: %u\n", max_len);
+		// if (ic_ingest8(&sg_num_out, 1, max_len-1) < 0) {
+		// 	printf("failed to ingest desc chaining out length!\n");
+		// 	sg_num_out = 1;
+		// }
+		// if (ic_ingest8(&sg_num_in, 1, max_len-sg_num_out) < 0) {
+		// 	printf("failed to ingest desc chaining in length!\n");
+		// 	sg_num_in = 1;
+		// }
+		
+		/* directly set sg_num_out = 1 and sg_num_in = 1 */
+		sg_num_in = sg_num_out = 1;
 		state = DescChainFSM::State::INITED;
 		printf("init desc chaining: out %u, in %u\n", sg_num_out, sg_num_in);
 	}	

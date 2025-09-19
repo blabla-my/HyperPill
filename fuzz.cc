@@ -58,6 +58,44 @@ static void *pattern_alloc(pattern p, size_t len) {
 	return buf;
 }
 
+static bool ingest_vring(bx_address addr, size_t len, void* data) {
+	auto gpa = lookup_gpa_by_hpa(addr);
+	const VRing *vring = VQueueManager::get_belonging_vring(gpa);
+	int rc;
+	if (vring) {
+		uint16_t vring_idx = 0;
+		uint8_t vring_elem[16] = {0};
+		switch (vring->filed_type(gpa)) {
+		case VRing::FILED_TYPE::FLAGS:
+			return true;
+		case VRing::FILED_TYPE::INDEX:
+			rc = vring->ingest_idx(&vring_idx);
+			if (rc < 0) {  
+				// -1, ingest error
+				// -2, queue locates at page 0
+				// if (rc == -1) // ingest error
+				fuzz_emu_stop_unhealthy();
+				return false;				
+			}
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
+			memcpy(data, &vring_idx, len);
+			break;
+		case VRing::FILED_TYPE::VRING_ELEM:
+			rc = vring->ingest_elem((void*)vring_elem);
+			if (rc < 0) {
+				return false;
+			}
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)vring_elem);
+			memcpy(data, vring_elem, len);
+			break;
+		default:
+			assert(false);
+			return false;
+		}
+	}
+	return false;
+}
+
 void clear_seen_dma() {
 	seen_dma.clear();
 }
@@ -101,57 +139,23 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	// might have multiple dma reads per op
 	dma_len += len;
 
+	if (bypass_virtio_core) {
+		if(ingest_vring(addr, len, data)){
+			return;
+		}
+	}
+
 	if (sectionlen < 0x100) {
 		// if DMA read is a reasonable size, obtain fuzz input for the
 		// entire DMA read
-		bx_address gpa = lookup_gpa_by_hpa(addr);
-		if (bypass_virtio_core) {
-			const VRing* vring = VQueueManager::get_belonging_vring(gpa);
-			if (vring) {
-				uint16_t vring_idx = 0;
-				uint8_t vring_elem[16] = {0};
-				switch (vring->filed_type(gpa)) {
-				case VRing::FILED_TYPE::FLAGS:
-					goto NOT_VIRTIO;
-					return;
-				case VRing::FILED_TYPE::INDEX:
-					rc = vring->ingest_idx(&vring_idx);
-					if (rc < 0) {  
-						// -1, ingest error
-						// -2, queue locates at page 0
-						// if (rc == -1) // ingest error
-						fuzz_emu_stop_unhealthy();
-						return;				
-					}
-					BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
-					memcpy(data, &vring_idx, len);
-					break;
-				case VRing::FILED_TYPE::VRING_ELEM:
-					rc = vring->ingest_elem((void*)vring_elem);
-					if (rc < 0) {
-						fuzz_emu_stop_unhealthy();
-						return;
-					}
-					BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)vring_elem);
-					memcpy(data, vring_elem, len);
-					break;
-				default:
-					assert(false);
-					return;
-				}
-			}
+		size_t l = len;
+		buf = ic_ingest_buf(&l, SEPARATOR, SEPARATOR_LEN, -1, 0);
+		if (buf == NULL) {
+			fuzz_emu_stop_unhealthy();
+			return;
 		}
-		else {
-NOT_VIRTIO:
-			size_t l = len;
-			buf = ic_ingest_buf(&l, SEPARATOR, SEPARATOR_LEN, -1, 0);
-			if (buf == NULL) {
-				fuzz_emu_stop_unhealthy();
-				return;
-			}
-			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, l, (void *)buf);
-			memcpy(data, buf, l);
-		}
+		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, l, (void *)buf);
+		memcpy(data, buf, l);
 	} else if (sectionlen > 0x1000) {
 	} else {
 		uint8_t buf[100];
