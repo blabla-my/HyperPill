@@ -47,14 +47,26 @@ void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, 
                 std::smatch dev_match;
                 if(std::regex_search(line, dev_match, dev_regex)){
                     std::string dev_name = dev_match[1].str();
-                    printf("Found virtio device: %s\n", dev_name.c_str());
-                    if (VQueueManager::create_virtio_device(dev_name))
-                        VQueueManager::add_config_space(dev_name, ConfigSpace::COMMON, start, end-start);
+                    printf("Found virtio device common cfg: %s, %lx - %lx\n", dev_name.c_str(), start, end);
+                    if (get_vqueue_manager().create_virtio_device(dev_name))
+                        get_vqueue_manager().add_config_space(dev_name, ConfigSpace::COMMON, start, end-start);
+                }
+            }
+            if (line.find("virtio-pci-notify") != std::string::npos) {
+                // line will be "virtio-pci-notify-virtio-xxx"
+                // use regex to extract the device name
+                std::regex dev_regex("virtio-pci-notify-(.*)");
+                std::smatch dev_match;
+                if(std::regex_search(line, dev_match, dev_regex)){
+                    std::string dev_name = dev_match[1].str();
+                    printf("Found virtio device notify cfg: %s, %lx - %lx\n", dev_name.c_str(), start, end);
+                    if (get_vqueue_manager().create_virtio_device(dev_name))
+                        get_vqueue_manager().add_config_space(dev_name, ConfigSpace::NOTIFY, start, end-start);
                 }
             }
 
             printf("Will fuzz: %s\n", line.c_str());
         }
     }
-    VQueueManager::group_vrings_by_page();
+    get_vqueue_manager().group_vrings_by_page();
 }

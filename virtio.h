@@ -196,8 +196,10 @@ struct DescRing: VRing {
 
 struct VQueue {
     VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL),
-        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm() {}
+        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs() {}
     void reset();
+    void add_desc(vring_desc *desc);
+    const vring_desc* get_belonging_desc(unsigned long addr, size_t size);
     DescRing* desc_ring;  // Descriptor ring
     AvailRing* avail_ring; // Available ring
     UsedRing* used_ring;  // Used ring
@@ -205,6 +207,7 @@ struct VQueue {
     size_t last_avail_idx; // Last available index processed
     size_t last_used_idx;  // Last used index processed
     DescChainFSM desc_chain_fsm;
+    std::vector<vring_desc> generated_descs;
 };
 
 struct ConfigSpace {
@@ -224,37 +227,52 @@ struct ConfigSpace {
     size_t get_queue_num() const;
     size_t get_queue_sel() const;
     void set_queue_num(size_t num) const;
-    void set_queue_sel(size_t sel) const;
+    bool set_queue_sel(size_t sel) const;
+    bool set_queue_enable(size_t sel) const;
     bool write(size_t offset, size_t size, unsigned long value) const;
+    bool contains(unsigned long addr) const;
 };
 
 #define VIRTIO_NAME_MAX 64
+#define CFG_START(addr) ((addr) >> 14 << 14)
 struct VirtioDev {
     VirtioDev();
     char name[VIRTIO_NAME_MAX]; // Name of the device
     VQueue* queues[VIRTIO_QUEUE_MAX];
     size_t queue_num;
     unsigned long features; // Device features
+    unsigned long multiplier;
     ConfigSpace common_cfg; // Common configuration space
     ConfigSpace isr_cfg;
     ConfigSpace device_cfg; // Device-specific configuration space
     ConfigSpace notify_cfg; // Notification configuration space
+    unsigned long config_space_start; // start address of the config space  
     void enumerate_queues_from_common_cfg();
 };
 
 class VQueueManager {
 public:
+    VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page() {}
     typedef tsl::robin_set<const VRing*> VRingSet;
-    static bool create_virtio_device(const std::string& name);
-    static void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
-    static void group_vrings_by_page();
-    static const VRing* get_belonging_vring(bx_address address);
-    static void reset_all_queue();
+    bool create_virtio_device(const std::string& name);
+    void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
+    void group_vrings_by_page();
+    const VRing* get_belonging_vring(bx_address address);
+    void reset_all_queue();
+    size_t get_num_virtio_dev() {return virtio_dev_list.size();}
+    VirtioDev* get_virtio_dev(size_t index) {
+        if (index >= virtio_dev_list.size()) return NULL;
+        else return virtio_dev_list[index];
+    }
+    VirtioDev* get_vdev_by_config_space_addr(unsigned long addr);
 private:
-    static void group_vring_by_page(const VRing* vring);
-    static tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
-    static tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
+    void group_vring_by_page(const VRing* vring);
+    tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
+    std::vector<VirtioDev*> virtio_dev_list;                                                           
+    tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
 };
+
+VQueueManager& get_vqueue_manager();
 
 typedef uint64_t hwaddr;
 typedef struct VirtQueueElement

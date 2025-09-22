@@ -4,6 +4,7 @@
 #include "cpu/cpu.h"
 #include "cpu/vmx.h"
 #include "fuzz.h"
+#include "task.h"
 #include <bits/types/struct_iovec.h>
 #include <cstddef>
 #include <cstdint>
@@ -90,13 +91,19 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 /* DescRing */
 int DescRing::ingest_elem(void* opaque) const {
 	auto* desc_ptr = (vring_desc*)opaque;
+	size_t off = ic_get_offset();
 	if (ic_ingest64(&desc_ptr->addr, 0x2000UL, GUEST_MEM_SIZE-1) < 0){
 		return -1;	
 	}
+	update_buffer_pos(off, sizeof(desc_ptr->addr));
 	// this upperbound and lowerbound are just for testing
+
+	off = ic_get_offset();
 	if (ic_ingest32(&desc_ptr->len, 0, 0x1000U) < 0){
 		return -1;	
 	}
+	update_buffer_pos(off, sizeof(desc_ptr->len));
+
 	/* TODO: flags should not be randomized(?) */
 	// if (ic_ingest16(&desc_ptr->flags, 0, -1) < 0){
 	// 	return -1;
@@ -111,11 +118,12 @@ int DescRing::ingest_elem(void* opaque) const {
 		}
 	}
 	// desc_ptr->addr should be page-aligned
-	desc_ptr->addr = desc_ptr->addr & (~((1<<PAGE_SHIFT) - 1));
+	// desc_ptr->addr = desc_ptr->addr & (~((1<<PAGE_SHIFT) - 1));
 	// desc_ptr->addr = desc_ptr->addr & (~0xf);
 	// desc_ptr->len should be 0x10-aligned
 	// desc_ptr->len = desc_ptr->len & (~0xf);
 	// desc_ptr->flag should be set according to desc FSM
+
 	desc_ptr->flags = 0;
 	if (queue->desc_chain_fsm.is_done()){
 		/* do not chaining */
@@ -140,6 +148,9 @@ int DescRing::ingest_elem(void* opaque) const {
 				break;
 		}
 	}
+	/* collect generated desc */
+	// queue->add_desc(desc_ptr);
+
 	printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
 		type_str(), element_size(),
 		desc_ptr->addr, desc_ptr->len, desc_ptr->next, desc_ptr->flags);
@@ -153,6 +164,20 @@ int DescRing::ingest_elem(void* opaque) const {
 /* VQueue */
 void VQueue::reset(){
 	desc_chain_fsm.reset();	
+}
+
+void VQueue::add_desc(vring_desc *desc) {
+	if (desc)
+		generated_descs.push_back(*desc);
+}
+
+const vring_desc* VQueue::get_belonging_desc(unsigned long addr, size_t size) {
+	for (const vring_desc& d : generated_descs) {
+		if (addr >= d.addr && addr + size < d.addr + d.len) {
+			return &d;
+		}
+	}
+	return NULL;
 }
 
 /* ConfigSpace */
@@ -227,12 +252,24 @@ void ConfigSpace::set_queue_num(size_t num) const {
 	write(VIRTIO_PCI_COMMON_NUMQ, sizeof(uint16_t), (unsigned long)num);
 }
 
-void ConfigSpace::set_queue_sel(size_t sel) const {
+bool ConfigSpace::set_queue_sel(size_t sel) const {
 	if (sel > VIRTIO_QUEUE_MAX) {
 		printf("Queue selection %zu exceeds maximum %u, clamping to max.\n", sel, VIRTIO_QUEUE_MAX);
 		sel = VIRTIO_QUEUE_MAX;
+		return false;
 	}
-	write(VIRTIO_PCI_COMMON_Q_SELECT, sizeof(uint16_t), (uint16_t)sel);
+	return write(VIRTIO_PCI_COMMON_Q_SELECT, sizeof(uint16_t), (uint16_t)sel);
+}
+
+bool ConfigSpace::set_queue_enable(size_t sel) const {
+	auto queue_idx = get_queue_sel();
+	if (queue_idx == sel){
+		return true;
+	}
+	if (!set_queue_sel(sel)){
+		return false;
+	}
+	return write(VIRTIO_PCI_COMMON_Q_ENABLE, sizeof(uint16_t), 1);
 }
 
 bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
@@ -253,7 +290,7 @@ bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
 		break;
 	default:
 		printf("Unsupported read size %zu in ConfigSpace::read\n", size);
-		return 0;
+		return false;
 	}
 	if (!inject_ok) 
 		return false;
@@ -263,10 +300,16 @@ bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
     return true;
 }
 
+bool ConfigSpace::contains(unsigned long addr) const {
+	return addr >= address and addr < address + size;
+}
+
 /* VirtioDev */
 VirtioDev::VirtioDev() {
 	// memset(this, 0, sizeof(VirtioDev));
 	memset(this, 0, sizeof(name));
+	this->multiplier = 4;
+	this->config_space_start = 0;
 }
 
 void VirtioDev::enumerate_queues_from_common_cfg() {
@@ -307,16 +350,20 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 }
 
 /* VQueueManager */
-tsl::robin_map<std::string, VirtioDev> VQueueManager::virtio_devs;
-tsl::robin_map<bx_address, VQueueManager::VRingSet> VQueueManager::rings_grouped_by_page;
+static VQueueManager vqueue_manager;
+VQueueManager& get_vqueue_manager() {
+	return vqueue_manager;
+}
 
 bool VQueueManager::create_virtio_device(const std::string& name) {
 	if (virtio_devs.find(name) != virtio_devs.end()) {
 		printf("Virtio device %s already exists.\n", name.c_str());
-		return false;
+		return true;
 	}
 	virtio_devs[name] = VirtioDev();
+	VirtioDev* dev_ptr = &virtio_devs[name];
 	strcpy(virtio_devs[name].name, name.c_str());
+	virtio_dev_list.push_back(&virtio_devs[name]);
 	return true;
 }
 
@@ -345,6 +392,13 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 		default:
 			printf("Unknown config space type %d for device %s.\n", type, name.c_str());
 			return;
+	}
+	if (!dev.config_space_start) {
+		dev.config_space_start = CFG_START(address); 
+	}
+	else {
+		printf("cfg start exist: %lx vs %lx\n", dev.config_space_start, CFG_START(address));
+		assert(dev.config_space_start == CFG_START(address));
 	}
 }
 
@@ -391,6 +445,15 @@ void VQueueManager::reset_all_queue(){
 				queue->reset();
 		}
 	}
+}
+
+VirtioDev* VQueueManager::get_vdev_by_config_space_addr(unsigned long addr) {
+	for (auto vdev: virtio_dev_list) {
+		if (vdev->config_space_start == CFG_START(addr)){
+			return vdev;
+		}
+	}
+	return NULL;
 }
 
 /* VirtQueueElement */

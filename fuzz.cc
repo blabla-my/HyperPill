@@ -1,6 +1,7 @@
 #include "fuzz.h"
 #include "bochs.h"
 #include "config.h"
+#include "conveyor.h"
 #include "virtio.h"
 #include <cstdint>
 #include <cstdlib>
@@ -16,6 +17,7 @@ enum cmds {
 	OP_PCI_WRITE,
 	OP_MSR_WRITE,
 	OP_VMCALL,
+	OP_NOTIFY
 };
 
 bool log_ops;
@@ -60,7 +62,7 @@ static void *pattern_alloc(pattern p, size_t len) {
 
 static bool ingest_vring(bx_address addr, size_t len, void* data) {
 	auto gpa = lookup_gpa_by_hpa(addr);
-	const VRing *vring = VQueueManager::get_belonging_vring(gpa);
+	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
 	if (vring) {
 		uint16_t vring_idx = 0;
@@ -92,6 +94,10 @@ static bool ingest_vring(bx_address addr, size_t len, void* data) {
 			assert(false);
 			return false;
 		}
+	} else { /* reading buffer */
+		/* mark the input region */
+		update_buffer_pos(ic_get_offset(), len);
+		return false;
 	}
 	return false;
 }
@@ -220,9 +226,7 @@ bool inject_halt() {
 bool inject_write(bx_address addr, int size, uint64_t val) {
 	enum Sizes { Byte, Word, Long, Quad, end_sizes };
 	BX_CPU(id)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
-
-	uint32_t exit_reason =
-		vmcs_translate_guest_physical_ept(addr, NULL, NULL);
+	uint32_t exit_reason = vmcs_translate_guest_physical_ept(addr, NULL, NULL);
 	/* printf("Exit reason: %lx\n", exit_reason); */
 	if (!exit_reason)
 		return false;
@@ -491,6 +495,7 @@ bool op_write() {
 	uint8_t base;
 	uint32_t offset;
 	uint64_t value;
+	size_t input_off;
 
 	if (ic_ingest8(&size, 0, Quad))
 		return false;
@@ -499,32 +504,38 @@ bool op_write() {
 	if (ic_ingest8(&base, 0, num_mmio_regions() - 1))
 		return false;
 	bx_address addr = mmio_region(base);
-
+	
 	if (ic_ingest32(&offset, 0, mmio_region_size(addr) - 1))
 		return false;
 	addr += offset;
+	
+	input_off = ic_get_offset();
 	switch (size) {
 	case Byte:
 		uint8_t val8;
 		if (ic_ingest8(&val8, 0, -1))
 			return false;
 		value = val8;
+		update_buffer_pos(input_off, sizeof(val8));
 		break;
 	case Word:
 		uint16_t val16;
 		if (ic_ingest16(&val16, 0, -1))
 			return false;
 		value = val16;
+		update_buffer_pos(input_off, sizeof(val16));
 		break;
 	case Long:
 		uint32_t val32;
 		if (ic_ingest32(&val32, 0, -1))
 			return false;
 		value = val32;
+		update_buffer_pos(input_off, sizeof(val32));
 		break;
 	case Quad:
 		if (ic_ingest64(&value, 0, -1))
 			return false;
+		update_buffer_pos(input_off, sizeof(value));
 		break;
 	}
 
@@ -833,6 +844,44 @@ bool op_vmcall() {
 	return true;
 }
 
+bool op_notify() {
+	/* inject an mmio write to notify cfg */
+	/*
+	  1. select a random virtio device
+	  2. select a random queue 
+	  3. set queue_sel to that queue
+	  4. set queue_enable to that queue
+	  5. inject write to notify start + multiplier * index
+	*/
+	uint16_t vdev_idx;
+	uint16_t vqueue_idx;
+	if (get_vqueue_manager().get_num_virtio_dev() < 1) {
+		return false;
+	}
+	if (ic_ingest16(&vdev_idx, 0, get_vqueue_manager().get_num_virtio_dev()-1) < 0) {
+		return false;
+	}
+	auto* vdev = get_vqueue_manager().get_virtio_dev(vdev_idx);
+	if (vdev->queue_num < 1) {
+		return false;
+	}
+	if (ic_ingest16(&vqueue_idx, 0, vdev->queue_num-1) < 0) {
+		return false;
+	}
+	if (!vdev->common_cfg.set_queue_enable(vqueue_idx)) {
+		return false;
+	}
+	bx_address addr = vdev->notify_cfg.address + vdev->multiplier * vqueue_idx; // make it mis-aligned
+	printf("inject notify to %lx\n", addr);
+	assert(addr < vdev->notify_cfg.address + vdev->notify_cfg.size);
+	if (!inject_write(addr, 2, vqueue_idx)) { //should be set according multiplier
+		printf("failed to inject notify at %lx (base %lx)!\n", addr, vdev->notify_cfg.address);
+		return false;
+	}
+	start_cpu();
+	return true;
+}
+
 extern bool fuzz_unhealthy_input, fuzz_do_not_continue, fuzz_should_abort;
 void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	bool (*ops[])() = {
@@ -843,17 +892,20 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		[OP_PCI_WRITE] = op_pci_write,
 		[OP_MSR_WRITE] = op_msr_write,
 		[OP_VMCALL] = op_vmcall,
+		[OP_NOTIFY] = op_notify,
 	};
 	static const int nr_ops = sizeof(ops) / sizeof((ops)[0]);
 	uint8_t op;
 
 	static void *fuzz_legacy, *fuzz_hypercalls;
+	static void *bypass_virtio_core;
 	static int inited;
 	if (!inited) {
 		inited = 1;
 		fuzz_legacy = getenv("FUZZ_LEGACY");
 		fuzz_hypercalls = getenv("FUZZ_HYPERCALLS");
 		log_ops = getenv("LOG_OPS") || BX_CPU(id)->fuzztrace;
+		bypass_virtio_core = getenv("VIRTIO_CORE");
 	}
 
 	//if (log_ops)
@@ -873,6 +925,12 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			}
 		} else if (fuzz_hypercalls) {
 			if (ic_ingest8(&op, OP_MSR_WRITE, OP_VMCALL, true)) {
+				ic_erase_backwards_until_token();
+				ic_subtract(4);
+				continue;
+			}
+		} else if (bypass_virtio_core) {
+			if (ic_ingest8(&op, 0, OP_NOTIFY, true)) {
 				ic_erase_backwards_until_token();
 				ic_subtract(4);
 				continue;
@@ -898,6 +956,14 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 
 	size_t dummy;
 	uint8_t *output = ic_get_output(&dummy); // Set the output and op log
+	
+	/* check desc buffer positions */
+	if (!buffer_pos_empty()) {
+		for (auto it = buffer_pos_begin(); it != buffer_pos_end(); it++) {
+			printf("desc buffer pos %d size %lx: ", it->pos, it->len);
+		}
+		reset_buffer_pos();
+	}
 }
 
 void add_pio_region(uint16_t addr, uint16_t size) {

@@ -22,6 +22,7 @@
 #include "FuzzerPlatform.h"
 #include "FuzzerUtil.h"
 #include "FuzzerValueBitMap.h"
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -443,6 +444,32 @@ static size_t InternalStrnlen(const char *S, size_t MaxLen) {
   return Len;
 }
 
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+void TracePC::ClearInputRange() {
+  input_range_size = 0;
+  memset(input_range, 0, sizeof(input_range));
+}
+
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+void TracePC::AddToInputRange(unsigned long pos, unsigned long len) {
+  // input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+  if (input_range_size > 0) {
+    auto& last_pos_len = input_range[input_range_size-1];
+    if (pos > last_pos_len.pos + last_pos_len.len) {
+      input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+    } else if (pos + len < last_pos_len.pos) {
+      input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+    } else if (pos == last_pos_len.pos + last_pos_len.len) {
+      last_pos_len.pos = Min(pos, last_pos_len.pos);
+      last_pos_len.len = Max(pos+len, last_pos_len.pos+last_pos_len.len);
+    }
+  } else {
+    input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+  }
+}
+
 // Finds min of (strlen(S1), strlen(S2)).
 // Needed because one of these strings may actually be non-zero terminated.
 ATTRIBUTE_NO_SANITIZE_MEMORY
@@ -797,4 +824,11 @@ void __sanitizer_weak_hook_memmem(void *called_pc, const void *s1, size_t len1,
   if (!fuzzer::RunningUserCallback) return;
   fuzzer::TPC.MMT.Add(reinterpret_cast<const uint8_t *>(s2), len2);
 }
+
+ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
+ATTRIBUTE_TARGET_POPCNT
+void __trace_pc_add_input_range(unsigned long pos, unsigned long len) {      
+  fuzzer::TPC.AddToInputRange(pos, len);
+}
+
 }  // extern "C"

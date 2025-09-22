@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <x86intrin.h>
 #include <stdio.h>
+#include <vector>
 
 #ifndef DEBUG                                                                    
 #define DEBUG 0
@@ -44,6 +45,7 @@ static size_t output_lenn;
 static uint8_t *last_token;
 static size_t bufsize;
 
+static std::vector<buffer_pos> desc_buffer_pos; /* mark buffer positions in current input */
 
 static uint8_t *zeros;
 
@@ -93,6 +95,11 @@ void ic_new_input(const uint8_t* in, size_t len) {
 uint8_t *ic_get_cursor(void){
     return output_cursor;
 }
+
+unsigned long ic_get_offset(void){
+    return (unsigned long)(output_cursor - output);
+}
+
 size_t ic_get_last_token(void){
     return last_token-output;
 }
@@ -511,4 +518,27 @@ void ic_subtract(size_t l){
         *output_len = output_cursor - output;
     }
     debug_printf("Subtracted %lx. Cursor is now at %lx\n", l, *output_len);
+}
+
+/* for virtio fuzz */
+bool buffer_pos_empty() {
+    return desc_buffer_pos.empty();
+}
+
+void update_buffer_pos(unsigned long pos, unsigned long len) {
+    static void* dma_only = getenv("CMPLOG_DMA_ONLY");
+    if (dma_only)
+        __trace_pc_add_input_range(pos, len);
+}
+
+buffer_pos_iterator buffer_pos_begin() {
+    return desc_buffer_pos.cbegin();
+}
+
+buffer_pos_iterator buffer_pos_end() {
+    return desc_buffer_pos.cend();
+}
+
+void reset_buffer_pos() {
+    desc_buffer_pos.clear();
 }

@@ -109,7 +109,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                 uint8_t data[len];
                 BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
                 bx_address gpa = lookup_gpa_by_hpa(phy);
-                const VRing* vring = VQueueManager::get_belonging_vring(gpa);
+                const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa);
                 if (vring)
                     printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s] len: %lx data: ",
                             phy, gpa, vring->type_str(), len);

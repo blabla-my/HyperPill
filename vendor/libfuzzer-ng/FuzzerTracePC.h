@@ -25,6 +25,12 @@ struct CmpLogEntry {
     uint64_t val2;
     uintptr_t pc;
 };
+
+struct PosLen {
+    uint64_t pos;
+    uint64_t len;
+};
+
 namespace fuzzer {
 
 // TableOfRecentCompares (TORC) remembers the most recently performed
@@ -119,6 +125,11 @@ class TracePC {
   void ClearCmpLog();
   size_t cmplog_size;
   struct CmpLogEntry cmplog[1024*8];
+  
+  void AddToInputRange(unsigned long pos, unsigned long len);
+  void ClearInputRange();
+  struct PosLen input_range[0x100];
+  size_t input_range_size;
 
   void RecordInitialStack();
   uintptr_t GetMaxStackOffset() const;

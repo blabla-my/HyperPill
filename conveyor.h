@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <vector>
 
 #define SEPARATOR "FUZZ"
 #define SEPARATOR_LEN 4
@@ -29,6 +30,7 @@ void* ic_append(const void* src, size_t len);
 size_t ic_length_until_token(const char* token, size_t len);
 void ic_erase_backwards_until_token(void);
 uint8_t *ic_get_cursor(void);
+unsigned long ic_get_offset(void);
 void ic_dump();
 void ic_dump_file(const char* filepath);
 void ic_dump_file_with_sha1(const char* prefix);
@@ -39,10 +41,26 @@ void ic_subtract(size_t l);
 
 int new_op(uint8_t op, uint32_t start, uint32_t end, uint32_t dma_start, uint32_t dma_len);
 
+/* for virtio fuzz */
+typedef struct {
+    unsigned long pos;
+    unsigned long len;
+    // unsigned long addr;
+} buffer_pos;
+typedef std::vector<buffer_pos> buffer_pos_list;
+typedef buffer_pos_list::const_iterator buffer_pos_iterator;
+bool buffer_pos_empty();
+void update_buffer_pos(unsigned long pos, unsigned long len);
+void reset_buffer_pos();
+buffer_pos_iterator buffer_pos_begin();
+buffer_pos_iterator buffer_pos_end();
+
 extern "C" {
 void __fuzzer_set_output(uint8_t *data, size_t size);
 void __fuzzer_set_op_log(void *log);
 void __fuzzer_compute_sha1(const uint8_t *Data, size_t Len, uint8_t *Out);
+
+void __trace_pc_add_input_range(unsigned long pos, unsigned long len);
 }
 
 #endif

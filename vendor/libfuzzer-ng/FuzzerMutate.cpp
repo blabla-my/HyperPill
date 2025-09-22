@@ -445,7 +445,7 @@ size_t MutationDispatcher::Mutate_ReplaceHotspotHint(uint8_t *Data, size_t Size,
     if(h.pos + h.size > Size || h.hint == 0)
         return 0;
     //if(h.size > 4)
-        //printf("Replacing %lx at %lx\n", h.size, h.pos);
+    Printf("Replacing %lx at %lx\n", h.size, h.pos);
     memcpy(Data + h.pos, &h.hint, h.size);
     return Size;
 }

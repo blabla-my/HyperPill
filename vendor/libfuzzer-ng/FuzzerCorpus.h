@@ -21,6 +21,7 @@
 #include "FuzzerInternal.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <numeric>
 #include <random>
 #include <unordered_set>
@@ -309,6 +310,7 @@ public:
       return *ret_iter;
   }
   uintptr_t AddHotCmps(InputInfo *II, const Unit &U){
+      static void *dma_only = getenv("CMPLOG_DMA_ONLY");
       std::set<uint64_t> hints;
       for(int i=0; i < TPC.cmplog_size; i++){
           auto &cmp = TPC.cmplog[i];
@@ -357,16 +359,36 @@ public:
                   if(hints.find(otherval) != hints.end())
                       continue;
                   auto start = U.begin();
-                  while ((start = std::search(start, U.end(),
-                                  pattern.begin(), pattern.end())) != U.end()) {
-                      count +=1;
-                      found_pos = std::distance(U.begin(), start);
-                      found_val = j == 0 ? Arg1: Arg2;
-                      hint_val = j == 0 ? Arg2: Arg1;
-                      printf("%lx Found %lx at %lx Size is %lx\n", count, found_val, found_pos, val_size);
-                      if(count > 1)
-                          break;
-                      start++;
+                  auto end = U.end();
+                  
+                  if (dma_only) {
+                    for (size_t ii = 0; ii < TPC.input_range_size; ii++) {
+                      start = U.begin() + TPC.input_range[ii].pos;
+                      end = start + TPC.input_range[ii].len;
+                      while ((start = std::search(start, end,
+                                      pattern.begin(), pattern.end())) != end) {
+                        count += 1;
+                        found_pos = std::distance(U.begin(), start);
+                        found_val = j == 0 ? Arg1: Arg2;
+                        hint_val = j == 0 ? Arg2: Arg1;
+                        printf("%lx Found %lx at %lx Size is %lx\n", count, found_val, found_pos, val_size);
+                        if(count > 1)
+                            break;
+                        start++;
+                      }
+                    }
+                  } else {
+                    while ((start = std::search(start, U.end(),
+                                    pattern.begin(), pattern.end())) != U.end()) {
+                        count +=1;
+                        found_pos = std::distance(U.begin(), start);
+                        found_val = j == 0 ? Arg1: Arg2;
+                        hint_val = j == 0 ? Arg2: Arg1;
+                        printf("%lx Found %lx at %lx Size is %lx\n", count, found_val, found_pos, val_size);
+                        if(count > 1)
+                            break;
+                        start++;
+                    }
                   }
               }
               if(count == 1){
