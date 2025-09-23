@@ -171,3 +171,30 @@ std::vector<bx_address> select_sym(const char* sym) {
     sqlite3_finalize(res);
     return result;
 }
+
+std::vector<int> select_pid(const char* bin) {
+    std::vector<int> result;
+    sqlite3_stmt* res = nullptr;
+    const char* sql = "SELECT DISTINCT Pid FROM SYM WHERE Bin = ?";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &res, nullptr) == SQLITE_OK) {
+        // Bind the parameter
+        sqlite3_bind_text(res, 1, bin, -1, SQLITE_TRANSIENT);
+
+        // Step through the rows
+        while (sqlite3_step(res) == SQLITE_ROW) {
+            int pid = sqlite3_column_int(res, 0);
+            if (pid != 0) {
+                printf("found pid %d\n", pid);
+                result.push_back(pid);
+            }
+        }
+    }
+
+    // Finalize statement to avoid memory leak
+    if (res) {
+        sqlite3_finalize(res);
+    }
+
+    return result;
+}

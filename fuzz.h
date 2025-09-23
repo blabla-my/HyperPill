@@ -240,7 +240,8 @@ void open_db(const char* path);
 void insert_mmio(uint64_t addr, uint64_t len);
 void insert_pio(uint16_t addr, uint16_t len);
 void insert_sym(uint64_t addr, const char* bin, const char* sym, int pid=0);
-std::vector<bx_address> select_sym(const char* sym);
+std::vector<bx_address> select_sym(const char* bin, const char* sym);
+std::vector<int> select_pid(const char* bin);
 void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address, uint32_t> &mmio_regions);
 void load_sym();
@@ -273,16 +274,10 @@ sym_name_t addr_to_sym(unsigned long addr, int pid=0);
 void set_addr2sym(sym_info_t sym);
 void set_sym2addr(sym_info_t sym);
 std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath);
+const char* get_bin_full_path(std::string bin);
 
 // link_map.c
 void load_link_map(char* map_path, char* obj_regex, size_t base);
-
-// sourcecov.c
-
-void write_source_cov();
-void init_sourcecov(size_t baseaddr);
-void setup_periodic_coverage();
-void check_write_coverage();
 
 // breakpoints.cc
 void handle_breakpoints(bxInstruction_c *i);
