@@ -2,6 +2,7 @@
 #include "config.h"
 #include "fuzz.h"
 #include "pc_system.h"
+#include "sourcecov.h"
 #include "task.h"
 #include <cstdint>
 #include <sstream>

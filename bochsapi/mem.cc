@@ -100,12 +100,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                        current_task->pid, current_task->comm, phy);
             }
             fuzz_dma_read_cb(phy, len, data);
-            // printf("DMA hook happen from: %d, %s\n", current_task->pid,
-            //        current_task->comm);
-            // print_stacktrace();
             if (log_ops) {
-                // dump_instr();
-                // print_stacktrace();
                 uint8_t data[len];
                 BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
                 bx_address gpa = lookup_gpa_by_hpa(phy);
