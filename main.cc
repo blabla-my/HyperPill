@@ -266,7 +266,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		if (!log_writes)
 			log_writes = getenv("LOG_WRITES");
 		if (!getenv("NOCOV")) {
-			init_sourcecov(0);
+			auto qemu_source_cov = new SourceCov("qemu-system-x86_64");
+			auto vhost_source_cov = new SourceCov("vhost");
+			add_to_source_cov_set(qemu_source_cov);
+			add_to_source_cov_set(vhost_source_cov);
 		}
 		setup_periodic_coverage();
 	}

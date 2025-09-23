@@ -284,3 +284,12 @@ int TaskManager::get_pid(bx_address CR3) {
         return 0;
     }
 }
+
+unsigned long TaskManager::get_cr3(int pid) {
+    for (auto it : task_map){
+        if (it.second->pid == pid) {
+            return it.second->cr3;
+        }
+    }
+    return 0;
+}

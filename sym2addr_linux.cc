@@ -35,6 +35,15 @@ unsigned long sym_to_addr(std::string bin, std::string name, int pid) {
     return 0UL;
 }
 
+const char* get_bin_full_path(std::string bin) {
+    for (const auto & b : bins) {
+        if (b.find(bin) != std::string::npos) {
+            return b.c_str();
+        }
+    }
+    return NULL;
+}
+
 sym_name_t addr_to_sym(unsigned long addr, int pid) {
     if (addr & (1UL << 63)) {
         // kernel address, we assume pid == 0

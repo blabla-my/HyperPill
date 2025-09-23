@@ -174,6 +174,7 @@ public:
     bool del_task(bx_address task_addr);
     bool has_hypervisor_task(bx_address task_addr);
     int get_pid(unsigned long CR3);
+    unsigned long get_cr3(int pid);
     // bool hypervisor_task(Task* task_addr);
 
 private:
