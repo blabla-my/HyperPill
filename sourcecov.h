@@ -10,6 +10,7 @@ public:
     SourceCov(const std::string& binary);
     void write_source_cov() const;
     bool inited() const {return __inited;}
+    const std::string get_bin() const {return bin;}
     
 private:
     bool __inited;

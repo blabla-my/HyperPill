@@ -322,9 +322,13 @@ extern uint64_t icount_limit_floor;
 extern uint64_t icount_limit;
 
 void add_to_source_cov_set(const SourceCov* source_cov) {
-    if (!source_cov && !source_cov->inited())
+    if (!source_cov)
         return;
-    source_cov_set.insert(source_cov);
+    if (source_cov->inited()) {
+        source_cov_set.insert(source_cov);
+    } else {
+        printf("failed to add %s to source_cov_set, inited = %d\n", source_cov->get_bin().c_str(), source_cov->inited());
+    }
 }
 
 void setup_periodic_coverage(){
