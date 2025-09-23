@@ -81,7 +81,7 @@ static bool ingest_vring(bx_address addr, size_t len, void* data) {
 			}
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
 			memcpy(data, &vring_idx, len);
-			break;
+			return true;
 		case VRing::FILED_TYPE::VRING_ELEM:
 			rc = vring->ingest_elem((void*)vring_elem);
 			if (rc < 0) {
@@ -89,7 +89,7 @@ static bool ingest_vring(bx_address addr, size_t len, void* data) {
 			}
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)vring_elem);
 			memcpy(data, vring_elem, len);
-			break;
+			return true;
 		default:
 			assert(false);
 			return false;
@@ -116,24 +116,24 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	if (!fuzzing)
 		return;
 
-	if (seen_dma[addr + len - 1] == len) 
+	/* we should not ignore polling */
+	if (!bypass_virtio_core && seen_dma[addr + len - 1] == len) {
+		printf("DMA at %lx len %x already handled\n", addr, len);
 		return;
-
-	for (auto it = seen_dma.begin(); it != seen_dma.end(); it++) {
-		bx_address start = it->first - it->second + 1;
-		bx_address end = it->first + 1;
-		if ((addr >= start && addr < end)) {
-			if (addr + len >= end) {
-				len = addr + len - end;
-				addr = end;
-			} else {
-				return;
-			}
-		} 	
 	}
 
-	// print_stacktrace();
-	// dump_regs();
+	// for (auto it = seen_dma.begin(); it != seen_dma.end(); it++) {
+	// 	bx_address start = it->first - it->second + 1;
+	// 	bx_address end = it->first + 1;
+	// 	if ((addr >= start && addr < end)) {
+	// 		if (addr + len >= end) {
+	// 			len = addr + len - end;
+	// 			addr = end;
+	// 		} else {
+	// 			return;
+	// 		}
+	// 	} 	
+	// }
 	
 	if (seen_dma.find(addr - 1) != seen_dma.end()) {
 		seen_dma[addr + len - 1] = seen_dma[addr - 1] + len;
@@ -146,10 +146,12 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	dma_len += len;
 
 	if (bypass_virtio_core) {
+		printf("ingest ring at %lx size %x\n", addr, len);
 		if(ingest_vring(addr, len, data)){
 			return;
 		}
 	}
+	printf("normal dma read at %lx len %x\n", addr, len);
 
 	if (sectionlen < 0x100) {
 		// if DMA read is a reasonable size, obtain fuzz input for the
