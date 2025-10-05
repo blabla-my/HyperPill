@@ -60,7 +60,13 @@ static void *pattern_alloc(pattern p, size_t len) {
 	return buf;
 }
 
-static bool ingest_vring(bx_address addr, size_t len, void* data) {
+/* 
+	returns:
+	 0: success
+	-1: failed to ingest element
+	1: not a vring element, should be considered as normal memory read
+*/
+static int ingest_vring(bx_address addr, size_t len, void* data) {
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
@@ -69,7 +75,7 @@ static bool ingest_vring(bx_address addr, size_t len, void* data) {
 		uint8_t vring_elem[16] = {0};
 		switch (vring->filed_type(gpa)) {
 		case VRing::FILED_TYPE::FLAGS:
-			return true;
+			return 0;
 		case VRing::FILED_TYPE::INDEX:
 			rc = vring->ingest_idx(&vring_idx);
 			if (rc < 0) {  
@@ -77,29 +83,33 @@ static bool ingest_vring(bx_address addr, size_t len, void* data) {
 				// -2, queue locates at page 0
 				// if (rc == -1) // ingest error
 				fuzz_emu_stop_unhealthy();
-				return false;				
+				return -1;				
 			}
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
 			memcpy(data, &vring_idx, len);
-			return true;
+			return 0;
 		case VRing::FILED_TYPE::VRING_ELEM:
-			rc = vring->ingest_elem((void*)vring_elem);
+			rc = vring->ingest_elem((void*)vring_elem, vring->element_index(gpa));
 			if (rc < 0) {
-				return false;
+				fuzz_emu_stop_unhealthy();
+				return -1;
+			} else if (rc == 0) {
+				vring->write_elem(vring->element_index(gpa), vring_elem);
+			} else if (rc == 1) { // genereted elem, already written
+				// just mark the region, do nothing
 			}
-			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)vring_elem);
-			memcpy(data, vring_elem, len);
-			return true;
+			// memcpy(data, vring_elem, len);
+			return 0;
 		default:
 			assert(false);
-			return false;
+			return -1;
 		}
 	} else { /* reading buffer */
 		/* mark the input region */
 		update_buffer_pos(ic_get_offset(), len);
-		return false;
+		return 1;
 	}
-	return false;
+	return 1;
 }
 
 void clear_seen_dma() {
@@ -146,12 +156,10 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	dma_len += len;
 
 	if (bypass_virtio_core) {
-		printf("ingest ring at %lx size %x\n", addr, len);
-		if(ingest_vring(addr, len, data)){
+		int rc = ingest_vring(addr, len, data);
+		if (rc <= 0) 
 			return;
-		}
 	}
-	printf("normal dma read at %lx len %x\n", addr, len);
 
 	if (sectionlen < 0x100) {
 		// if DMA read is a reasonable size, obtain fuzz input for the
@@ -709,7 +717,7 @@ bool op_msr_write() {
 		return false;
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
-		printf("!wrmsr inject: %lx = %lx\n", msr, value);
+		printf("!wrmsr inject: %x = %lx\n", msr, value);
 	}
 	return inject_wrmsr(msr, value);
 }
@@ -800,11 +808,11 @@ bool op_vmcall() {
 
 	if (BX_CPU(id)->fuzztrace || log_ops) {
 		printf("!hypercall inject: [RAX: %lx, RBX: %lx, RCX: %lx, RDX: %lx, RSI: %lx]\n", 
-			vmcall_gpregs[BX_64BIT_REG_RAX], 
-			vmcall_gpregs[BX_64BIT_REG_RBX],
-			vmcall_gpregs[BX_64BIT_REG_RCX],
-			vmcall_gpregs[BX_64BIT_REG_RDX],
-			vmcall_gpregs[BX_64BIT_REG_RSI]);
+			vmcall_gpregs[BX_64BIT_REG_RAX].rrx, 
+			vmcall_gpregs[BX_64BIT_REG_RBX].rrx,
+			vmcall_gpregs[BX_64BIT_REG_RCX].rrx,
+			vmcall_gpregs[BX_64BIT_REG_RDX].rrx,
+			vmcall_gpregs[BX_64BIT_REG_RSI].rrx);
 	}
 	start_cpu();
 	/* printf("Hypercall %lx Result: %lx\n",vmcall_gpregs[BX_64BIT_REG_RCX],
@@ -874,7 +882,6 @@ bool op_notify() {
 		return false;
 	}
 	bx_address addr = vdev->notify_cfg.address + vdev->multiplier * vqueue_idx; // make it mis-aligned
-	printf("inject notify to %lx\n", addr);
 	assert(addr < vdev->notify_cfg.address + vdev->notify_cfg.size);
 	if (!inject_write(addr, 2, vqueue_idx)) { //should be set according multiplier
 		printf("failed to inject notify at %lx (base %lx)!\n", addr, vdev->notify_cfg.address);
@@ -910,8 +917,6 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		bypass_virtio_core = getenv("VIRTIO_CORE");
 	}
 
-	//if (log_ops)
-		//printf("!new input (length %d)\n", Size);
 	ic_new_input(Data, Size);
 	uint16_t start = 0;
 	int nops = 0;
@@ -959,22 +964,16 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	size_t dummy;
 	uint8_t *output = ic_get_output(&dummy); // Set the output and op log
 	
-	/* check desc buffer positions */
-	if (!buffer_pos_empty()) {
-		for (auto it = buffer_pos_begin(); it != buffer_pos_end(); it++) {
-			printf("desc buffer pos %d size %lx: ", it->pos, it->len);
-		}
-		reset_buffer_pos();
-	}
+	reset_buffer_pos();
 }
 
 void add_pio_region(uint16_t addr, uint16_t size) {
 	pio_regions[addr] = size;
-	printf("pio_regions %d = %lx + %lx\n", pio_regions.size(), addr, size);
+	printf("pio_regions %lx = %x + %x\n", pio_regions.size(), addr, size);
 }
 void add_mmio_region(uint64_t addr, uint64_t size) {
 	mmio_regions[addr] = size;
-	printf("mmio_regions %d = %lx + %lx\n", mmio_regions.size(), addr,
+	printf("mmio_regions %lx = %lx + %lx\n", mmio_regions.size(), addr,
 	       size);
 }
 void add_mmio_range_alt(uint64_t addr, uint64_t end) {
