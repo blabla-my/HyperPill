@@ -67,16 +67,20 @@ bool ignore_pc(bx_address pc) {
 
 bool task_filter(bool user_only) {
     Task* cur_task = task_manager.get_current_task();
+    bool reject = false;
     if(cur_task == NULL) {
         return true;
     }
-    if (cur_task->is_userspace_vmm_task()){
-        return BX_CPU(id)->get_cpl() == 0;
+    else if (cur_task->is_userspace_vmm_task()){
+        reject = BX_CPU(id)->get_cpl() == 0;
     }
-    if (!user_only && cur_task->is_hypervisor_task()){
-        return false;
+    else if (!user_only && cur_task->is_hypervisor_task()){
+        reject = false;
     }
-    return true;
+    else{
+        reject = true;
+    }
+    return reject;
 }
 
 static size_t last_new = 0;

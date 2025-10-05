@@ -196,6 +196,13 @@ Task* TaskManager::add_task(bx_address task_addr){
         } else if (strstr(new_task->comm, "CPU 0/KVM") != NULL) {
             new_task->CPU_KVM = true;
         }
+        for (auto sig : hypervisor_task_signatures) {
+            if (strstr(new_task->comm, sig.c_str()) != NULL) {
+                new_task->hypervisor_task = 1;
+                printf("add_task: mark hypervisor task %s\n", new_task->comm);
+                break;
+            }
+        }
         task_map[task_addr] = new_task;
         return new_task;
     }
