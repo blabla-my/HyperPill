@@ -191,7 +191,6 @@ void SourceCov::write_source_cov() const {
         {padding, 8-((sizeof(header)+pdsize+pcsize+pnsize)%8)}
     };
     char filename[100];
-    printf("Reaching write_source_cov_end\n");
     sprintf(filename, "%s-%d-%ld.profraw", bin.c_str(), getpid(), time(NULL));
     int fd = open(filename, O_CREAT|O_RDWR, 0666);
     writev(fd, iov, sizeof(iov)/sizeof(struct iovec));
@@ -243,7 +242,7 @@ static void sig_handler(int signum) {
     }
 }
 
-SourceCov::SourceCov(const std::string& binary) {
+SourceCov::SourceCov(const std::string& binary, bool reserve_init_cov) {
     __inited = false;
     bin = std::string("");
     pdstart = pdstop = pdsize = 0;
@@ -251,6 +250,7 @@ SourceCov::SourceCov(const std::string& binary) {
     pnstart = pnstop = pnsize = 0;
     pd = pc = pn = NULL;
     cr3 = 0;
+    reserve_init_cov = reserve_init_cov;
 
     // we have already loaded all symbol addresses in the main.cc
     pdstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_data");
@@ -307,7 +307,8 @@ SourceCov::SourceCov(const std::string& binary) {
         BX_CPU(0)->cr3 = cr3;
         bx_phy_address phystart = 
             BX_CPU(0)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_READ);
-        BX_CPU(0)->access_write_linear(start, len, 0, BX_WRITE, 0x0, pc);
+        if (!reserve_init_cov)
+            BX_CPU(0)->access_write_linear(start, len, 0, BX_WRITE, 0x0, pc);
         /* resume cr3 */
         BX_CPU(0)->cr3 = old_cr3;
 
@@ -361,7 +362,7 @@ void setup_periodic_coverage(){
         assert(val < max);
         if(max != LONG_MIN){
             icount_limit = icount_limit_floor + ((icount_limit-icount_limit_floor)/(max))*(val-1);
-            printf("SET ICOUNT LIMIT: %d\n", icount_limit);
+            printf("SET ICOUNT LIMIT: %lu\n", icount_limit);
         }
     }
 }

@@ -7,13 +7,14 @@
 #include <set>
 class SourceCov {
 public:
-    SourceCov(const std::string& binary);
+    SourceCov(const std::string& binary, bool reserve_init_cov = false);
     void write_source_cov() const;
     bool inited() const {return __inited;}
     const std::string get_bin() const {return bin;}
     
 private:
     bool __inited;
+    bool reserve_init_cov;
     std::string bin;
     uint64_t pdstart, pdstop, pdsize;
     uint64_t pcstart, pcstop, pcsize;
@@ -21,6 +22,9 @@ private:
     uint8_t *pd, *pc, *pn;
     unsigned long cr3;
     
+    /* when accessing llvm prf sections, it is possible that we are not in the virtual memory space of corresponding process.  */
+    /* as a result, we need to switch to the process of target binary, then read/write */
+    /* this is done by switching CR3 value */
     int access_read_linear(bx_address laddr, unsigned len, unsigned curr_pl, unsigned xlate_rw, Bit32u ac_mask, void *data) const;
 };
 
