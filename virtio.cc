@@ -10,8 +10,7 @@
 #include <cstdint>
 #include "conveyor.h"
 
-// #define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
-#define DBG_PRINT if(1)
+#define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
 
 /* global variables */
 
@@ -24,7 +23,7 @@ VRing::VRing(size_t size, bx_address addr_gpa, VQueue* vqueue): size(size), addr
 	printf("VRing: hpa %lx, size: %lx, vqueue: %p\n", addr_hpa, size, queue);
 }
 
-int VRing::ingest_idx(uint16_t *idx) const {
+int AvailRing::ingest_idx(uint16_t *idx) const {
 	// read last index
 	if (!addr_hpa) return -2;
 	uint16_t last_idx;
@@ -39,12 +38,14 @@ int VRing::ingest_idx(uint16_t *idx) const {
 void VRing::write_elem(int index, void* elem) const {
 	if (!addr_hpa) return;
 	if (index >= size) return;
-	BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
+	// BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
 }
+
 /* AvailRing */
 int AvailRing::ingest_elem(void* opaque, int index) const {
 	auto* avail_elem_ptr = (vring_avail_elem*)opaque;
-	if(ic_ingest16(avail_elem_ptr, 0, size) < 0){
+	if(ic_ingest_uint(avail_elem_ptr, sizeof(uint16_t), 0, size) < 0){
 		return -1;
 	}
 	/* every time the avail ring is touched, reset desc chain fsm */
@@ -104,61 +105,61 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 	/* firstly, we query desc chain fsm for genereted desc index */
 	/* we assume here the desc chain fsm has been initialized */
 	if (queue->desc_chain_fsm.has_used_index(index)){
-		printf("!virtio: desc ring index %d generated already\n", index);
 		return 1;
 	} 
 	auto* desc_ptr = (vring_desc*)opaque;
 	size_t off = ic_get_offset();
-	if (ic_ingest64(&desc_ptr->addr, 0x2000UL, GUEST_MEM_SIZE-1) < 0){
+	if (ic_ingest_uint(&desc_ptr->addr, sizeof(uint64_t), GUEST_MEM_START, GUEST_MEM_START+GUEST_MEM_SIZE-1) < 0){
 		return -1;	
 	}
 	update_buffer_pos(off, sizeof(desc_ptr->addr));
 	// this upperbound and lowerbound are just for testing
 
 	off = ic_get_offset();
-	if (ic_ingest32(&desc_ptr->len, 0, 0x1000U) < 0){
+	if (ic_ingest_uint(&desc_ptr->len, sizeof(uint32_t), 0, 0x1000U) < 0){
 		return -1;	
 	}
 	update_buffer_pos(off, sizeof(desc_ptr->len));
-
-	/* TODO: flags should not be randomized(?) */
-	// if (ic_ingest16(&desc_ptr->flags, 0, -1) < 0){
-	// 	return -1;
-	// }
-	while (true){
-		if (ic_ingest16(&desc_ptr->next, 0, size-1) < 0){
-			return -1;
-		}
-		if (desc_ptr->next != index and !queue->desc_chain_fsm.has_used_index(desc_ptr->next)){
-			break;
-		}
-	}
-	// desc_ptr->addr should be page-aligned
-	// desc_ptr->addr = desc_ptr->addr & (~((1<<PAGE_SHIFT) - 1));
-	// desc_ptr->addr = desc_ptr->addr & (~0xf);
-	// desc_ptr->len should be 0x10-aligned
-	// desc_ptr->len = desc_ptr->len & (~0xf);
-	// desc_ptr->flag should be set according to desc FSM
-
+	
+	desc_ptr->next = (index+1) % size;
 	desc_ptr->flags = 0;
 	if (queue->desc_chain_fsm.is_done()){
 		/* do not chaining */
 		desc_ptr->flags &= ~VRING_DESC_F_NEXT;
-		queue->desc_chain_fsm.reset();
 	}
 	else if (queue->desc_chain_fsm.is_inited()){
 		DescChainFSM::SGType sg_type = queue->desc_chain_fsm.consume();
 		switch (sg_type) {
+			case DescChainFSM::SGType::OUT_HEAD:
+				desc_ptr->flags |= VRING_DESC_F_NEXT;
+				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
+				desc_ptr->len = 0x10; // for virtio-blk
+				break;
 			case DescChainFSM::SGType::OUT:
 				desc_ptr->flags |= VRING_DESC_F_NEXT;
 				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
+				desc_ptr->addr &= ~0xfff; // page-aligned
+				desc_ptr->len = 512; // for virtio-blk
+				break;
+			case DescChainFSM::SGType::IN_HEAD:
+				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
+				desc_ptr->addr &= ~0xfff; // page-aligned
+				desc_ptr->len = 512; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::IN:
 				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
+				desc_ptr->addr &= ~0xfff; // page-aligned
+				desc_ptr->len = 512; // for virtio-blk
 				break;
-			case DescChainFSM::SGType::TAIL:
+			case DescChainFSM::SGType::IN_HEAD_TAIL:
 				desc_ptr->flags |= VRING_DESC_F_WRITE;
 				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
+				desc_ptr->len = 0x1; // for virtio-blk
+				break;
+			case DescChainFSM::SGType::IN_TAIL:
+				desc_ptr->flags |= VRING_DESC_F_WRITE;
+				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
+				desc_ptr->len = 0x1; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::NONE:
 				break;
@@ -201,21 +202,26 @@ const vring_desc* VQueue::get_belonging_desc(unsigned long addr, size_t size) {
 /* ConfigSpace */
 unsigned long ConfigSpace::read(size_t offset, size_t size) const {
 	bx_address addr = address + offset;
+	bool inject_ok;
 	switch (size) {
 	case sizeof(uint8_t): 
-		inject_read(addr, 0);
+		inject_ok = inject_read(addr, 0);
 		break;
 	case sizeof(uint16_t): 
-		inject_read(addr, 1);
+		inject_ok = inject_read(addr, 1);
 		break;
 	case sizeof(uint32_t): 
-		inject_read(addr, 2);
+		inject_ok = inject_read(addr, 2);
 		break;
 	case sizeof(uint64_t):
-		inject_read(addr, 3);
+		inject_ok = inject_read(addr, 3);
 		break;
 	default:
 		printf("Unsupported read size %zu in ConfigSpace::read\n", size);
+		return 0;
+	}
+	if (!inject_ok) {
+		printf("Failed to inject read in ConfigSpace::read to %lx size %lx\n", addr+offset, size);
 		return 0;
 	}
     start_cpu(true);
@@ -241,6 +247,55 @@ bx_address ConfigSpace::get_desc_ring_addr() const {
 	unsigned desc_lo = read(VIRTIO_PCI_COMMON_Q_DESCLO, sizeof(unsigned));
 	unsigned desc_hi = read(VIRTIO_PCI_COMMON_Q_DESCHI, sizeof(unsigned));
 	return (bx_address)(((bx_address)desc_hi << 32) | desc_lo);	
+}
+
+bool ConfigSpace::set_avail_ring_addr(unsigned long addr) const {
+	unsigned lo = addr & 0xFFFFFFFF;
+	unsigned hi = (addr >> 32) & 0xFFFFFFFF;
+	bool write_ok;
+	write_ok = write(VIRTIO_PCI_COMMON_Q_AVAILLO, sizeof(unsigned), lo);
+	if (!write_ok) {
+		return false;
+	}
+	write_ok = write(VIRTIO_PCI_COMMON_Q_AVAILHI, sizeof(unsigned), hi);
+	if (!write_ok) {
+		return false;
+	}
+	return true;
+}
+
+bool ConfigSpace::set_used_ring_addr(unsigned long addr) const {
+	unsigned lo = addr & 0xFFFFFFFF;
+	unsigned hi = (addr >> 32) & 0xFFFFFFFF;
+	bool write_ok;
+	write_ok = write(VIRTIO_PCI_COMMON_Q_USEDLO, sizeof(unsigned), lo);
+	if (!write_ok) {
+		return false;
+	}
+	write_ok = write(VIRTIO_PCI_COMMON_Q_USEDHI, sizeof(unsigned), hi);
+	if (!write_ok) {
+		return false;
+	}
+	return true;
+}
+
+bool ConfigSpace::set_desc_ring_addr(unsigned long addr) const {
+	unsigned lo = addr & 0xFFFFFFFF;
+	unsigned hi = (addr >> 32) & 0xFFFFFFFF;
+	bool write_ok;
+	write_ok = write(VIRTIO_PCI_COMMON_Q_DESCLO, sizeof(unsigned), lo);
+	if (!write_ok) {
+		return false;
+	}
+	write_ok = write(VIRTIO_PCI_COMMON_Q_DESCHI, sizeof(unsigned), hi);
+	if (!write_ok) {
+		return false;
+	}
+	return true;
+}
+
+bool ConfigSpace::setup_queue() const {
+	return false;
 }
 
 size_t ConfigSpace::get_queue_size() const {
@@ -310,8 +365,10 @@ bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
 		printf("Unsupported read size %zu in ConfigSpace::read\n", size);
 		return false;
 	}
-	if (!inject_ok) 
+	if (!inject_ok) {
+		printf("Failed to inject write in ConfigSpace::write to %lx size %lx\n", addr+offset, size);
 		return false;
+	}
 
     start_cpu(true);
     
@@ -513,8 +570,14 @@ void DescChainFSM::init(unsigned max_len) {
 	/* ingest random number as the length of chaining desc */	
 	max_len = max_len < CHAINING_DESC_MAX ? max_len : CHAINING_DESC_MAX;
 	if (state == DescChainFSM::State::WAIT){
-		/* directly set sg_num_out = 1 and sg_num_in = 1 */
-		sg_num_in = sg_num_out = 1;
+		if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, max_len) < 0){
+			sg_num_out = 1;
+		}
+		if (ic_ingest_uint(&sg_num_in, sizeof(sg_num_in), 1, max_len) < 0){
+			sg_num_in = 1;
+		}
+		sg_num_out_remain = sg_num_out;
+		sg_num_in_remain = sg_num_in;
 		state = DescChainFSM::State::INITED;
 		DBG_PRINT {
 			printf("init desc chaining: out %u, in %u\n", sg_num_out, sg_num_in);
@@ -532,20 +595,29 @@ DescChainFSM::SGType DescChainFSM::consume() {
 		state = RUNNING;
 	}
 	if (state == RUNNING) {
-		if (sg_num_out > 0) {
-			sg_num_out--;
+		if (sg_num_out_remain > 0 && sg_num_out_remain == sg_num_out) {
+			sg_num_out_remain--;
+			return SGType::OUT_HEAD;
+		} else if (sg_num_out_remain > 0) {
+			sg_num_out_remain--;
 			return SGType::OUT;
-		} else if (sg_num_in > 1) {
-			sg_num_in--;
+		} else if (sg_num_in_remain > 0 && sg_num_in_remain == sg_num_in) {
+			sg_num_in_remain--;
+			if (sg_num_in == 1) {
+				return SGType::IN_HEAD_TAIL;
+			}
+			return SGType::IN_HEAD;
+		} else if (sg_num_in_remain > 1) {
+			sg_num_in_remain--;
 			return SGType::IN;
-		} else if (sg_num_in == 1) {
-			sg_num_in--;
-			return SGType::TAIL;
-		}
-		else if (sg_num_out == 0 && sg_num_in == 0) {
+		} else if (sg_num_in_remain == 1) {
+			sg_num_in_remain--;
+			return SGType::IN_TAIL;
+		} else if (sg_num_out_remain == 0 && sg_num_in_remain == 0) {
 			state = DONE;
 			return SGType::NONE;
 		}
 	}
+	state = DONE;
 	return SGType::NONE;
 }

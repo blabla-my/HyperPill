@@ -70,6 +70,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
+	bx_address off_in_elem = 0;
 	if (vring) {
 		uint16_t vring_idx = 0;
 		uint8_t vring_elem[16] = {0};
@@ -82,23 +83,30 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				// -1, ingest error
 				// -2, queue locates at page 0
 				// if (rc == -1) // ingest error
-				fuzz_emu_stop_unhealthy();
+				/* here we should not call fuzz_emu_stop_unhealthy */
+				// fuzz_emu_stop_unhealthy();
 				return -1;				
+			}
+			if (rc == 1) { // genereted index, already written
+				// just mark the region, do nothing
+				return 0;
 			}
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
 			memcpy(data, &vring_idx, len);
 			return 0;
 		case VRing::FILED_TYPE::VRING_ELEM:
 			rc = vring->ingest_elem((void*)vring_elem, vring->element_index(gpa));
+			off_in_elem = gpa - (vring->start() + vring->ring_offset() + vring->element_index(gpa) * vring->element_size());
 			if (rc < 0) {
-				fuzz_emu_stop_unhealthy();
+				/* here we should not call fuzz_emu_stop_unhealthy */
+				// fuzz_emu_stop_unhealthy();
 				return -1;
 			} else if (rc == 0) {
 				vring->write_elem(vring->element_index(gpa), vring_elem);
+				memcpy(data, vring_elem + off_in_elem, len);
 			} else if (rc == 1) { // genereted elem, already written
 				// just mark the region, do nothing
 			}
-			// memcpy(data, vring_elem, len);
 			return 0;
 		default:
 			assert(false);

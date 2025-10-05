@@ -106,10 +106,10 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                 bx_address gpa = lookup_gpa_by_hpa(phy);
                 const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa);
                 if (vring)
-                    printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s] len: %lx data: ",
-                            phy, gpa, vring->type_str(), len);
+                    printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x data: ",
+                            phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len);
                 else
-                    printf("!dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
+                    printf("!dma inject: [HPA: %lx, GPA: %lx] len: %x data: ",
                             phy, gpa, len);
                 for (int i = 0; i < len; i++)
                     printf("%02x", data[i]);

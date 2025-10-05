@@ -11,6 +11,8 @@
 #include "tsl/robin_map.h"
 #include "tsl/robin_set.h"
 
+#include "task.h"
+
 #define VIRTIO_PCI_COMMON_DFSELECT	0
 #define VIRTIO_PCI_COMMON_DF		4
 #define VIRTIO_PCI_COMMON_GFSELECT	8
@@ -44,7 +46,8 @@
 #define VIRTIO_QUEUE_MAX 1024
 
 
-#define GUEST_MEM_SIZE 0x100000000UL 
+#define GUEST_MEM_START ((0x100000000UL))
+#define GUEST_MEM_SIZE ((1UL<<31))
 
 struct ConfigSpace;
 struct VQueue;
@@ -60,8 +63,11 @@ public:
     };
     enum SGType {
         OUT,
+        OUT_HEAD,
         IN,
-        TAIL,
+        IN_HEAD,
+        IN_HEAD_TAIL,
+        IN_TAIL,
         NONE
     };
 
@@ -80,7 +86,9 @@ private:
     State state;
     tsl::robin_set<uint16_t> used_index;
     uint8_t sg_num_in;
+    uint8_t sg_num_in_remain;
     uint8_t sg_num_out;
+    uint8_t sg_num_out_remain;
 };
 
 struct vring_desc {
@@ -146,7 +154,7 @@ struct VRing {
     };
     virtual FILED_TYPE filed_type(bx_address address) const {return FILED_TYPE::VRING_ELEM;};
 
-    virtual int ingest_idx(uint16_t* idx) const ;
+    virtual int ingest_idx(uint16_t* idx) const {return 0;};
 };
 
 struct AvailRing: VRing {
@@ -163,6 +171,7 @@ struct AvailRing: VRing {
     int ingest_elem(void*, int index) const override;
     const char* type_str() const override {return "avail";}
     virtual FILED_TYPE filed_type(bx_address address) const override;
+    virtual int ingest_idx(uint16_t* idx) const override;
 };
 
 struct UsedRing: VRing {
@@ -225,6 +234,10 @@ struct ConfigSpace {
     bx_address get_avail_ring_addr() const;
     bx_address get_used_ring_addr() const;
     bx_address get_desc_ring_addr() const;
+    bool set_avail_ring_addr(unsigned long addr) const;
+    bool set_used_ring_addr(unsigned long addr) const;
+    bool set_desc_ring_addr(unsigned long addr) const;
+    bool setup_queue() const;
     size_t get_queue_size() const;
     size_t get_queue_num() const;
     size_t get_queue_sel() const;

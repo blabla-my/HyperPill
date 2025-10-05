@@ -303,9 +303,8 @@ uint8_t* ic_ingest_len(size_t len) {
     size_t remaining_len = len - copy;
     if(copy != len) {
         srand(__rdtsc());
-        memset(zeros, 0, remaining_len);
-        for(int i=0; i<(rand()%8)*remaining_len/16 && remaining_len; i++) {
-            zeros[rand()%remaining_len] = rand()&0xFF;
+        for (int i=0; i<remaining_len; i++){
+            zeros[i] = rand() % 0xFF;
         }
     }
     if(!append(zeros, remaining_len)) {
@@ -346,8 +345,6 @@ int ic_ingest_uint(void*result, size_t len, unsigned long min, unsigned long max
         default:
             return -1;
     }
-    if(!append(result, len))
-        return -1;
     return 0;
 }
 
