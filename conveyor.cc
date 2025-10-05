@@ -180,7 +180,7 @@ static inline const uint8_t* size_ptr(size_t len){
     return input_cursor - len;
 }
 
-static inline const size_t remaining_input_len(){
+const size_t remaining_input_len(){
     return input + input_len - input_cursor;
 }
 

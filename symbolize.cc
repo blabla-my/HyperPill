@@ -88,7 +88,7 @@ void symbolize(size_t pc) {
         if(pc >= range.first.first && pc < range.first.first + range.first.second)
             return ;
     }                                                                                         
-    printf("Trying to read from %lx\n", pc&(~0xFFFLL));
+    printf("Trying to read from %llx\n", pc&(~0xFFFLL));
     /* BX_CPU(0)->access_read_linear(pc&(~0xFFFLL), 0x1000, 0, BX_READ, 0x0, instr_buf); */
 
     bool valid = BX_CPU(0)->dbg_xlate_linear2phy(pc&(~0xFFFLL), &phy_addr);

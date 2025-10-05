@@ -9,6 +9,7 @@
 #define SEPARATOR "FUZZ"
 #define SEPARATOR_LEN 4
 
+const size_t remaining_input_len();
 void ic_setup(size_t max_input);
 void ic_new_input(const uint8_t* in, size_t len);
 uint8_t *ic_get_output(size_t *len);
