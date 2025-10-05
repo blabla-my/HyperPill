@@ -26,12 +26,10 @@ int VRing::ingest_idx(uint16_t *idx) const {
 	if (!addr_hpa) return -2;
 	uint16_t last_idx;
 	BX_CPU(x)->access_read_physical(addr_hpa + sizeof(uint16_t), sizeof(last_idx), &last_idx);
-	// if(ic_ingest16(idx, 0, size) < 0) {
-	// 	printf("failed to inject vring index!\n");
-	// 	return -1;
-	// }
-	*idx = (last_idx + 1) % size;
-	printf("!virtio: inject vring %s index %.2x, last %.2x\n", type_str(), *idx, last_idx);
+	*idx = last_idx + 1;
+	DBG_PRINT {
+		printf("!virtio: inject vring %s index %.2x, last %.2x\n", type_str(), *idx, last_idx);
+	}
 	return 0;
 }
 
