@@ -69,8 +69,8 @@ void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address
         if(sqlite3_column_int64(res, 1)) {
             pio_regions[sqlite3_column_int64(res, 0)] = sqlite3_column_int64(res, 1);
             printf("Loaded PIO Region: %lx +%lx\n", 
-                    sqlite3_column_int64(res, 0),
-                    sqlite3_column_int64(res, 1));
+                    (unsigned long)sqlite3_column_int64(res, 0),
+                    (unsigned long)sqlite3_column_int64(res, 1));
         }
     }
     sql = "SELECT Address, Length from MMIO";
@@ -78,8 +78,8 @@ void load_regions(std::map<uint16_t, uint16_t> &pio_regions, std::map<bx_address
     while((step = sqlite3_step(res)) == SQLITE_ROW) {
         if(sqlite3_column_int64(res, 1)){
             printf("Loaded MMIO Region: %lx +%lx\n", 
-                    sqlite3_column_int64(res, 0),
-                    sqlite3_column_int64(res, 1));
+                    (unsigned long)sqlite3_column_int64(res, 0),
+                    (unsigned long)sqlite3_column_int64(res, 1));
             mmio_regions[sqlite3_column_int64(res, 0)] = sqlite3_column_int64(res, 1);
         }
     }

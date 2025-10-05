@@ -43,8 +43,6 @@
 
 #define VIRTIO_QUEUE_MAX 1024
 
-#define PAGE_SHIFT 12
-#define PAGE_NUM(x) ((x)>>PAGE_SHIFT)
 
 #define GUEST_MEM_SIZE 0x100000000UL 
 

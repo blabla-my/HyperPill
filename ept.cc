@@ -203,7 +203,7 @@ void ept_locate_pc() {
     printf("%lx -> %lx\n", BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phyaddr);
     
     vmcs_linear2phy(0, &phyaddr);
-    printf("%lx -> %lx\n", 0, phyaddr);
+    printf("%lx -> %lx\n", 0UL, phyaddr);
 }
 
 // Walk guest page table

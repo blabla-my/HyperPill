@@ -185,11 +185,11 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
         if(cur_input.emplace(new_rip).second)
             last_new = 0;
         if(last_new++ > 3000000 && !master_fuzzer ){
-            printf("No new edges for over %d..\n", last_new);
+            printf("No new edges for over %lu..\n", last_new);
             fuzz_emu_stop_unhealthy();
         }
         if(last_new > 3000000 && master_fuzzer ){
-            printf("No new edges for over %d..\n", last_new);
+            printf("No new edges for over %lu..\n", last_new);
             fuzz_stacktrace();
             fuzz_emu_stop_unhealthy();
         }
@@ -205,7 +205,7 @@ out:
     if (seen_edges.emplace(hash).second) {
         time(&t);
         auto s = addr_to_sym(new_rip);
-        printf("[%d] NEW_PC: %lx %s (%s)\n", t, new_rip, s.symbol.c_str(), s.bin.c_str());
+        printf("[%lu] NEW_PC: %lx %s (%s)\n", t, new_rip, s.symbol.c_str(), s.bin.c_str());
         status |= (1 << 1); // new pc
     }
 }

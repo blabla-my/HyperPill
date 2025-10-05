@@ -106,7 +106,7 @@ std::vector<uint32_t> get_pio_icounts() {
         reset_bx_vm();
 
         pio_icounts[i] = icount_read + icount_write;
-        printf("Port %x %lx\n", i, pio_icounts[i]);
+        printf("Port %x %x\n", i, pio_icounts[i]);
     }
 
     for (uint32_t i = 0x0; i <= 0xFFFF; i += 0x1) {
@@ -145,7 +145,7 @@ void enum_pio_regions() {
 
     printf("\n--- PIO Ranges ---\n");
     for (auto &a : merged_regions) {
-        printf("PIO Range: 0x%lx 0x%lx\n", a.first, a.second);
+        printf("PIO Range: 0x%hx 0x%hx\n", a.first, a.second);
         insert_pio(a.first, a.second);
     }
 }
@@ -178,7 +178,7 @@ void enum_mmio_regions(void) {
             uint32_t status = get_sysret_status();
             uint64_t icount = get_icount();
 
-            printf("MMIO: %lx Icount %lx Sysret: %lx ", addr, icount, status);
+            printf("MMIO: %lx Icount %lx Sysret: %x ", addr, icount, status);
             printf("\n");
             if (seen_icounts.emplace(icount).second) {
                 new_icount =1 ; // new icount

@@ -238,11 +238,11 @@ void fuzz_instr_before_execution(bxInstruction_c *i) {
 
 	/* Check Icount limits */
 	if (icount > icount_limit && fuzzing) {
-		printf("icount abort %d\n", icount);
+		printf("icount abort %ld\n", icount);
 	    fuzz_emu_stop_unhealthy();
 	}
 	if (pio_icount > pio_icount_limit && fuzzenum){
-		printf("pio_icount abort %d\n", pio_icount);
+		printf("pio_icount abort %ld\n", pio_icount);
 		fuzz_emu_stop_unhealthy();
 	}
     icount++;

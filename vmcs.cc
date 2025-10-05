@@ -40,7 +40,7 @@ unsigned fuzz_get_vmcs_field_offset(Bit32u encoding) {
     static int reenter; 
     if(BX_CPU(id)->fuzztrace && !reenter){
         reenter = 1;
-        printf("VMCS->%lx = VMCS[%lx] = %lx\n", encoding, shadow_vmcs_layout[encoding], auto_vmread(encoding));
+        printf("VMCS->%x = VMCS[%lx] = %lx\n", encoding, shadow_vmcs_layout[encoding], auto_vmread(encoding));
         reenter = 0;
     }
     return shadow_vmcs_layout[encoding];

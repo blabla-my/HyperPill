@@ -67,7 +67,7 @@ void iterate_tasks(bx_address task_struct_head);
 /* macros for operating struct task_struct */
 /* kernel version 6.0.32 */
 #define PAGE_SHIFT 12
-#define PAGE_NUM(x) (x>>PAGE_SHIFT)
+#define PAGE_NUM(x) ((x)>>PAGE_SHIFT)
 
 /* copied from linx/sched.h */
 /*

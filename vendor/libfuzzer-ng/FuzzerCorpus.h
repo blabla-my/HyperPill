@@ -371,7 +371,6 @@ public:
                         found_pos = std::distance(U.begin(), start);
                         found_val = j == 0 ? Arg1: Arg2;
                         hint_val = j == 0 ? Arg2: Arg1;
-                        printf("%lx Found %lx at %lx Size is %lx\n", count, found_val, found_pos, val_size);
                         if(count > 1)
                             break;
                         start++;
@@ -384,7 +383,6 @@ public:
                         found_pos = std::distance(U.begin(), start);
                         found_val = j == 0 ? Arg1: Arg2;
                         hint_val = j == 0 ? Arg2: Arg1;
-                        printf("%lx Found %lx at %lx Size is %lx\n", count, found_val, found_pos, val_size);
                         if(count > 1)
                             break;
                         start++;
