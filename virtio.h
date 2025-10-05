@@ -132,8 +132,12 @@ struct VRing {
     }
     virtual size_t element_size() const {return 0;}
     virtual size_t ring_offset() const {return 0;}
-    virtual int ingest_elem(void*) const {return 0;};
+    virtual uint16_t element_index(bx_address gpa) const {
+        return (gpa - start() - ring_offset()) / element_size();
+    }
+    virtual int ingest_elem(void*, int index=-1) const {return 0;};
     virtual const char* type_str() const {return "base";};
+    virtual void write_elem(int index, void* elem) const;
 
     enum FILED_TYPE {
         FLAGS, 
@@ -156,7 +160,7 @@ struct AvailRing: VRing {
     }
     size_t element_size() const override {return sizeof(vring_avail_elem);}
     size_t ring_offset() const override {return sizeof(uint16_t)*2;}
-    int ingest_elem(void*) const override;
+    int ingest_elem(void*, int index) const override;
     const char* type_str() const override {return "avail";}
     virtual FILED_TYPE filed_type(bx_address address) const override;
 };
@@ -172,7 +176,7 @@ struct UsedRing: VRing {
     }
     size_t element_size() const override {return sizeof(vring_used_elem);}
     size_t ring_offset() const override {return sizeof(uint16_t)*2;}
-    int ingest_elem(void*) const override;
+    int ingest_elem(void*, int index) const override;
     const char* type_str() const override {return "used";}
     virtual FILED_TYPE filed_type(bx_address address) const override;
 };
@@ -188,7 +192,7 @@ struct DescRing: VRing {
     }
     size_t element_size() const override  {return sizeof(vring_desc);}
     size_t ring_offset() const override {return 0;}
-    int ingest_elem(void*) const override;
+    int ingest_elem(void*, int index) const override;
     const char* type_str() const override {return "desc";}
 };
 

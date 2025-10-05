@@ -10,6 +10,9 @@
 #include <cstdint>
 #include "conveyor.h"
 
+// #define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
+#define DBG_PRINT if(1)
+
 /* global variables */
 
 /* VRing */
@@ -33,8 +36,13 @@ int VRing::ingest_idx(uint16_t *idx) const {
 	return 0;
 }
 
+void VRing::write_elem(int index, void* elem) const {
+	if (!addr_hpa) return;
+	if (index >= size) return;
+	BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
+}
 /* AvailRing */
-int AvailRing::ingest_elem(void* opaque) const {
+int AvailRing::ingest_elem(void* opaque, int index) const {
 	auto* avail_elem_ptr = (vring_avail_elem*)opaque;
 	if(ic_ingest16(avail_elem_ptr, 0, size) < 0){
 		return -1;
@@ -42,11 +50,13 @@ int AvailRing::ingest_elem(void* opaque) const {
 	/* every time the avail ring is touched, reset desc chain fsm */
 	queue->desc_chain_fsm.reset();
 	queue->desc_chain_fsm.init(size);
-	printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
-	for (int i = 0; i < element_size(); i++){
-		printf("%.2x", *((uint8_t*)opaque + i));
+	DBG_PRINT {
+		printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
+		for (int i = 0; i < element_size(); i++){
+			printf("%.2x", *((uint8_t*)opaque + i));
+		}
+		printf("\n");
 	}
-	printf("\n");
 	return 0;
 }
 VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
@@ -63,16 +73,18 @@ VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
 }
 
 /* UsedRing */
-int UsedRing::ingest_elem(void* opaque) const {
+int UsedRing::ingest_elem(void* opaque, int index) const {
 	auto* used_elem_ptr = (vring_used_elem*)opaque;
 	if(ic_ingest64((uint64_t*)used_elem_ptr, 0, -1) < 0){
 		return -1;
 	}
-	printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
-	for (int i = 0; i < element_size(); i++){
-		printf("%.2x", *((uint8_t*)opaque + i));
+	DBG_PRINT {
+		printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
+		for (int i = 0; i < element_size(); i++){
+			printf("%.2x", *((uint8_t*)opaque + i));
+		}
+		printf("\n");
 	}
-	printf("\n");
 	return 0;
 }
 VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
@@ -88,7 +100,13 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 }
 
 /* DescRing */
-int DescRing::ingest_elem(void* opaque) const {
+int DescRing::ingest_elem(void* opaque, int index) const {
+	/* firstly, we query desc chain fsm for genereted desc index */
+	/* we assume here the desc chain fsm has been initialized */
+	if (queue->desc_chain_fsm.has_used_index(index)){
+		printf("!virtio: desc ring index %d generated already\n", index);
+		return 1;
+	} 
 	auto* desc_ptr = (vring_desc*)opaque;
 	size_t off = ic_get_offset();
 	if (ic_ingest64(&desc_ptr->addr, 0x2000UL, GUEST_MEM_SIZE-1) < 0){
@@ -111,8 +129,7 @@ int DescRing::ingest_elem(void* opaque) const {
 		if (ic_ingest16(&desc_ptr->next, 0, size-1) < 0){
 			return -1;
 		}
-		if (!queue->desc_chain_fsm.has_used_index(desc_ptr->next)){
-			queue->desc_chain_fsm.add_used_index(desc_ptr->next);
+		if (desc_ptr->next != index and !queue->desc_chain_fsm.has_used_index(desc_ptr->next)){
 			break;
 		}
 	}
@@ -146,17 +163,19 @@ int DescRing::ingest_elem(void* opaque) const {
 			case DescChainFSM::SGType::NONE:
 				break;
 		}
+		queue->desc_chain_fsm.add_used_index(index);
 	}
 	/* collect generated desc */
 	// queue->add_desc(desc_ptr);
-
-	printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
-		type_str(), element_size(),
-		desc_ptr->addr, desc_ptr->len, desc_ptr->next, desc_ptr->flags);
-	for (int i = 0; i < element_size(); i++){
-		printf("%.2x", *((uint8_t*)opaque + i));
+	DBG_PRINT {
+		printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
+			type_str(), element_size(),
+			desc_ptr->addr, desc_ptr->len, desc_ptr->next, desc_ptr->flags);
+		for (int i = 0; i < element_size(); i++){
+			printf("%.2x", *((uint8_t*)opaque + i));
+		}
+		printf("\n");
 	}
-	printf("\n");
 	return 0;
 }
 
@@ -494,20 +513,12 @@ void DescChainFSM::init(unsigned max_len) {
 	/* ingest random number as the length of chaining desc */	
 	max_len = max_len < CHAINING_DESC_MAX ? max_len : CHAINING_DESC_MAX;
 	if (state == DescChainFSM::State::WAIT){
-		printf("init desc chaining FSM, max len: %u\n", max_len);
-		// if (ic_ingest8(&sg_num_out, 1, max_len-1) < 0) {
-		// 	printf("failed to ingest desc chaining out length!\n");
-		// 	sg_num_out = 1;
-		// }
-		// if (ic_ingest8(&sg_num_in, 1, max_len-sg_num_out) < 0) {
-		// 	printf("failed to ingest desc chaining in length!\n");
-		// 	sg_num_in = 1;
-		// }
-		
 		/* directly set sg_num_out = 1 and sg_num_in = 1 */
 		sg_num_in = sg_num_out = 1;
 		state = DescChainFSM::State::INITED;
-		printf("init desc chaining: out %u, in %u\n", sg_num_out, sg_num_in);
+		DBG_PRINT {
+			printf("init desc chaining: out %u, in %u\n", sg_num_out, sg_num_in);
+		}
 	}	
 }
 
