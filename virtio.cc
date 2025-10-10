@@ -133,33 +133,24 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 			case DescChainFSM::SGType::OUT_HEAD:
 				desc_ptr->flags |= VRING_DESC_F_NEXT;
 				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
-				desc_ptr->len = 0x10; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::OUT:
 				desc_ptr->flags |= VRING_DESC_F_NEXT;
 				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
-				desc_ptr->addr &= ~0xfff; // page-aligned
-				desc_ptr->len = 512; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::IN_HEAD:
 				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
-				desc_ptr->addr &= ~0xfff; // page-aligned
-				desc_ptr->len = 512; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::IN:
 				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
-				desc_ptr->addr &= ~0xfff; // page-aligned
-				desc_ptr->len = 512; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::IN_HEAD_TAIL:
 				desc_ptr->flags |= VRING_DESC_F_WRITE;
 				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
-				desc_ptr->len = 0x1; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::IN_TAIL:
 				desc_ptr->flags |= VRING_DESC_F_WRITE;
 				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
-				desc_ptr->len = 0x1; // for virtio-blk
 				break;
 			case DescChainFSM::SGType::NONE:
 				break;
