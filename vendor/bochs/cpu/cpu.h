@@ -5727,5 +5727,5 @@ class bxInstruction_c;
 #endif
 
 
-void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size);
+void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant = false);
 #endif  // #ifndef BX_CPU_H

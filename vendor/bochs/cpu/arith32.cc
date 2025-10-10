@@ -471,7 +471,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EdIdM(bxInstruction_c *i)
   op1_32 = read_virtual_dword(i->seg(), eaddr);
   op2_32 = i->Id();
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32));
+  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32), true);
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 
@@ -485,7 +485,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EdIdR(bxInstruction_c *i)
   op1_32 = BX_READ_32BIT_REG(i->dst());
   op2_32 = i->Id();
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32));
+  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32), true);
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 

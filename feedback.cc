@@ -71,7 +71,9 @@ void indicator_cb(void(*cb)(uint64_t)) {
     }
 }
 
-void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size){
+void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
+    if (!constant)
+        return;
 
 
     uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;

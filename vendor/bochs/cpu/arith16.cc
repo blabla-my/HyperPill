@@ -439,7 +439,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EwIwM(bxInstruction_c *i)
   Bit32u op1_16 = read_virtual_word(i->seg(), eaddr);
   Bit32u op2_16 = i->Iw();
   Bit32u diff_16 = op1_16 - op2_16;
-  fuzz_hook_cmp(op1_16, op2_16, sizeof(op1_16));
+  fuzz_hook_cmp(op1_16, op2_16, sizeof(op1_16), true);
 
   SET_FLAGS_OSZAPC_SUB_16(op1_16, op2_16, diff_16);
 
@@ -451,7 +451,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EwIwR(bxInstruction_c *i)
   Bit32u op1_16 = BX_READ_16BIT_REG(i->dst());
   Bit32u op2_16 = i->Iw();
   Bit32u diff_16 = op1_16 - op2_16;
-  fuzz_hook_cmp(op1_16, op2_16, sizeof(op1_16));
+  fuzz_hook_cmp(op1_16, op2_16, sizeof(op1_16), true);
 
   SET_FLAGS_OSZAPC_SUB_16(op1_16, op2_16, diff_16);
 
