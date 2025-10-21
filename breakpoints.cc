@@ -232,19 +232,6 @@ void apply_breakpoints_linux() {
                 elem.in_sgl_size(), elem.out_sgl_size());
         }
     }, true);
-    auto process_blk_task_addr = sym_to_addr("vhost", "process_blk_task");
-    add_breakpoint(process_blk_task_addr + 222UL, [](bxInstruction_c *i) {
-        // qemu-system-x86_64 + 0x0128A7E
-        // virtio_net_handle_rx
-        printf("debug vhost: rax: %lx\n", BX_CPU(0)->gen_reg[BX_64BIT_REG_RAX].rrx);
-    }, false);
-    add_breakpoint(process_blk_task_addr + 0xdbUL, [](bxInstruction_c *i) {
-        // qemu-system-x86_64 + 0x0128A7E
-        // virtio_net_handle_rx
-        static int prf_cnt = 0;
-        prf_cnt++;
-        printf("debug vhost: inc prf cnt, rax: %lx, cnt: %x\n", BX_CPU(0)->gen_reg[BX_64BIT_REG_RAX].rrx, prf_cnt);
-    }, false);
 }
 
 
