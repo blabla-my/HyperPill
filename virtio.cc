@@ -108,18 +108,17 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 		return 1;
 	} 
 	auto* desc_ptr = (vring_desc*)opaque;
-	size_t off = ic_get_offset();
-	if (ic_ingest_uint(&desc_ptr->addr, sizeof(uint64_t), GUEST_MEM_START, GUEST_MEM_START+GUEST_MEM_SIZE-1) < 0){
-		return -1;	
-	}
-	update_buffer_pos(off, sizeof(desc_ptr->addr));
-	// this upperbound and lowerbound are just for testing
 
-	off = ic_get_offset();
-	if (ic_ingest_uint(&desc_ptr->len, sizeof(uint32_t), 0, 0x1000U) < 0){
-		return -1;	
+	/* we generate the whole desc here, and apply some constraints */
+	uint8_t* src = ic_ingest_len(sizeof(vring_desc));
+	if (!src) {
+		return -1;
 	}
-	update_buffer_pos(off, sizeof(desc_ptr->len));
+	memcpy(desc_ptr, src, sizeof(vring_desc));
+	/* round the address */
+	conveyor_round(&desc_ptr->addr, GUEST_MEM_START, GUEST_MEM_START + GUEST_MEM_SIZE - 1);
+	size_t off = ic_get_offset();
+	update_desc_region(off-sizeof(vring_desc), sizeof(vring_desc));
 	
 	desc_ptr->next = (index+1) % size;
 	desc_ptr->flags = 0;
@@ -157,8 +156,6 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 		}
 		queue->desc_chain_fsm.add_used_index(index);
 	}
-	/* collect generated desc */
-	// queue->add_desc(desc_ptr);
 	DBG_PRINT {
 		printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
 			type_str(), element_size(),
@@ -400,6 +397,7 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 		bx_address desc_ring_addr = common_cfg.get_desc_ring_addr();
 		if (i < VIRTIO_QUEUE_MAX) {
 			queues[i] = new VQueue{};
+			queues[i]->idx = get_vqueue_manager().allocate_new_queue_idx();
 			queues[i]->desc_ring = new DescRing{queue_size, desc_ring_addr, queues[i]};
 			queues[i]->avail_ring = new AvailRing{queue_size, avail_ring_addr, queues[i]};
 			queues[i]->used_ring = new UsedRing{queue_size, used_ring_addr, queues[i]};
@@ -611,4 +609,39 @@ DescChainFSM::SGType DescChainFSM::consume() {
 	}
 	state = DONE;
 	return SGType::NONE;
+}
+
+uint16_t DescChainFSM::desc_seq() {
+	if (is_inited() == false) {
+		return 0xffff;
+	}
+	
+	if (sg_num_out == 0 || sg_num_in == 0) {
+		return 0xffff;
+	}
+	
+	if (sg_num_out_remain == sg_num_out)
+		return 0xffff;
+	
+	if (sg_num_out_remain > 0)
+		return sg_num_out - sg_num_out_remain - 1;
+	if (sg_num_in_remain == sg_num_in)
+		return sg_num_out - 1;
+	if (sg_num_in_remain >= 0)
+		return sg_num_in - sg_num_in_remain - 1;
+
+	return 0xffff;
+}
+
+void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {
+	static void* enabled = getenv("SGL_SIZE_INFER");
+	if (enabled)
+		__trace_pc_add_desc_size(queue_id, desc_idx, is_out, size);
+}
+
+void* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out) {
+	static void* enabled = getenv("SGL_SIZE_INFER");
+	if (enabled)
+		return __trace_pc_get_desc_size_hints(queue_id, desc_idx, is_out);
+	return nullptr;
 }

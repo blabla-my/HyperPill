@@ -313,17 +313,6 @@ uint8_t* ic_ingest_len(size_t len) {
     return result;
 }
 
-#define round(ptr, min, max) \
-    do { \
-        if(max>min && max - min + 1 != 0) \
-            *ptr = ((*ptr) % (max - min+1)); \
-        else if (max > min) \
-            *ptr = (*ptr); \
-        else \
-            *ptr = 0; \
-        *ptr += min; \
-    } while(0)
-
 int ic_ingest_uint(void*result, size_t len, unsigned long min, unsigned long max) {
     uint8_t *src = ic_ingest_len(len);
     if(src == NULL)
@@ -331,16 +320,16 @@ int ic_ingest_uint(void*result, size_t len, unsigned long min, unsigned long max
     memcpy(result, src, len);
     switch(len) {
         case sizeof(uint8_t):
-            round((uint8_t*)result, min, max);
+            conveyor_round((uint8_t*)result, min, max);
             break;
         case sizeof(uint16_t):
-            round((uint16_t*)result, min, max);
+            conveyor_round((uint16_t*)result, min, max);
             break;
         case sizeof(uint32_t):
-            round((uint32_t*)result, min, max);
+            conveyor_round((uint32_t*)result, min, max);
             break;
         case sizeof(uint64_t):
-            round((uint64_t*)result, min, max);
+            conveyor_round((uint64_t*)result, min, max);
             break;
         default:
             return -1;
@@ -526,6 +515,10 @@ void update_buffer_pos(unsigned long pos, unsigned long len) {
     static void* dma_only = getenv("CMPLOG_DMA_ONLY");
     if (dma_only)
         __trace_pc_add_input_range(pos, len);
+}
+
+void update_desc_region(unsigned long pos, unsigned long len) {
+    __trace_pc_add_input_range(pos, len);
 }
 
 buffer_pos_iterator buffer_pos_begin() {

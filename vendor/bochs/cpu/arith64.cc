@@ -463,6 +463,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::SUB_EqIdR(bxInstruction_c *i)
 }
 
 __attribute__((weak)) void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){}
+__attribute__((weak)) void fuzz_hook_alignment(uint64_t op1, uint64_t op2, size_t size){}
 
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EqIdM(bxInstruction_c *i)
 {

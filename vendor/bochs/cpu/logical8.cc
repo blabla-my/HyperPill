@@ -245,6 +245,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EbIbM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR(i);
 
   op1 = read_RMW_virtual_byte(i->seg(), eaddr);
+  fuzz_hook_alignment(op1, op2, 1);
   op1 &= op2;
   write_RMW_linear_byte(op1);
 
@@ -258,6 +259,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EbIbR(bxInstruction_c *i)
   Bit8u op1, op2 = i->Ib();
 
   op1 = BX_READ_8BIT_REGx(i->dst(), i->extend8bitL());
+  fuzz_hook_alignment(op1, op2, 1);
   op1 &= op2;
   BX_WRITE_8BIT_REGx(i->dst(), i->extend8bitL(), op1);
 
@@ -297,6 +299,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EbGbM(bxInstruction_c *i)
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EbIbR(bxInstruction_c *i)
 {
   Bit8u op1 = BX_READ_8BIT_REGx(i->dst(), i->extend8bitL());
+  fuzz_hook_alignment(op1, i->Ib(), 1);
   op1 &= i->Ib();
   SET_FLAGS_OSZAPC_LOGIC_8(op1);
 
@@ -308,6 +311,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EbIbM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR(i);
 
   Bit8u op1 = read_virtual_byte(i->seg(), eaddr);
+  fuzz_hook_alignment(op1, i->Ib(), 1);
   op1 &= i->Ib();
   SET_FLAGS_OSZAPC_LOGIC_8(op1);
 

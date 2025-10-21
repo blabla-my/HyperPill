@@ -21,6 +21,7 @@
 #include "FuzzerInternal.h"
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <numeric>
 #include <random>
@@ -309,11 +310,19 @@ public:
       }
       return *ret_iter;
   }
+
   uintptr_t AddHotCmps(InputInfo *II, const Unit &U){
       static void *dma_only = getenv("CMPLOG_DMA_ONLY");
       std::set<uint64_t> hints;
       for(int i=0; i < TPC.cmplog_size; i++){
           auto &cmp = TPC.cmplog[i];
+          if (cmp.size == sizeof(uint64_t) && (int64_t)cmp.val2 > 0) {
+            DescInfo* desc_info = nullptr;
+            /* check val1 (by default, val2 is the immedidate number) */
+            if((desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
+                TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2);                
+            }           
+          }
           //Printf("Doing: %lx %lx vs %lx\n", i, cmp.val1, cmp.val2);
           uint64_t found_val, hint_val;
           uint16_t found_pos;

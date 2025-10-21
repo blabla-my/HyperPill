@@ -9,6 +9,17 @@
 #define SEPARATOR "FUZZ"
 #define SEPARATOR_LEN 4
 
+#define conveyor_round(ptr, min, max) \
+    do { \
+        if(max>min && max - min + 1 != 0) \
+            *(ptr) = ((*(ptr)) % (max - min+1)); \
+        else if (max > min) \
+            *(ptr) = (*(ptr)); \
+        else \
+            *(ptr) = 0; \
+        *(ptr) += min; \
+    } while(0)
+
 const size_t remaining_input_len();
 void ic_setup(size_t max_input);
 void ic_new_input(const uint8_t* in, size_t len);
@@ -52,6 +63,7 @@ typedef std::vector<buffer_pos> buffer_pos_list;
 typedef buffer_pos_list::const_iterator buffer_pos_iterator;
 bool buffer_pos_empty();
 void update_buffer_pos(unsigned long pos, unsigned long len);
+void update_desc_region(unsigned long pos, unsigned long len);
 void reset_buffer_pos();
 buffer_pos_iterator buffer_pos_begin();
 buffer_pos_iterator buffer_pos_end();

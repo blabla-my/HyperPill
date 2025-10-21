@@ -1,5 +1,6 @@
 #include "bochs.h"
 #include "fuzz.h"
+#include <sys/types.h>
 #include <tsl/robin_set.h>
 #include <unordered_set>
 #include <map>
@@ -75,11 +76,9 @@ void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
     if (!constant)
         return;
 
-
     uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
     if(BX_CPU(id)->fuzztrace)
         printf("CMP%ld: %lx vs %lx @ %lx\n", size, op1, op2, PC);
-
 
     if(!op1 || !op2 || op1 == op2 || size < 2)
         return;
@@ -141,6 +140,20 @@ void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
             break;
     }
 
+}
+
+void fuzz_hook_alignment(uint64_t op1, uint64_t op2, size_t size) {
+    if(size != 4 && size != 8)
+        return;
+
+    uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
+    if(BX_CPU(id)->fuzztrace)
+        printf("ALIGN%ld: %lx vs %lx @ %lx\n", size, op1, op2, PC);
+
+    if(ignore_pc(PC))
+        return;
+
+    // printf("ALIGN: %lx vs %lx @ %lx\n", op1, op2, PC);
 }
 
 void init_register_feedback() {

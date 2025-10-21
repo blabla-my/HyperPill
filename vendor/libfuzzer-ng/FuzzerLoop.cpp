@@ -644,6 +644,7 @@ ATTRIBUTE_NOINLINE void Fuzzer::ExecuteCallback(const uint8_t *Data,
                                                 size_t Size) {
   TPC.ClearCmpLog();
   TPC.ClearInputRange();
+  TPC.ClearDescSizes();
   TPC.RecordInitialStack();
   TotalNumberOfRuns++;
   assert(InFuzzingThread());

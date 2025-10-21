@@ -74,6 +74,7 @@ public:
     DescChainFSM() : state(WAIT), sg_num_in(0), sg_num_out(0), used_index() {}
     void init(unsigned max_len);
     SGType consume();
+    uint16_t desc_seq(); // return the number of last consumed desc; out, in, counts independently
     void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
     void add_used_index(uint16_t idx) {used_index.insert(idx);}
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
@@ -206,7 +207,7 @@ struct DescRing: VRing {
 };
 
 struct VQueue {
-    VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL),
+    VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL), idx(0),
         num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs() {}
     void reset();
     void add_desc(vring_desc *desc);
@@ -214,6 +215,7 @@ struct VQueue {
     DescRing* desc_ring;  // Descriptor ring
     AvailRing* avail_ring; // Available ring
     UsedRing* used_ring;  // Used ring
+    size_t idx;
     size_t num;         // Number of descriptors
     size_t last_avail_idx; // Last available index processed
     size_t last_used_idx;  // Last used index processed
@@ -250,6 +252,7 @@ struct ConfigSpace {
 
 #define VIRTIO_NAME_MAX 64
 #define CFG_START(addr) ((addr) >> 14 << 14)
+class VQueueManager;
 struct VirtioDev {
     VirtioDev();
     char name[VIRTIO_NAME_MAX]; // Name of the device
@@ -267,7 +270,7 @@ struct VirtioDev {
 
 class VQueueManager {
 public:
-    VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page() {}
+    VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page(), all_queue_count(0UL) {}
     typedef tsl::robin_set<const VRing*> VRingSet;
     bool create_virtio_device(const std::string& name);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
@@ -280,11 +283,13 @@ public:
         else return virtio_dev_list[index];
     }
     VirtioDev* get_vdev_by_config_space_addr(unsigned long addr);
+    size_t allocate_new_queue_idx() {return all_queue_count++;}
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
     std::vector<VirtioDev*> virtio_dev_list;                                                           
     tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
+    size_t all_queue_count;
 };
 
 VQueueManager& get_vqueue_manager();
@@ -309,5 +314,25 @@ typedef struct VirtQueueElement
 
 int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem);
 
+extern "C" {
+    void __trace_pc_add_desc_size(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
+    void* __trace_pc_get_desc_size_hints(uint16_t queue_id, uint16_t desc_idx, bool is_out);      
+}
+
+/* keep the same with definitions in FuzzerTracePC.h */
+struct DescInfo {
+    uint16_t queue_id;
+    uint16_t desc_idx;
+    bool is_out;
+};
+struct DescSize {
+    DescInfo desc_info;
+    uint32_t size;
+    uint32_t alignment;
+    DescSize* next;
+};
+
+void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
+void* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);
 
 #endif

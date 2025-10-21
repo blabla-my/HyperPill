@@ -31,6 +31,19 @@ struct PosLen {
     uint64_t len;
 };
 
+struct DescInfo {
+    uint16_t queue_id;
+    uint16_t desc_idx;
+    bool is_out;
+};
+
+struct DescSize {
+    DescInfo desc_info;
+    uint32_t size;
+    uint32_t alignment;
+    DescSize* next;
+};
+
 namespace fuzzer {
 
 // TableOfRecentCompares (TORC) remembers the most recently performed
@@ -129,7 +142,19 @@ class TracePC {
   void AddToInputRange(unsigned long pos, unsigned long len);
   void ClearInputRange();
   struct PosLen input_range[0x100];
-  size_t input_range_size;
+  size_t input_range_size = 0;
+  
+  void AddToDescSizes(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
+  void ClearDescSizes();
+  DescInfo* SearchDescSize(unsigned long val);
+  size_t desc_sizes_size = 0;
+  struct DescSize desc_sizes[0x200];
+
+  /* return a linked list of DescSize */
+  void AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
+  void* GetDescSizeHintList(uint16_t queue_id, uint16_t desc_idx, bool is_out);
+  size_t desc_size_hints_size = 0;
+  struct DescSize desc_size_hints[0x100];
 
   void RecordInitialStack();
   uintptr_t GetMaxStackOffset() const;

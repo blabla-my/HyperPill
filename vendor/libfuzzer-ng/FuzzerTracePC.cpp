@@ -23,6 +23,8 @@
 #include "FuzzerUtil.h"
 #include "FuzzerValueBitMap.h"
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <map>
 #include <set>
 
@@ -470,6 +472,90 @@ void TracePC::AddToInputRange(unsigned long pos, unsigned long len) {
   }
 }
 
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+void TracePC::AddToDescSizes(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {
+  if (desc_sizes_size >= sizeof(desc_sizes) / sizeof(desc_sizes[0])) {
+      return;
+  }
+  DescInfo desc_info = DescInfo{.queue_id = queue_id, .desc_idx = desc_idx, .is_out = is_out};
+  DescSize desc_size = DescSize{.desc_info = desc_info, .size = size, .next = nullptr};
+  desc_sizes[desc_sizes_size++] = desc_size;
+}
+
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+void TracePC::ClearDescSizes() {
+  desc_sizes_size = 0;
+  memset(desc_sizes, 0, sizeof(desc_sizes));
+}
+
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+DescInfo* TracePC::SearchDescSize(unsigned long val) {
+  for (size_t i = 0; i < desc_sizes_size; i++) {
+      if (desc_sizes[i].size == val) {
+          return &desc_sizes[i].desc_info;
+      }
+  }
+  return nullptr;
+}
+
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+void TracePC::AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {
+  if (desc_size_hints_size >= sizeof(desc_size_hints) / sizeof(desc_size_hints[0])) {
+      Printf("TracePC: AddToDescSizeHints: Too many desc size hints\n");
+      return;
+  }
+  DescInfo desc_info = DescInfo{.queue_id = queue_id, .desc_idx = desc_idx, .is_out = is_out};
+  DescSize desc_size = DescSize{.desc_info = desc_info, .size = size, .next = nullptr};
+
+  /* first iteration, we find whether this has been added before */
+  for (size_t i = 0; i < desc_size_hints_size; i++) {
+      if (desc_size_hints[i].desc_info.queue_id == queue_id &&
+          desc_size_hints[i].desc_info.desc_idx == desc_idx &&
+          desc_size_hints[i].desc_info.is_out == is_out) {
+        
+          if (desc_size_hints[i].size == size) {
+              return;
+          }
+      }
+  }
+  
+  /* append to desc_size_hints */
+  size_t idx = desc_size_hints_size++;
+  desc_size_hints[idx] = desc_size;
+
+  /* second iteration */
+  /* search for a desc_size with the same desc_info, add to linked list */
+  for (size_t i = 0; i < desc_size_hints_size; i++) {
+      if (desc_size_hints[i].desc_info.queue_id == queue_id &&
+          desc_size_hints[i].desc_info.desc_idx == desc_idx &&
+          desc_size_hints[i].desc_info.is_out == is_out) {
+        
+          desc_size_hints[idx].next = desc_size_hints[i].next;
+          desc_size_hints[i].next = &desc_size_hints[idx];
+          Printf("TracePC: Desc size hint: queue_id=%d desc_idx=%d is_out=%d hint=%d, %lx\n", queue_id, desc_idx, is_out, size, idx);
+          fflush(stdout);
+          return;
+      }
+  }
+}
+
+ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
+ATTRIBUTE_NO_SANITIZE_ALL
+void* TracePC::GetDescSizeHintList(uint16_t queue_id, uint16_t desc_idx, bool is_out) {
+  for (size_t i = 0; i < desc_size_hints_size; i++) {
+      if (desc_size_hints[i].desc_info.queue_id == queue_id &&
+          desc_size_hints[i].desc_info.desc_idx == desc_idx &&
+          desc_size_hints[i].desc_info.is_out == is_out) {
+          return &desc_size_hints[i];
+      }
+  }
+  return nullptr;
+}
+
 // Finds min of (strlen(S1), strlen(S2)).
 // Needed because one of these strings may actually be non-zero terminated.
 ATTRIBUTE_NO_SANITIZE_MEMORY
@@ -829,6 +915,18 @@ ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __trace_pc_add_input_range(unsigned long pos, unsigned long len) {      
   fuzzer::TPC.AddToInputRange(pos, len);
+}
+
+ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
+ATTRIBUTE_TARGET_POPCNT
+void __trace_pc_add_desc_size(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {      
+  fuzzer::TPC.AddToDescSizes(queue_id, desc_idx, is_out, size);
+}
+
+ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
+ATTRIBUTE_TARGET_POPCNT
+void* __trace_pc_get_desc_size_hints(uint16_t queue_id, uint16_t desc_idx, bool is_out) {      
+  return fuzzer::TPC.GetDescSizeHintList(queue_id, desc_idx, is_out);
 }
 
 }  // extern "C"

@@ -500,7 +500,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 			}
 	}
 	if (getenv("KVM")) {
-		add_pc_range(0, 0x7fffffffffff);
+		add_pc_range(0, 0x5fffffffffff);
 		apply_breakpoints_linux();
     }
 	/*

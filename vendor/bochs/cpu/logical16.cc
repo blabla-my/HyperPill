@@ -248,6 +248,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EwIwM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR(i);
 
   op1_16 = read_RMW_virtual_word(i->seg(), eaddr);
+  fuzz_hook_alignment(op1_16, i->Iw(), 2);
   op1_16 &= i->Iw();
   write_RMW_linear_word(op1_16);
 
@@ -259,6 +260,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EwIwM(bxInstruction_c *i)
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EwIwR(bxInstruction_c *i)
 {
   Bit16u op1_16 = BX_READ_16BIT_REG(i->dst());
+  fuzz_hook_alignment(op1_16, i->Iw(), 2);
   op1_16 &= i->Iw();
   BX_WRITE_16BIT_REG(i->dst(), op1_16);
 
@@ -296,6 +298,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EwGwM(bxInstruction_c *i)
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EwIwR(bxInstruction_c *i)
 {
   Bit16u op1_16 = BX_READ_16BIT_REG(i->dst());
+  fuzz_hook_alignment(op1_16, i->Iw(), 2);
   op1_16 &= i->Iw();
   SET_FLAGS_OSZAPC_LOGIC_16(op1_16);
 
@@ -307,6 +310,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EwIwM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR(i);
 
   Bit16u op1_16 = read_virtual_word(i->seg(), eaddr);
+  fuzz_hook_alignment(op1_16, i->Iw(), 2);
   op1_16 &= i->Iw();
   SET_FLAGS_OSZAPC_LOGIC_16(op1_16);
 
