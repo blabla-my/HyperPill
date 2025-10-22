@@ -54,6 +54,7 @@ OBJS       = main.o \
              gdbstub.o \
              task.o \
              virtio.o \
+			 mutate.o \
              bochsapi/logfunctions.o \
              devices.o \
              bochsapi/system.o \
