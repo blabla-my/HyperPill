@@ -73,18 +73,23 @@ void indicator_cb(void(*cb)(uint64_t)) {
 }
 
 void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
-    if (!constant)
+    static void* virtio_by_core = getenv("VIRTIO_CORE"); 
+    if (virtio_by_core && !constant)
         return;
 
     uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
     if(BX_CPU(id)->fuzztrace)
         printf("CMP%ld: %lx vs %lx @ %lx\n", size, op1, op2, PC);
 
-    if(!op1 || !op2 || op1 == op2 || size < 2)
+    // if(!op1 || !op2 || op1 == op2 || size < 2)
+    if(!op1 || !op2 || op1 == op2)
         return;
 
     if(ignore_pc(PC))
         return;
+
+    if(virtio_by_core)
+        goto TRACE_CMP;
 
     if (indicator_values.find(op1) != indicator_values.end()) {
         found_indicators[op2]+=1;
@@ -127,7 +132,10 @@ void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
         }
     }
 
+TRACE_CMP:
     switch(size) {
+        case 1:
+            __sanitizer_cov_trace_cmp1_pc(PC, (uint8_t)op1, (uint8_t)op2);
         case 2:
             __sanitizer_cov_trace_cmp2_pc(PC, (uint16_t)op1, (uint16_t)op2);
         case 4:
