@@ -1,4 +1,5 @@
 #include "virtio.h"
+#include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include "bochs.h"
 #include "config.h"
 #include "cpu/cpu.h"
@@ -118,7 +119,6 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 	/* round the address */
 	conveyor_round(&desc_ptr->addr, GUEST_MEM_START, GUEST_MEM_START + GUEST_MEM_SIZE - 1);
 	size_t off = ic_get_offset();
-	update_desc_region(off-sizeof(vring_desc), sizeof(vring_desc));
 	
 	desc_ptr->next = (index+1) % size;
 	desc_ptr->flags = 0;
@@ -155,6 +155,23 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 				break;
 		}
 		queue->desc_chain_fsm.add_used_index(index);
+		uint16_t queue_idx = queue->idx;
+		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
+		auto desc_seq = queue->desc_chain_fsm.desc_seq();
+		DescInfo desc_info = {
+			.queue_id = queue_idx,
+			.desc_idx = desc_seq,
+			.is_out = is_out
+		};
+		// if (!ic_append(&desc_info, sizeof(DescInfo))) {
+		// 	return -1;
+		// }
+		// if (!ic_append(DESC_SEPARATOR, DESC_SEPARATOR_LEN)) {
+		// 	return -1;
+		// }
+		if (desc_ptr->len - desc_seq - queue_idx == 0xdeadbeef)
+			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
+		update_desc_region(queue_idx, desc_seq, is_out, off-sizeof(vring_desc), sizeof(vring_desc));
 	}
 	DBG_PRINT {
 		printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 

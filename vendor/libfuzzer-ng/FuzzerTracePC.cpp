@@ -448,27 +448,28 @@ static size_t InternalStrnlen(const char *S, size_t MaxLen) {
 
 ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
 ATTRIBUTE_NO_SANITIZE_ALL
-void TracePC::ClearInputRange() {
-  input_range_size = 0;
-  memset(input_range, 0, sizeof(input_range));
+void TracePC::ClearDescRegions() {
+  desc_regions_size = 0;
+  memset(desc_regions, 0, sizeof(desc_regions));
 }
 
 ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
 ATTRIBUTE_NO_SANITIZE_ALL
-void TracePC::AddToInputRange(unsigned long pos, unsigned long len) {
+void TracePC::AddToDescRegions(uint16_t queue_idx, uint16_t desc_idx, bool is_out,
+    unsigned long pos, unsigned long len) {
   // input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
-  if (input_range_size > 0) {
-    auto& last_pos_len = input_range[input_range_size-1];
+  if (desc_regions_size > 0) {
+    auto& last_pos_len = desc_regions[desc_regions_size-1];
     if (pos > last_pos_len.pos + last_pos_len.len) {
-      input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+      desc_regions[desc_regions_size++] = DescRegion{.desc_info = { .queue_id=queue_idx, .desc_idx = desc_idx, .is_out = is_out} , .pos = pos, .len = len};
     } else if (pos + len < last_pos_len.pos) {
-      input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+      desc_regions[desc_regions_size++] = DescRegion{.desc_info = { .queue_id=queue_idx, .desc_idx = desc_idx, .is_out = is_out} , .pos = pos, .len = len};
     } else if (pos == last_pos_len.pos + last_pos_len.len) {
       last_pos_len.pos = Min(pos, last_pos_len.pos);
       last_pos_len.len = Max(pos+len, last_pos_len.pos+last_pos_len.len);
     }
   } else {
-    input_range[input_range_size++] = PosLen{.pos = pos, .len = len};
+      desc_regions[desc_regions_size++] = DescRegion{.desc_info = { .queue_id=queue_idx, .desc_idx = desc_idx, .is_out = is_out} , .pos = pos, .len = len};
   }
 }
 
@@ -494,7 +495,7 @@ ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
 ATTRIBUTE_NO_SANITIZE_ALL
 DescInfo* TracePC::SearchDescSize(unsigned long val) {
   for (size_t i = 0; i < desc_sizes_size; i++) {
-      if (desc_sizes[i].size == val) {
+      if (val - desc_sizes[i].desc_info.desc_idx - desc_sizes[i].desc_info.queue_id == 0xdeadbeef) { // check if val is the expected magic number
           return &desc_sizes[i].desc_info;
       }
   }
@@ -503,7 +504,7 @@ DescInfo* TracePC::SearchDescSize(unsigned long val) {
 
 ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
 ATTRIBUTE_NO_SANITIZE_ALL
-void TracePC::AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {
+void TracePC::AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size, uint64_t pc) {
   if (desc_size_hints_size >= sizeof(desc_size_hints) / sizeof(desc_size_hints[0])) {
       Printf("TracePC: AddToDescSizeHints: Too many desc size hints\n");
       return;
@@ -536,7 +537,7 @@ void TracePC::AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_o
         
           desc_size_hints[idx].next = desc_size_hints[i].next;
           desc_size_hints[i].next = &desc_size_hints[idx];
-          Printf("TracePC: Desc size hint: queue_id=%d desc_idx=%d is_out=%d hint=%d, %lx\n", queue_id, desc_idx, is_out, size, idx);
+          Printf("TracePC: Desc size hint: queue_id=%d desc_idx=%d is_out=%d hint=%d idx %lx pc %lx\n", queue_id, desc_idx, is_out, size, idx, pc);
           fflush(stdout);
           return;
       }
@@ -913,8 +914,20 @@ void __sanitizer_weak_hook_memmem(void *called_pc, const void *s1, size_t len1,
 
 ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
 ATTRIBUTE_TARGET_POPCNT
-void __trace_pc_add_input_range(unsigned long pos, unsigned long len) {      
-  fuzzer::TPC.AddToInputRange(pos, len);
+void __trace_pc_add_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len) {      
+  fuzzer::TPC.AddToDescRegions(queue_idx, desc_idx, is_out, pos, len);
+}
+
+ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
+ATTRIBUTE_TARGET_POPCNT
+void* __trace_pc_get_desc_regions() {      
+  return (void*)fuzzer::TPC.GetDescRegions();
+}
+
+ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
+ATTRIBUTE_TARGET_POPCNT
+size_t __trace_pc_get_desc_regions_size() {      
+  return fuzzer::TPC.GetDescRegionsSize();
 }
 
 ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   

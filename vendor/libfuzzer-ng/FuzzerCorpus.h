@@ -312,17 +312,10 @@ public:
   }
 
   uintptr_t AddHotCmps(InputInfo *II, const Unit &U){
-      static void *dma_only = getenv("CMPLOG_DMA_ONLY");
+      static void *virtio_core = getenv("VIRTIO_CORE");
       std::set<uint64_t> hints;
       for(int i=0; i < TPC.cmplog_size; i++){
           auto &cmp = TPC.cmplog[i];
-          if (cmp.size == sizeof(uint64_t) && (int64_t)cmp.val2 > 0) {
-            DescInfo* desc_info = nullptr;
-            /* check val1 (by default, val2 is the immedidate number) */
-            if((desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
-                TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2);                
-            }           
-          }
           //Printf("Doing: %lx %lx vs %lx\n", i, cmp.val1, cmp.val2);
           uint64_t found_val, hint_val;
           uint16_t found_pos;
@@ -330,6 +323,54 @@ public:
           int count = 0;
           if(cmp_pc_counts[cmp.pc] > 50)
               continue;
+          
+          if (virtio_core) {
+            if (cmp.size == sizeof(uint64_t) && (int64_t)cmp.val2 > 0) {
+              DescInfo* desc_info = nullptr;
+              /* check val1 (by default, val2 is the immedidate number) */
+              if((desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
+                  TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2, cmp.pc);                
+              }           
+            }
+            
+            /* by default, val2 is the immediate value */
+            hint_val = cmp.val2;
+            found_val = cmp.val1;
+            uint64_t Arg1 = cmp.val1, Arg2 = cmp.val2;
+            std::vector<uint8_t> pattern = {};
+            if ((Arg1 | Arg2) <= UINT8_MAX) {
+                val_size = 1;
+            }
+            else if ((Arg1 | Arg2) <= UINT16_MAX)
+                val_size = 2;
+            else if ((Arg1 | Arg2) <= UINT32_MAX)
+                val_size = 4;
+            for (int i=0; i<val_size; i++){
+                pattern.push_back((Arg1 >> (8*i)) & 0xFF);
+            }
+            auto start = U.begin();
+            auto end = U.end();
+            while ((start = std::search(start, U.end(),
+                            pattern.begin(), pattern.end())) != U.end()) {
+                count +=1;
+                found_pos = std::distance(U.begin(), start);
+                if(count > 1)
+                    break;
+                start++;
+            }
+            if(count == 1){
+                if(II){
+                    II->HotSpots.push_back({val_size, found_pos, hint_val, cmp.pc});
+                    Printf("Hotspot Pos %d\tHint: %lx (vs %lx)\tPC: %lx\n",
+                            found_pos, hint_val, found_val, cmp.pc);
+                    cmp_pc_counts[cmp.pc]++;
+                    hinted_pcs[std::make_tuple(cmp.pc, hint_val)] = U.size();
+                    hints.insert(hint_val);
+                } else {
+                    return cmp.pc ^ found_val;
+                }
+            }
+          } else { 
           for (int reversed=0 ; reversed<2 && (!count); reversed++) {
               uint64_t Arg1 = cmp.val1, Arg2 = cmp.val2;
 
@@ -370,32 +411,15 @@ public:
                   auto start = U.begin();
                   auto end = U.end();
                   
-                  if (dma_only) {
-                    for (size_t ii = 0; ii < TPC.input_range_size; ii++) {
-                      start = U.begin() + TPC.input_range[ii].pos;
-                      end = start + TPC.input_range[ii].len;
-                      while ((start = std::search(start, end,
-                                      pattern.begin(), pattern.end())) != end) {
-                        count += 1;
-                        found_pos = std::distance(U.begin(), start);
-                        found_val = j == 0 ? Arg1: Arg2;
-                        hint_val = j == 0 ? Arg2: Arg1;
-                        if(count > 1)
-                            break;
-                        start++;
-                      }
-                    }
-                  } else {
-                    while ((start = std::search(start, U.end(),
-                                    pattern.begin(), pattern.end())) != U.end()) {
-                        count +=1;
-                        found_pos = std::distance(U.begin(), start);
-                        found_val = j == 0 ? Arg1: Arg2;
-                        hint_val = j == 0 ? Arg2: Arg1;
-                        if(count > 1)
-                            break;
-                        start++;
-                    }
+                  while ((start = std::search(start, U.end(),
+                                  pattern.begin(), pattern.end())) != U.end()) {
+                      count +=1;
+                      found_pos = std::distance(U.begin(), start);
+                      found_val = j == 0 ? Arg1: Arg2;
+                      hint_val = j == 0 ? Arg2: Arg1;
+                      if(count > 1)
+                          break;
+                      start++;
                   }
               }
               if(count == 1){
@@ -411,6 +435,7 @@ public:
                   }
               }
           }
+        }
       }
       return 0;
   }

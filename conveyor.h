@@ -9,6 +9,10 @@
 #define SEPARATOR "FUZZ"
 #define SEPARATOR_LEN 4
 
+// #define DESC_SEPARATOR "DESC_END"
+#define DESC_SEPARATOR "\xad\xde"
+#define DESC_SEPARATOR_LEN 8
+
 #define conveyor_round(ptr, min, max) \
     do { \
         if(max>min && max - min + 1 != 0) \
@@ -62,8 +66,7 @@ typedef struct {
 typedef std::vector<buffer_pos> buffer_pos_list;
 typedef buffer_pos_list::const_iterator buffer_pos_iterator;
 bool buffer_pos_empty();
-void update_buffer_pos(unsigned long pos, unsigned long len);
-void update_desc_region(unsigned long pos, unsigned long len);
+void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len);
 void reset_buffer_pos();
 buffer_pos_iterator buffer_pos_begin();
 buffer_pos_iterator buffer_pos_end();
@@ -73,7 +76,11 @@ void __fuzzer_set_output(uint8_t *data, size_t size);
 void __fuzzer_set_op_log(void *log);
 void __fuzzer_compute_sha1(const uint8_t *Data, size_t Len, uint8_t *Out);
 
-void __trace_pc_add_input_range(unsigned long pos, unsigned long len);
+void __trace_pc_add_desc_size(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
+void* __trace_pc_get_desc_size_hints(uint16_t queue_id, uint16_t desc_idx, bool is_out);      
+void __trace_pc_add_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len);
+void* __trace_pc_get_desc_regions();
+size_t __trace_pc_get_desc_regions_size();
 }
 
 #endif

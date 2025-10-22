@@ -44,6 +44,12 @@ struct DescSize {
     DescSize* next;
 };
 
+struct DescRegion {
+    DescInfo desc_info;
+    uint64_t pos;
+    uint64_t len;
+};
+
 namespace fuzzer {
 
 // TableOfRecentCompares (TORC) remembers the most recently performed
@@ -139,10 +145,12 @@ class TracePC {
   size_t cmplog_size;
   struct CmpLogEntry cmplog[1024*8];
   
-  void AddToInputRange(unsigned long pos, unsigned long len);
-  void ClearInputRange();
-  struct PosLen input_range[0x100];
-  size_t input_range_size = 0;
+  void AddToDescRegions(uint16_t queue_id, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len);
+  void* GetDescRegions() {return desc_regions;}
+  size_t GetDescRegionsSize() {return desc_regions_size;}
+  void ClearDescRegions();
+  struct DescRegion desc_regions[0x100];
+  size_t desc_regions_size = 0;
   
   void AddToDescSizes(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
   void ClearDescSizes();
@@ -151,7 +159,7 @@ class TracePC {
   struct DescSize desc_sizes[0x200];
 
   /* return a linked list of DescSize */
-  void AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
+  void AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size, uint64_t pc);
   void* GetDescSizeHintList(uint16_t queue_id, uint16_t desc_idx, bool is_out);
   size_t desc_size_hints_size = 0;
   struct DescSize desc_size_hints[0x100];

@@ -114,7 +114,6 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		}
 	} else { /* reading buffer */
 		/* mark the input region */
-		update_buffer_pos(ic_get_offset(), len);
 		return 1;
 	}
 	return 1;
@@ -534,26 +533,22 @@ bool op_write() {
 		if (ic_ingest8(&val8, 0, -1))
 			return false;
 		value = val8;
-		update_buffer_pos(input_off, sizeof(val8));
 		break;
 	case Word:
 		uint16_t val16;
 		if (ic_ingest16(&val16, 0, -1))
 			return false;
 		value = val16;
-		update_buffer_pos(input_off, sizeof(val16));
 		break;
 	case Long:
 		uint32_t val32;
 		if (ic_ingest32(&val32, 0, -1))
 			return false;
 		value = val32;
-		update_buffer_pos(input_off, sizeof(val32));
 		break;
 	case Quad:
 		if (ic_ingest64(&value, 0, -1))
 			return false;
-		update_buffer_pos(input_off, sizeof(value));
 		break;
 	}
 
@@ -945,7 +940,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 				continue;
 			}
 		} else if (bypass_virtio_core) {
-			if (ic_ingest8(&op, 0, OP_NOTIFY, true)) {
+			if (ic_ingest8(&op, 0, OP_VMCALL, true)) {
 				ic_erase_backwards_until_token();
 				ic_subtract(4);
 				continue;

@@ -511,14 +511,9 @@ bool buffer_pos_empty() {
     return desc_buffer_pos.empty();
 }
 
-void update_buffer_pos(unsigned long pos, unsigned long len) {
-    static void* dma_only = getenv("CMPLOG_DMA_ONLY");
-    if (dma_only)
-        __trace_pc_add_input_range(pos, len);
-}
 
-void update_desc_region(unsigned long pos, unsigned long len) {
-    __trace_pc_add_input_range(pos, len);
+void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len) {
+    __trace_pc_add_desc_region(queue_idx, desc_idx, is_out, pos, len);
 }
 
 buffer_pos_iterator buffer_pos_begin() {

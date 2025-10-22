@@ -643,7 +643,7 @@ static bool LooseMemeq(const uint8_t *A, const uint8_t *B, size_t Size) {
 ATTRIBUTE_NOINLINE void Fuzzer::ExecuteCallback(const uint8_t *Data,
                                                 size_t Size) {
   TPC.ClearCmpLog();
-  TPC.ClearInputRange();
+  TPC.ClearDescRegions();
   TPC.ClearDescSizes();
   TPC.RecordInitialStack();
   TotalNumberOfRuns++;

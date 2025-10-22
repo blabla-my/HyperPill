@@ -314,24 +314,6 @@ typedef struct VirtQueueElement
 
 int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem);
 
-extern "C" {
-    void __trace_pc_add_desc_size(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
-    void* __trace_pc_get_desc_size_hints(uint16_t queue_id, uint16_t desc_idx, bool is_out);      
-}
-
-/* keep the same with definitions in FuzzerTracePC.h */
-struct DescInfo {
-    uint16_t queue_id;
-    uint16_t desc_idx;
-    bool is_out;
-};
-struct DescSize {
-    DescInfo desc_info;
-    uint32_t size;
-    uint32_t alignment;
-    DescSize* next;
-};
-
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
 void* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);
 
