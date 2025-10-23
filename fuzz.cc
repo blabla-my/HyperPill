@@ -114,7 +114,12 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		}
 	} else { /* reading buffer */
 		/* mark the input region */
-		return 1;
+		uint8_t* buf = ic_ingest_len(len);
+		if (!buf)
+			return -1;
+		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf);
+		memcpy(data, buf, len);
+		return 0;
 	}
 	return 1;
 }
