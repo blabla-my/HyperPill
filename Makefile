@@ -125,4 +125,3 @@ clean:
 	rm -rf vendor/bochs-build vendor/lib vendor/include vendor/libfuzzer-ng/libFuzzer.a
 	rm -f bochsapi/*.o
 	rm -f ./*.o
-	rm -f fuzz tests/*
