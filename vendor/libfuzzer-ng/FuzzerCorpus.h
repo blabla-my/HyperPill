@@ -325,13 +325,11 @@ public:
               continue;
           
           if (virtio_core) {
-            if (cmp.size == sizeof(uint64_t) && (int64_t)cmp.val2 > 0) {
-              DescInfo* desc_info = nullptr;
-              /* check val1 (by default, val2 is the immedidate number) */
-              if((desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
-                  TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2, cmp.pc);                
-              }           
-            }
+            DescInfo* desc_info = nullptr;
+            /* check val1 (by default, val2 is the immedidate number) */
+            if((desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
+                TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2, cmp.pc);                
+            }           
             
             /* by default, val2 is the immediate value */
             hint_val = cmp.val2;

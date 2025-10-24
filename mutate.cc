@@ -7,76 +7,95 @@
 #include "mutate.h"
 #include "virtio.h"
 #include "conveyor.h"
+#include "conveyor.h"
 #include <sys/types.h>
 
+static desc_pool_t* mutate_desc_pool1 = nullptr;
+static desc_pool_t* mutate_desc_pool2 = nullptr;
+static uint8_t* crossover_buffer = nullptr;
 
-void get_desc_regions(uint8_t *Data, size_t Size, std::vector<DescRegion> &regions) {
-    // search all occurrences of DESC_SEPARATOR
-    size_t pos = 0;
-    while (pos < Size) {
-        uint8_t* token_position = (uint8_t*) memmem(Data + pos,
-                Size - pos,
-                DESC_SEPARATOR,
-                DESC_SEPARATOR_LEN);
-        if (!token_position) {
-            break;
-        }
-        size_t token_offset = token_position - Data;
-        ssize_t desc_start_offset = token_offset - sizeof(DescInfo) - sizeof(vring_desc);
-        if (desc_start_offset < 0) {
-            pos = token_offset + DESC_SEPARATOR_LEN;
-            continue;
-        }
-        vring_desc* desc_ptr = (vring_desc*)(Data + desc_start_offset);
-        DescInfo* desc_info_ptr = (DescInfo*)(Data + desc_start_offset + sizeof(vring_desc));
-        if (desc_info_ptr->desc_idx > 0x10) {
-            pos = token_offset + DESC_SEPARATOR_LEN;
-            continue;
-        }
-        
-        DescRegion region;
-        region.desc_info = *desc_info_ptr;
-        region.pos = desc_start_offset;
-        region.len = sizeof(vring_desc);
-        regions.push_back(region);
+namespace DescMutator {
 
-        pos = token_offset + DESC_SEPARATOR_LEN;
+static void AlignLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+    const size_t align[] = {16, 256, 512, 1024};
+    auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
+    int mul = gen() % 8 + 1;
+    desc->desc.len = mul * choice;  
+}
+
+static void SmallLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+    size_t new_len = gen() % 0x200; // [0,64]
+    desc->desc.len = new_len;
+}
+
+static void MiddleLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+    size_t new_len = (gen() % 0xe00) + 0x200; // [256,4352]
+    desc->desc.len = new_len;
+}
+
+static void MutateLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+    size_t change = (gen() % 33); // [0,32]
+    if (gen() % 2 == 0) {
+        // increase length
+        desc->desc.len += change;
+    } else {
+        // decrease length
+        if (desc->desc.len > change) {
+            desc->desc.len -= change;
+        } else {
+            desc->desc.len = 0;
+        }
     }
 }
 
-size_t mutate_desc(uint8_t *Data, size_t Size, size_t MaxSize, std::mt19937 &gen) {
-    std::vector<DescRegion> desc_regions;
-    get_desc_regions(Data, Size, desc_regions);
+static void AlignAddress(vring_desc_with_info* desc, std::mt19937 &gen) {
+    const size_t align[] = {16, 256, 512, 1024};
+    auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
+    if (desc->desc.addr % choice != 0) {
+        desc->desc.addr = (desc->desc.addr / choice) * choice;
+    }
+}
 
-    if (desc_regions.empty()) {
-        return Size;
+static void UpdateWithHints(vring_desc_with_info* desc, std::mt19937 &gen) {
+    auto hints = GetDescSizeHints(desc->desc_info.queue_id, desc->desc_info.desc_idx, desc->desc_info.is_out);
+    if (hints) {
+        size_t len = 0;
+        auto cur = hints;
+        // get the length of hints
+        for (cur=hints;cur;cur = cur->next, len++);
+        auto choosed_hint_idx = gen() % len;
+        for (cur=hints; cur && choosed_hint_idx >0; cur = cur->next, choosed_hint_idx--);
+        desc->desc.len = cur->size;
+        printf("Mutator: Updated desc len with hint: queue %d, desc %d, is_out %d, len %u\n",
+                desc->desc_info.queue_id,desc->desc_info.desc_idx, desc->desc_info.is_out, desc->desc.len);
+    } else {
+        // no hints, do nothing
     }
-    
-    for (const DescRegion& region : desc_regions) {
-        vring_desc* desc_ptr = (vring_desc*)(Data + region.pos);
-        const DescInfo& desc_info = region.desc_info;
-        // static std::vector<double> weights = {20.0, 80.0};
-        DescSize* hints = (DescSize*)GetDescSizeHints(desc_info.queue_id, desc_info.desc_idx, desc_info.is_out);
-        if (hints) {
-            int choosed = gen() % 0x5;
-            auto cur = hints;
-            while (choosed > 0) {
-                if (cur->next) {
-                    --choosed;
-                    cur = cur->next;
-                } else {
-                    break;
-                }
-            }          
-            desc_ptr->len = cur->size;
-            printf("mutate_desc: set len to %x, queue %x, desc_seq %x, is_out: %d\n", cur->size, desc_info.queue_id, desc_info.desc_idx, desc_info.is_out);
-        } else { // no hints, set desc length to magic number
-            desc_ptr->len = 0xdeadbeef + desc_info.desc_idx + desc_info.queue_id;
-            printf("mutate_desc: set to magic num %x, %x\n", desc_ptr->len, desc_info.desc_idx);
-        }
+}
+
+std::vector<void (*)(vring_desc_with_info*, std::mt19937 &)> mutators = {
+    AlignLength,
+    SmallLength,
+    MiddleLength,
+    AlignAddress,
+    UpdateWithHints
+};
+
+} // namespace DescMutator
+
+static void mutate_desc(desc_pool_t* pool, std::mt19937 &gen) {
+    if (pool->len == 0) {
+        return;
     }
-    
-    return Size;
+    // for (auto& choosed_desc : pool->array) {
+    //     auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
+    //     choosed_mutator(&choosed_desc, gen);
+    // }
+    for (int i = 0; i < 100; i++) {
+        auto choosed_desc = &pool->array[gen() % pool->len];
+        auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
+        choosed_mutator(choosed_desc, gen);
+    }
 }
 
 /**
@@ -92,19 +111,73 @@ size_t mutate_desc(uint8_t *Data, size_t Size, size_t MaxSize, std::mt19937 &gen
 extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                          size_t MaxSize, unsigned int Seed) {
-  // Use the seed to initialize a simple PRNG
-  static void* size_infer = getenv("SGL_SIZE_INFER");
-  if (!size_infer)
-    return LLVMFuzzerMutate(Data, Size, MaxSize);
-
-  std::mt19937 gen(Seed);
-  std::discrete_distribution<> dist({
-        20.0,  // Weight for mutate_desc
-        80.0   // Weight for LLVMFuzzerMutate
-    });
-  int choice = dist(gen);
-  if (choice == 0)
-    return mutate_desc(Data, Size, MaxSize, gen);
-  else
-    return LLVMFuzzerMutate(Data, Size, MaxSize);
+    if (!mutate_desc_pool1) {
+        mutate_desc_pool1 = (desc_pool_t*)malloc(sizeof(desc_pool_t));
+        memset(mutate_desc_pool1, 0, sizeof(desc_pool_t));
+    }
+    if (desc_pool_deserialize(Data, Size, mutate_desc_pool1)) {
+        size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - desc_pool_get_size(mutate_desc_pool1));
+        std::mt19937 gen(Seed);
+        mutate_desc(mutate_desc_pool1, gen);
+        auto sz = desc_pool_serialize(mutate_desc_pool1, Data+new_size, MaxSize - new_size);
+        return new_size + sz;
+    } else {
+        return LLVMFuzzerMutate(Data, Size, MaxSize);
+    }
 }
+
+/* static size_t crossover_desc_pool(desc_pool_t* dst_pool, const desc_pool_t* src_pool, std::mt19937 &gen) {
+    size_t MAX_SIZE = dst_pool->len < src_pool->len ? dst_pool->len : src_pool->len;
+    for (size_t i = 0; i < MAX_SIZE; i++) {
+        if (gen() % 2 == 0) {
+            dst_pool->array[i] = src_pool->array[i];
+        }
+        if (i >= dst_pool->len) {
+            dst_pool->len++;
+        }
+    }
+    return desc_pool_get_size(dst_pool);
+} */
+
+/* extern "C" size_t __fuzzer_mutation_cross_over(const uint8_t *Data1, size_t Size1, const uint8_t *Data2,
+             size_t Size2, uint8_t *Out, size_t MaxOutSize);
+extern "C" size_t LLVMFuzzerCustomCrossOver(
+    const uint8_t *Data1, size_t Size1,
+    const uint8_t *Data2, size_t Size2,
+    uint8_t *Out, size_t MaxOutSize, unsigned int Seed) {
+    if (!mutate_desc_pool1) {
+        mutate_desc_pool1 = (desc_pool_t*)malloc(sizeof(desc_pool_t));
+        memset(mutate_desc_pool1, 0, sizeof(desc_pool_t));
+    }
+    if (!mutate_desc_pool2) {
+        mutate_desc_pool2 = (desc_pool_t*)malloc(sizeof(desc_pool_t));
+        memset(mutate_desc_pool2, 0, sizeof(desc_pool_t));
+    }
+    auto pool1 = desc_pool_deserialize(Data1, Size1, mutate_desc_pool1);
+    auto pool2 = desc_pool_deserialize(Data2, Size2, mutate_desc_pool2);
+    if (!pool1 && !pool2) {
+        return __fuzzer_mutation_cross_over(Data1, Size1, Data2, Size2, Out, MaxOutSize);
+    }
+    if (pool1 && pool2){
+        std::mt19937 gen(Seed);
+        size_t data1_size = Size1 - desc_pool_get_size(mutate_desc_pool1);
+        size_t data2_size = Size2 - desc_pool_get_size(mutate_desc_pool2);
+        size_t copy_size = crossover_desc_pool(mutate_desc_pool1, mutate_desc_pool2, gen);
+        size_t new_size = __fuzzer_mutation_cross_over(Data1, data1_size, Data2, data2_size, Out, MaxOutSize-copy_size);
+        memcpy(Out + new_size, mutate_desc_pool1, copy_size);
+        return new_size + copy_size;
+    }
+    if (pool1) {
+        size_t data1_size = Size1 - desc_pool_get_size(mutate_desc_pool1);
+        size_t copy_size = desc_pool_get_size(mutate_desc_pool1);
+        size_t new_size = __fuzzer_mutation_cross_over(Data1, data1_size, Data2, Size2, Out, MaxOutSize - copy_size);
+        memcpy(Out + new_size, mutate_desc_pool1, copy_size);
+        return new_size + copy_size;
+    } else {
+        size_t data2_size = Size2 - desc_pool_get_size(mutate_desc_pool2);
+        size_t copy_size = desc_pool_get_size(mutate_desc_pool2);
+        size_t new_size = __fuzzer_mutation_cross_over(Data1, Size1, Data2, data2_size, Out, MaxOutSize - copy_size);
+        memcpy(Out + new_size, mutate_desc_pool2, copy_size);
+        return new_size + copy_size;
+    }
+} */

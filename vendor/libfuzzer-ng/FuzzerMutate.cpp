@@ -102,7 +102,7 @@ MutationDispatcher::MutationDispatcher(Random &Rand,
   if (EF->LLVMFuzzerCustomCrossOver)
     Mutators.push_back(
         {&MutationDispatcher::Mutate_CustomCrossOver, "CustomCrossOver"});
-}
+  }
 
 static char RandCh(Random &Rand) {
   if (Rand.RandBool())
@@ -1173,3 +1173,12 @@ size_t MutationDispatcher::VmcsMutateImpl(uint8_t *Data, size_t Size,
 }
 
 }  // namespace fuzzer
+
+extern "C" {
+ATTRIBUTE_INTERFACE ATTRIBUTE_NO_SANITIZE_ALL                   
+ATTRIBUTE_TARGET_POPCNT
+size_t __fuzzer_mutation_cross_over(const uint8_t *Data1, size_t Size1, const uint8_t *Data2,
+             size_t Size2, uint8_t *Out, size_t MaxOutSize) {
+  return fuzzer::F->GetMD().CrossOver(Data1, Size1, Data2, Size2, Out, MaxOutSize);
+}
+}

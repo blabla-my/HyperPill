@@ -495,7 +495,7 @@ ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
 ATTRIBUTE_NO_SANITIZE_ALL
 DescInfo* TracePC::SearchDescSize(unsigned long val) {
   for (size_t i = 0; i < desc_sizes_size; i++) {
-      if (val - desc_sizes[i].desc_info.desc_idx - desc_sizes[i].desc_info.queue_id == 0xdeadbeef) { // check if val is the expected magic number
+      if (val == desc_sizes[i].size) { 
           return &desc_sizes[i].desc_info;
       }
   }
@@ -530,7 +530,7 @@ void TracePC::AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_o
 
   /* second iteration */
   /* search for a desc_size with the same desc_info, add to linked list */
-  for (size_t i = 0; i < desc_size_hints_size; i++) {
+  for (size_t i = 0; i < idx; i++) {
       if (desc_size_hints[i].desc_info.queue_id == queue_id &&
           desc_size_hints[i].desc_info.desc_idx == desc_idx &&
           desc_size_hints[i].desc_info.is_out == is_out) {

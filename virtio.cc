@@ -110,24 +110,31 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 	} 
 	auto* desc_ptr = (vring_desc*)opaque;
 
-	/* we generate the whole desc here, and apply some constraints */
-	uint8_t* src = ic_ingest_len(sizeof(vring_desc));
-	if (!src) {
-		return -1;
-	}
-	memcpy(desc_ptr, src, sizeof(vring_desc));
-	/* round the address */
-	conveyor_round(&desc_ptr->addr, GUEST_MEM_START, GUEST_MEM_START + GUEST_MEM_SIZE - 1);
-	size_t off = ic_get_offset();
-	
-	desc_ptr->next = (index+1) % size;
-	desc_ptr->flags = 0;
 	if (queue->desc_chain_fsm.is_done()){
 		/* do not chaining */
 		desc_ptr->flags &= ~VRING_DESC_F_NEXT;
 	}
 	else if (queue->desc_chain_fsm.is_inited()){
 		DescChainFSM::SGType sg_type = queue->desc_chain_fsm.consume();
+
+		uint16_t queue_idx = queue->idx;
+		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
+		auto desc_seq = queue->desc_chain_fsm.desc_seq();
+		DescInfo desc_info = {
+			.queue_id = queue_idx,
+			.desc_idx = desc_seq,
+			.is_out = is_out
+		};
+		
+		const vring_desc_with_info* desc_with_info = desc_pool_ingest_desc(&desc_info);
+		if (!desc_with_info) { 
+			return -1;
+		}
+		memcpy(desc_ptr, &desc_with_info->desc, sizeof(vring_desc_with_info));
+		auto addr_ptr = (uint64_t*)&desc_ptr->addr;
+		desc_ptr->next = (index+1) % size;
+		desc_ptr->flags = 0;
+
 		switch (sg_type) {
 			case DescChainFSM::SGType::OUT_HEAD:
 				desc_ptr->flags |= VRING_DESC_F_NEXT;
@@ -155,23 +162,9 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 				break;
 		}
 		queue->desc_chain_fsm.add_used_index(index);
-		uint16_t queue_idx = queue->idx;
-		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
-		auto desc_seq = queue->desc_chain_fsm.desc_seq();
-		DescInfo desc_info = {
-			.queue_id = queue_idx,
-			.desc_idx = desc_seq,
-			.is_out = is_out
-		};
-		// if (!ic_append(&desc_info, sizeof(DescInfo))) {
-		// 	return -1;
-		// }
-		// if (!ic_append(DESC_SEPARATOR, DESC_SEPARATOR_LEN)) {
-		// 	return -1;
-		// }
-		if (desc_ptr->len - desc_seq - queue_idx == 0xdeadbeef)
+		if (desc_ptr->len > 0x10000) { // record large desc size, having more chance to be identified by cmplog
 			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
-		update_desc_region(queue_idx, desc_seq, is_out, off-sizeof(vring_desc), sizeof(vring_desc));
+		}
 	}
 	DBG_PRINT {
 		printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
@@ -656,9 +649,9 @@ void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t siz
 		__trace_pc_add_desc_size(queue_id, desc_idx, is_out, size);
 }
 
-void* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out) {
+const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out) {
 	static void* enabled = getenv("SGL_SIZE_INFER");
 	if (enabled)
-		return __trace_pc_get_desc_size_hints(queue_id, desc_idx, is_out);
+		return (DescSize*)__trace_pc_get_desc_size_hints(queue_id, desc_idx, is_out);
 	return nullptr;
 }

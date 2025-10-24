@@ -1,10 +1,13 @@
 #ifndef CONVEYOR_H
 #define CONVEYOR_H
 
+#include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <vector>
+
+#include "virtio.h"
 
 #define SEPARATOR "FUZZ"
 #define SEPARATOR_LEN 4
@@ -23,6 +26,26 @@
             *(ptr) = 0; \
         *(ptr) += min; \
     } while(0)
+
+#define DESC_ARRAY_MAX_LEN 0x40
+#define DESC_POOL_SEPARATOR "DESCPOOL"
+#define DESC_POOL_SEPARATOR_LEN 8
+struct desc_pool_t {
+    size_t len;
+    vring_desc_with_info array[DESC_ARRAY_MAX_LEN];
+} __attribute__((packed));
+
+const size_t desc_pool_get_size(const desc_pool_t* pool);
+const desc_pool_t* desc_pool_get();
+const vring_desc_with_info* desc_pool_get_item(size_t idx);
+const bool desc_pool_add(const vring_desc_with_info* desc_with_info);
+vring_desc_with_info* desc_pool_new();
+const vring_desc_with_info* desc_pool_ingest_desc(const DescInfo* desc_info);
+const size_t desc_pool_deserialize(const uint8_t* data, size_t len, void* dst);
+const size_t desc_pool_serialize(const desc_pool_t* pool, void* dst, size_t max_len);
+
+uint8_t* final_input_get(size_t* length);
+const size_t final_input_len_get();
 
 const size_t remaining_input_len();
 void ic_setup(size_t max_input);

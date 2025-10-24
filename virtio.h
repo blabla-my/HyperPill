@@ -12,6 +12,7 @@
 #include "tsl/robin_set.h"
 
 #include "task.h"
+#include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 
 #define VIRTIO_PCI_COMMON_DFSELECT	0
 #define VIRTIO_PCI_COMMON_DF		4
@@ -46,8 +47,8 @@
 #define VIRTIO_QUEUE_MAX 1024
 
 
-#define GUEST_MEM_START ((0x100000000UL))
-#define GUEST_MEM_SIZE ((1UL<<31))
+#define GUEST_MEM_START 0x100000000UL
+#define GUEST_MEM_SIZE  0x80000000UL 
 
 struct ConfigSpace;
 struct VQueue;
@@ -97,6 +98,12 @@ struct vring_desc {
 	uint32_t len;
 	uint16_t flags;
 	uint16_t next;
+};
+
+struct vring_desc_with_info {
+    struct DescInfo desc_info;
+    vring_desc desc;
+    bool used;
 };
 
 typedef uint16_t vring_avail_elem;
@@ -315,6 +322,6 @@ typedef struct VirtQueueElement
 int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem);
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
-void* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);
+const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);
 
 #endif

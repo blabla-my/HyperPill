@@ -259,6 +259,7 @@ static void usage() {
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+	printf("run a new input\n");
 	static void *ic_test = getenv("FUZZ_IC_TEST");
 	static int done;
 	if (BX_CPU(id)->fuzztrace)
@@ -286,6 +287,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	fuzzing = true;
 	fuzz_run_input(Data, Size);
 	fuzzing = false;
+
+	size_t final_size;
+	final_input_get(&final_size);
 
 	if (fuzz_should_abort) abort();
 
@@ -319,6 +323,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		fuzzing = false;
 
 		output = ic_get_output(&len2);
+		
 		if (len != len2 || memcmp(output, newdata, len)) {
 			printf("Detected mismatch. Original Input %ld. IC Output1: %ld IC "
 			       "Output2: %ld\n",

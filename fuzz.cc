@@ -945,7 +945,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 				continue;
 			}
 		} else if (bypass_virtio_core) {
-			if (ic_ingest8(&op, 0, OP_VMCALL, true)) {
+			if (ic_ingest8(&op, 0, OP_NOTIFY, true)) {
 				ic_erase_backwards_until_token();
 				ic_subtract(4);
 				continue;
@@ -968,11 +968,6 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			   dma_len) >= 8)
 			break;
 	} while (ic_advance_until_token(SEPARATOR, 4));
-
-	size_t dummy;
-	uint8_t *output = ic_get_output(&dummy); // Set the output and op log
-	
-	reset_buffer_pos();
 }
 
 void add_pio_region(uint16_t addr, uint16_t size) {
