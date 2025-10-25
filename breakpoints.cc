@@ -188,21 +188,23 @@ void apply_breakpoints_linux() {
             BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
             BX_CPU(id)->async_event = 1;
     });
-    add_breakpoint(sym_to_addr("vmlinux", "exc_page_fault"), [](bxInstruction_c *i) {
-            printf("page fault at: 0x%lx\n", BX_CPU(id)->cr2);
-            // fuzz_emu_stop_crash("page fault");
-    });
-    add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](bxInstruction_c *i) {
-        i->execute1 = BX_CPU_C::RETnear64_Iw;
-        i->modRMForm.Iw[0] = 0;
-        i->modRMForm.Iw[1] = 0;
-        BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-        BX_CPU(id)->async_event = 1;
-        char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx,
-                BX_CPU(id)->gen_reg[BX_64BIT_REG_RDX].rrx+1);
-        printf("#console_write\n%s\n#end_console_write", msg);
-        free(msg);
-    });
+    if (log_ops) {
+        add_breakpoint(sym_to_addr("vmlinux", "exc_page_fault"), [](bxInstruction_c *i) {
+                printf("page fault at: 0x%lx\n", BX_CPU(id)->cr2);
+                // fuzz_emu_stop_crash("page fault");
+        });
+        add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](bxInstruction_c *i) {
+            i->execute1 = BX_CPU_C::RETnear64_Iw;
+            i->modRMForm.Iw[0] = 0;
+            i->modRMForm.Iw[1] = 0;
+            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+            BX_CPU(id)->async_event = 1;
+            char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx,
+                    BX_CPU(id)->gen_reg[BX_64BIT_REG_RDX].rrx+1);
+            printf("#console_write\n%s\n#end_console_write", msg);
+            free(msg);
+        });
+    }
     // hook kasan
     add_breakpoint(sym_to_addr("vmlinux", "kasan_report"), [](bxInstruction_c *i) {
         fuzz_emu_stop_crash("kasan-report");
@@ -262,14 +264,16 @@ void handle_syscall_hooks(bxInstruction_c *i)
                         ->gen_reg[BX_64BIT_REG_RDX]
                         .rrx &
                         0xFFF;
-                    char *buf = (char *)malloc(len + 1);
-                    BX_CPU(0)->access_read_linear(
-                            BX_CPU(id)
-                            ->gen_reg[BX_64BIT_REG_RSI]
-                            .rrx,
-                            len, 3, BX_READ, 0x0, buf);
-                    buf[len] = 0;
-                    printf("#write\n%s\n#end_write\n", buf);
+                    if (log_ops || BX_CPU(id)->fuzztrace) {
+                        char *buf = (char *)malloc(len + 1);
+                        BX_CPU(0)->access_read_linear(
+                                BX_CPU(id)
+                                ->gen_reg[BX_64BIT_REG_RSI]
+                                .rrx,
+                                len, 3, BX_READ, 0x0, buf);
+                        buf[len] = 0;
+                        printf("#write\n%s\n#end_write\n", buf);
+                    }
                     BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = len;
                     return;
                 }

@@ -94,7 +94,7 @@ vendor/libfuzzer-ng/libFuzzer.a:
 rebuild_bochs:
 	@echo "===> Building Bochs"
 	mkdir -p vendor/bochs-build vendor/lib vendor/include
-	cd vendor/bochs-build; test -f config.h || ../bochs/configure \
+	cd vendor/bochs-build; test -f config.h || CXXFLAGS="-O3 -g" ../bochs/configure \
 		--enable-vmx=2 --with-vncsrv --enable-x86-64 --enable-e1000 \
 		--without-x --without-x11 --without-win32 --without-macos \
 		--enable-cpu-level=6 --enable-pci --without-gui --enable-pnic \
