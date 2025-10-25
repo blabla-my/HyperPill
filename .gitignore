@@ -145,7 +145,8 @@ vendor/include
 # /qemu-*
 /qemu-*
 /VM
-/download
+/download*
+GEMINI.md
 
 # /.cache
 .cache
