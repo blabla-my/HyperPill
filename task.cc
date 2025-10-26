@@ -159,6 +159,7 @@ Task* TaskManager::get_current_task(){
     if (BX_CPU(id)->get_cpl() == 0){
         bx_address current_task_bx_addr = get_current_task_bx_addr();
         if (!current_task_bx_addr) return NULL;
+        printf("current_task address: %lx\n", current_task_bx_addr);
         Task* current_task_fuzz = get_task(current_task_bx_addr);
         if (!current_task_fuzz) {
             return add_task(current_task_bx_addr);
@@ -268,9 +269,12 @@ Task* TaskManager::alloca_task(bx_address task_addr){
     Task* new_task = new Task();
     if (task_buf_to_task(task_buf, new_task) < 0){
         printf("Error: failed to convert task buf to task\n");
+        free(task_buf);
+        delete new_task;
         return NULL;
     }
     new_task->vaddr = task_addr;
+    free(task_buf);
     return new_task;
 }
 

@@ -66,6 +66,7 @@ bool ignore_pc(bx_address pc) {
 }
 
 bool task_filter(bool user_only) {
+    if (!fuzzing) return false;
     Task* cur_task = task_manager.get_current_task();
     bool reject = false;
     if(cur_task == NULL) {
