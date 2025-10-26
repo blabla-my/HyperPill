@@ -359,8 +359,8 @@ public:
             if(count == 1){
                 if(II){
                     II->HotSpots.push_back({val_size, found_pos, hint_val, cmp.pc});
-                    Printf("Hotspot Pos %d\tHint: %lx (vs %lx)\tPC: %lx\n",
-                            found_pos, hint_val, found_val, cmp.pc);
+                    // Printf("Hotspot Pos %d\tHint: %lx (vs %lx)\tPC: %lx\n",
+                    //         found_pos, hint_val, found_val, cmp.pc);
                     cmp_pc_counts[cmp.pc]++;
                     hinted_pcs[std::make_tuple(cmp.pc, hint_val)] = U.size();
                     hints.insert(hint_val);
@@ -423,8 +423,8 @@ public:
               if(count == 1){
                   if(II){
                       II->HotSpots.push_back({val_size, found_pos, hint_val, cmp.pc});
-                      Printf("Hotspot Pos %d\tHint: %lx (vs %lx)\tPC: %lx\n",
-                              found_pos, hint_val, found_val, cmp.pc);
+                      // Printf("Hotspot Pos %d\tHint: %lx (vs %lx)\tPC: %lx\n",
+                      //         found_pos, hint_val, found_val, cmp.pc);
                       cmp_pc_counts[cmp.pc]++;
                       hinted_pcs[std::make_tuple(cmp.pc, hint_val)] = U.size();
                       hints.insert(hint_val);

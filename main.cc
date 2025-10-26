@@ -201,33 +201,34 @@ void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
 }
 
 void fuzz_instr_after_execution(bxInstruction_c *i) {
-	if (hack_timer_mod && i->getIaOpcode() == 0x4b8 /*CALL_Jq*/) {
-		static uint64_t rdi, rsi; // context
-		uint64_t rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
-		if (rip == timer_mod[0] || rip == timer_mod[1] || rip == timer_mod[2] || rip == timer_mod[3]) {
-			if (in_timer_mode == 0) {
-				uint64_t anchor = BX_CPU(id)->pop_64() - 5; // assume CALL_Ja
-				rdi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx;
-				rsi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx;
-				// printf("call timer_mod(ts=0x%lx, expire_time=0x%lx), ", rdi, rsi);
-				BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, 1 /*CLOCK_VIRTUAL*/);
-				BX_CPU(id)->prev_rip = timer_mod[4];
-				BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = timer_mod[4];
-				BX_CPU(id)->push_64(anchor);
-				BX_CPU(id)->invalidate_prefetch_q();
-				in_timer_mode++;
-			} else if (in_timer_mode == 1) {
-				uint64_t current = BX_CPU(id)->get_reg64(BX_64BIT_REG_RAX);
-				// printf("while current=0x%lx\n", current);
-				BX_CPU(id)->set_reg64(BX_64BIT_REG_RSI, current);
-				BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, rdi);
-				BX_CPU(id)->prev_rip = rip;
-				BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = rip;
-				BX_CPU(id)->invalidate_prefetch_q();
-				in_timer_mode = 2;
-			}
-		}
-	}
+	/* I don't think we need hacker_timer_mod. This prevent from configuring bochs to use -O2 optimization, just remove it */
+	// if (hack_timer_mod && i->getIaOpcode() == 0x4b8 /*CALL_Jq*/) {
+	// 	static uint64_t rdi, rsi; // context
+	// 	uint64_t rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
+	// 	if (rip == timer_mod[0] || rip == timer_mod[1] || rip == timer_mod[2] || rip == timer_mod[3]) {
+	// 		if (in_timer_mode == 0) {
+	// 			uint64_t anchor = BX_CPU(id)->pop_64() - 5; // assume CALL_Ja
+	// 			rdi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx;
+	// 			rsi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx;
+	// 			// printf("call timer_mod(ts=0x%lx, expire_time=0x%lx), ", rdi, rsi);
+	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, 1 /*CLOCK_VIRTUAL*/);
+	// 			BX_CPU(id)->prev_rip = timer_mod[4];
+	// 			BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = timer_mod[4];
+	// 			BX_CPU(id)->push_64(anchor);
+	// 			BX_CPU(id)->invalidate_prefetch_q();
+	// 			in_timer_mode++;
+	// 		} else if (in_timer_mode == 1) {
+	// 			uint64_t current = BX_CPU(id)->get_reg64(BX_64BIT_REG_RAX);
+	// 			// printf("while current=0x%lx\n", current);
+	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RSI, current);
+	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, rdi);
+	// 			BX_CPU(id)->prev_rip = rip;
+	// 			BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = rip;
+	// 			BX_CPU(id)->invalidate_prefetch_q();
+	// 			in_timer_mode = 2;
+	// 		}
+	// 	}
+	// }
 }
 
 void fuzz_instr_before_execution(bxInstruction_c *i) {

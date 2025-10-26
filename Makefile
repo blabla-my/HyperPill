@@ -15,7 +15,13 @@ CXX ?= clang++
 
 # --- Flags ---
 # CXXFLAGS: Flags for the C++ compiler (optimization, language standard)
+ifeq ($(DEBUG),1)
+CXXFLAGS   = -std=c++17 -O0 -g
+BOCHS_CXXFLAGS = -O0 -g
+else
 CXXFLAGS   = -std=c++17 -O3 -g
+BOCHS_CXXFLAGS = -O3 -g
+endif
 
 # CPPFLAGS: Preprocessor flags (include paths)
 CPPFLAGS   = -I vendor/bochs \
@@ -89,12 +95,12 @@ fuzz: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
 
 vendor/libfuzzer-ng/libFuzzer.a:
 	@echo "===> Building libFuzzer-ng"
-	cd vendor/libfuzzer-ng/; ./build.sh
+	cd vendor/libfuzzer-ng/; DEBUG=$(DEBUG) ./build.sh
 
 rebuild_bochs:
 	@echo "===> Building Bochs"
 	mkdir -p vendor/bochs-build vendor/lib vendor/include
-	cd vendor/bochs-build; test -f config.h || ../bochs/configure \
+	cd vendor/bochs-build; test -f config.h || CXXFLAGS="$(BOCHS_CXXFLAGS)" ../bochs/configure \
 		--enable-vmx=2 --with-vncsrv --enable-x86-64 --enable-e1000 \
 		--without-x --without-x11 --without-win32 --without-macos \
 		--enable-cpu-level=6 --enable-pci --without-gui --enable-pnic \

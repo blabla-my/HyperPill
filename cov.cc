@@ -66,6 +66,7 @@ bool ignore_pc(bx_address pc) {
 }
 
 bool task_filter(bool user_only) {
+    if (!fuzzing) return false;
     Task* cur_task = task_manager.get_current_task();
     bool reject = false;
     if(cur_task == NULL) {
@@ -201,16 +202,14 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
     libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
 
 out:
-    // if (NEW_PC_QEMU_ONLY && task_filter(true))
-    //     return;
-    // else if (!NEW_PC_QEMU_ONLY && task_filter())
-    //     return;
-    bx_address hash = prev_rip ^ (new_rip >> 1);
-    if (seen_edges.emplace(hash).second) {
-        time(&t);
-        auto s = addr_to_sym(new_rip);
-        printf("[%lu] NEW_PC: %lx %s (%s)\n", t, new_rip, s.symbol.c_str(), s.bin.c_str());
-        status |= (1 << 1); // new pc
+    if (log_ops) {
+        bx_address hash = prev_rip ^ (new_rip >> 1);
+        if (seen_edges.emplace(hash).second) {
+            time(&t);
+            auto s = addr_to_sym(new_rip);
+            printf("[%lu] NEW_PC: %lx %s (%s)\n", t, new_rip, s.symbol.c_str(), s.bin.c_str());
+            status |= (1 << 1); // new pc
+        }
     }
 }
 
