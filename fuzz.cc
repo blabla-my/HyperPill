@@ -102,10 +102,13 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		case VRing::FILED_TYPE::VRING_ELEM:
 			rc = vring->ingest_elem((void*)vring_elem, vring->element_index(gpa));
 			off_in_elem = gpa - (vring->start() + vring->ring_offset() + vring->element_index(gpa) * vring->element_size());
-			if (rc < 0) {
+			if (rc == -1) {
 				/* here we should not call fuzz_emu_stop_unhealthy */
 				// fuzz_emu_stop_unhealthy();
 				return -1;
+			} else if (rc == -2) {
+				fuzz_emu_stop_normal();
+				return -2;
 			} else if (rc == 0) {
 				vring->write_elem(vring->element_index(gpa), vring_elem);
 				memcpy(data, vring_elem + off_in_elem, len);

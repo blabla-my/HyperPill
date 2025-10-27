@@ -126,7 +126,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 			.is_out = is_out
 		};
 		
-		const vring_desc_with_info* desc_with_info = desc_pool_ingest_desc(&desc_info);
+		const vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 		if (!desc_with_info) { 
 			return -1;
 		}
@@ -564,7 +564,7 @@ size_t VirtQueueElement::out_sgl_size() {
 }
 
 /* DescChainFSM */
-#define CHAINING_DESC_MAX 16
+#define CHAINING_DESC_MAX 8
 void DescChainFSM::init(unsigned max_len) {
 	/* ingest random number as the length of chaining desc */	
 	max_len = max_len < CHAINING_DESC_MAX ? max_len : CHAINING_DESC_MAX;

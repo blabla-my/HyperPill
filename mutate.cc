@@ -10,8 +10,8 @@
 #include "conveyor.h"
 #include <sys/types.h>
 
-static desc_pool_t* mutate_desc_pool1 = nullptr;
-static desc_pool_t* mutate_desc_pool2 = nullptr;
+static DescPool* mutate_desc_pool1 = nullptr;
+static DescPool* mutate_desc_pool2 = nullptr;
 static uint8_t* crossover_buffer = nullptr;
 
 namespace DescMutator {
@@ -83,14 +83,10 @@ std::vector<void (*)(vring_desc_with_info*, std::mt19937 &)> mutators = {
 
 } // namespace DescMutator
 
-static void mutate_desc(desc_pool_t* pool, std::mt19937 &gen) {
+static void mutate_desc(DescPool* pool, std::mt19937 &gen) {
     if (pool->len == 0) {
         return;
     }
-    // for (auto& choosed_desc : pool->array) {
-    //     auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
-    //     choosed_mutator(&choosed_desc, gen);
-    // }
     for (int i = 0; i < 100; i++) {
         auto choosed_desc = &pool->array[gen() % pool->len];
         auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
@@ -112,18 +108,145 @@ extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                          size_t MaxSize, unsigned int Seed) {
     if (!mutate_desc_pool1) {
-        mutate_desc_pool1 = (desc_pool_t*)malloc(sizeof(desc_pool_t));
-        memset(mutate_desc_pool1, 0, sizeof(desc_pool_t));
+        mutate_desc_pool1 = new DescPool();
     }
-    if (desc_pool_deserialize(Data, Size, mutate_desc_pool1)) {
-        size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - desc_pool_get_size(mutate_desc_pool1));
+    if (mutate_desc_pool1->deserialize(Data, Size)) {
+        size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size());
         std::mt19937 gen(Seed);
         mutate_desc(mutate_desc_pool1, gen);
-        auto sz = desc_pool_serialize(mutate_desc_pool1, Data+new_size, MaxSize - new_size);
+        auto sz = mutate_desc_pool1->serialize(Data+new_size, MaxSize - new_size);
         return new_size + sz;
     } else {
         return LLVMFuzzerMutate(Data, Size, MaxSize);
     }
+}
+
+
+#define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
+
+extern bool log_ops;
+
+DescPool::DescPool() {
+    len = 0;
+    memset(array, 0, sizeof(vring_desc_with_info) * DESC_ARRAY_MAX_LEN);
+}
+
+DescPool::~DescPool() {
+    free(array);
+}
+
+const size_t DescPool::get_size() const {return len * sizeof(array[0]) + sizeof(len);}
+
+const vring_desc_with_info* DescPool::get_item(size_t idx) const {
+    if(idx >= len)
+        return NULL;
+    return &array[idx];
+}
+bool DescPool::add(const vring_desc_with_info* desc_with_info) {
+    if(len >= DESC_ARRAY_MAX_LEN)
+        return false;
+    memcpy(&array[len], desc_with_info, sizeof(vring_desc_with_info));
+    len++;
+    return true;
+}
+vring_desc_with_info* DescPool::new_desc() {
+    if(len >= DESC_ARRAY_MAX_LEN)
+        return NULL;
+    vring_desc_with_info* ret = &array[len];
+    memset(ret, 0, sizeof(vring_desc_with_info));
+    len++;
+    srand(__rdtsc());
+    ret->desc.addr = GUEST_MEM_START + (rand() % (GUEST_MEM_SIZE));
+    ret->desc.len = rand();
+    DBG_PRINT {
+        printf("DescPool: new desc addr %lx len %x total %lx\n", 
+            ret->desc.addr,
+            ret->desc.len, len);
+        fflush(stdout);
+    }
+    return ret;
+}
+const vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info) {
+    for (size_t i = 0; i < len; i++) {
+        vring_desc_with_info* desc_with_info = &array[i];
+        if (desc_with_info->desc_info.queue_id == desc_info->queue_id &&
+            desc_with_info->desc_info.desc_idx == desc_info->desc_idx &&
+            desc_with_info->desc_info.is_out == desc_info->is_out &&
+            desc_with_info->used == false) {
+            DBG_PRINT {
+                printf("DescPool: reusing desc idx %x for queue %u is_out %d addr %lx len %x\n", 
+                    desc_with_info->desc_info.desc_idx,
+                    desc_with_info->desc_info.queue_id,
+                    desc_with_info->desc_info.is_out,
+                    desc_with_info->desc.addr,
+                    desc_with_info->desc.len);
+                desc_with_info->used = true;
+            }
+            return desc_with_info;
+        }
+    }
+    auto new_desc = this->new_desc();
+    if (new_desc) {
+        new_desc->desc_info = *desc_info;
+        new_desc->used = true;
+        return new_desc;
+    }
+    return nullptr;
+}
+size_t DescPool::deserialize(const uint8_t* data, size_t len) {
+    uint8_t* desc_pool_pos = NULL; // Will hold the *last* match
+    uint8_t* search_start = (uint8_t*)data;
+    size_t remaining_len = len;
+    void* current_match = NULL;
+
+    while ((current_match = memmem(search_start, 
+                                   remaining_len, 
+                                   DESC_POOL_SEPARATOR, 
+                                   DESC_POOL_SEPARATOR_LEN)) != NULL) {
+        
+        desc_pool_pos = (uint8_t*)current_match;
+        search_start = (uint8_t*)current_match + DESC_POOL_SEPARATOR_LEN;
+
+        remaining_len = len - (search_start - data);
+
+        if (remaining_len < DESC_POOL_SEPARATOR_LEN) {
+            break;
+        }
+    }
+    if (desc_pool_pos && desc_pool_pos + DESC_POOL_SEPARATOR_LEN + sizeof(size_t) - data <= len) {
+        size_t desc_num = *(size_t*)(desc_pool_pos + DESC_POOL_SEPARATOR_LEN);
+        if (desc_num > DESC_ARRAY_MAX_LEN)
+            return 0;
+        desc_pool_pos += DESC_POOL_SEPARATOR_LEN;
+        if (desc_pool_pos + sizeof(size_t) + desc_num * sizeof(vring_desc_with_info) - data <= len) {
+            this->len = 0;
+            DBG_PRINT {
+                printf("Deserialized desc pool with %ld(%ld) entries.\n", this->len, desc_num);
+            }
+            return DESC_POOL_SEPARATOR_LEN + get_size();
+        } else {
+            DBG_PRINT {
+                printf("Deserialize desc pool failed: insufficient length.\n");
+            }
+        }
+    }
+    return 0;
+}
+size_t DescPool::serialize(void* dst, size_t max_len) const {
+    size_t required_size = DESC_POOL_SEPARATOR_LEN + get_size();
+    if (required_size > max_len) {
+        DBG_PRINT {
+            printf("Serialize desc pool failed: insufficient length.\n");
+        }
+        return 0UL;
+    }
+    uint8_t* pos = (uint8_t*)dst;
+    memcpy(pos, DESC_POOL_SEPARATOR, DESC_POOL_SEPARATOR_LEN);
+    memcpy(pos+DESC_POOL_SEPARATOR_LEN, this, get_size());
+    DBG_PRINT {
+        printf("Serialized desc pool with %ld entries.\n", len);
+    }
+    return DESC_POOL_SEPARATOR_LEN + get_size();
 }
 
 /* static size_t crossover_desc_pool(desc_pool_t* dst_pool, const desc_pool_t* src_pool, std::mt19937 &gen) {
@@ -146,36 +269,34 @@ extern "C" size_t LLVMFuzzerCustomCrossOver(
     const uint8_t *Data2, size_t Size2,
     uint8_t *Out, size_t MaxOutSize, unsigned int Seed) {
     if (!mutate_desc_pool1) {
-        mutate_desc_pool1 = (desc_pool_t*)malloc(sizeof(desc_pool_t));
-        memset(mutate_desc_pool1, 0, sizeof(desc_pool_t));
+        mutate_desc_pool1 = new desc_pool_t();
     }
     if (!mutate_desc_pool2) {
-        mutate_desc_pool2 = (desc_pool_t*)malloc(sizeof(desc_pool_t));
-        memset(mutate_desc_pool2, 0, sizeof(desc_pool_t));
+        mutate_desc_pool2 = new desc_pool_t();
     }
-    auto pool1 = desc_pool_deserialize(Data1, Size1, mutate_desc_pool1);
-    auto pool2 = desc_pool_deserialize(Data2, Size2, mutate_desc_pool2);
+    auto pool1 = mutate_desc_pool1->deserialize(Data1, Size1);
+    auto pool2 = mutate_desc_pool2->deserialize(Data2, Size2);
     if (!pool1 && !pool2) {
         return __fuzzer_mutation_cross_over(Data1, Size1, Data2, Size2, Out, MaxOutSize);
     }
     if (pool1 && pool2){
         std::mt19937 gen(Seed);
-        size_t data1_size = Size1 - desc_pool_get_size(mutate_desc_pool1);
-        size_t data2_size = Size2 - desc_pool_get_size(mutate_desc_pool2);
+        size_t data1_size = Size1 - mutate_desc_pool1->get_size();
+        size_t data2_size = Size2 - mutate_desc_pool2->get_size();
         size_t copy_size = crossover_desc_pool(mutate_desc_pool1, mutate_desc_pool2, gen);
         size_t new_size = __fuzzer_mutation_cross_over(Data1, data1_size, Data2, data2_size, Out, MaxOutSize-copy_size);
         memcpy(Out + new_size, mutate_desc_pool1, copy_size);
         return new_size + copy_size;
     }
     if (pool1) {
-        size_t data1_size = Size1 - desc_pool_get_size(mutate_desc_pool1);
-        size_t copy_size = desc_pool_get_size(mutate_desc_pool1);
+        size_t data1_size = Size1 - mutate_desc_pool1->get_size();
+        size_t copy_size = mutate_desc_pool1->get_size();
         size_t new_size = __fuzzer_mutation_cross_over(Data1, data1_size, Data2, Size2, Out, MaxOutSize - copy_size);
         memcpy(Out + new_size, mutate_desc_pool1, copy_size);
         return new_size + copy_size;
     } else {
-        size_t data2_size = Size2 - desc_pool_get_size(mutate_desc_pool2);
-        size_t copy_size = desc_pool_get_size(mutate_desc_pool2);
+        size_t data2_size = Size2 - mutate_desc_pool2->get_size();
+        size_t copy_size = mutate_desc_pool2->get_size();
         size_t new_size = __fuzzer_mutation_cross_over(Data1, Size1, Data2, data2_size, Out, MaxOutSize - copy_size);
         memcpy(Out + new_size, mutate_desc_pool2, copy_size);
         return new_size + copy_size;

@@ -84,6 +84,8 @@ public:
     bool is_done() const {return state == DONE;}
     bool is_running() const {return state == RUNNING;}
     bool is_inited() const {return state == INITED or state == RUNNING;}
+    uint8_t get_inited_count() const {return inited_count;}
+    void increment_inited_count() {inited_count++;}
 private:
     State state;
     tsl::robin_set<uint16_t> used_index;
@@ -91,6 +93,7 @@ private:
     uint8_t sg_num_in_remain;
     uint8_t sg_num_out;
     uint8_t sg_num_out_remain;
+    uint8_t inited_count;
 };
 
 struct vring_desc {
