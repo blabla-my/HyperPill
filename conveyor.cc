@@ -34,6 +34,9 @@ do {                                                                       \
         /* printf("\n=====\n");\ */
 
 #define MAXLEN 8192
+#define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
+
+extern bool log_ops;
 
 static const uint8_t *input;
 static const uint8_t *input_cursor;
@@ -75,10 +78,12 @@ vring_desc_with_info* desc_pool_new() {
     srand(__rdtsc());
     ret->desc.addr = GUEST_MEM_START + (rand() % (GUEST_MEM_SIZE));
     ret->desc.len = rand();
-    printf("DescPool: new desc addr %lx len %x total %lx\n", 
-        ret->desc.addr,
-        ret->desc.len, desc_pool->len);
-    fflush(stdout);
+    DBG_PRINT {
+        printf("DescPool: new desc addr %lx len %x total %lx\n", 
+            ret->desc.addr,
+            ret->desc.len, desc_pool->len);
+        fflush(stdout);
+    }
     return ret;
 }
 const vring_desc_with_info* desc_pool_ingest_desc(const DescInfo* desc_info) {
@@ -88,13 +93,15 @@ const vring_desc_with_info* desc_pool_ingest_desc(const DescInfo* desc_info) {
             desc_with_info->desc_info.desc_idx == desc_info->desc_idx &&
             desc_with_info->desc_info.is_out == desc_info->is_out &&
             desc_with_info->used == false) {
-            printf("DescPool: reusing desc idx %x for queue %u is_out %d addr %lx len %x\n", 
-                desc_with_info->desc_info.desc_idx,
-                desc_with_info->desc_info.queue_id,
-                desc_with_info->desc_info.is_out,
-                desc_with_info->desc.addr,
-                desc_with_info->desc.len);
-            desc_with_info->used = true;
+            DBG_PRINT {
+                printf("DescPool: reusing desc idx %x for queue %u is_out %d addr %lx len %x\n", 
+                    desc_with_info->desc_info.desc_idx,
+                    desc_with_info->desc_info.queue_id,
+                    desc_with_info->desc_info.is_out,
+                    desc_with_info->desc.addr,
+                    desc_with_info->desc.len);
+                desc_with_info->used = true;
+            }
             return desc_with_info;
         }
     }
@@ -134,10 +141,14 @@ uint8_t* desc_pool_pos = NULL; // Will hold the *last* match
         if (desc_pool_pos + sizeof(size_t) + desc_num * sizeof(vring_desc_with_info) - data <= len) {
             memset(dst, 0, sizeof(desc_pool_t));
             memcpy(dst, desc_pool_pos, sizeof(size_t) + desc_num * sizeof(vring_desc_with_info));
-            printf("Deserialized desc pool with %ld(%ld) entries.\n", ((desc_pool_t*)dst)->len, desc_num);
+            DBG_PRINT {
+                printf("Deserialized desc pool with %ld(%ld) entries.\n", ((desc_pool_t*)dst)->len, desc_num);
+            }
             return DESC_POOL_SEPARATOR_LEN + desc_pool_get_size((desc_pool_t*)dst);
         } else {
-            printf("Deserialize desc pool failed: insufficient length.\n");
+            DBG_PRINT {
+                printf("Deserialize desc pool failed: insufficient length.\n");
+            }
         }
     }
     return 0;
@@ -145,13 +156,17 @@ uint8_t* desc_pool_pos = NULL; // Will hold the *last* match
 const size_t desc_pool_serialize(const desc_pool_t* pool, void* dst, size_t max_len) {
     size_t required_size = DESC_POOL_SEPARATOR_LEN + desc_pool_get_size(pool);
     if (required_size > max_len) {
-        printf("Serialize desc pool failed: insufficient length.\n");
+        DBG_PRINT {
+            printf("Serialize desc pool failed: insufficient length.\n");
+        }
         return 0UL;
     }
     uint8_t* pos = (uint8_t*)dst;
     memcpy(pos, DESC_POOL_SEPARATOR, DESC_POOL_SEPARATOR_LEN);
     memcpy(pos+DESC_POOL_SEPARATOR_LEN, pool, desc_pool_get_size(pool));
-    printf("Serialized desc pool with %ld entries.\n", pool->len);
+    DBG_PRINT {
+        printf("Serialized desc pool with %ld entries.\n", pool->len);
+    }
     return DESC_POOL_SEPARATOR_LEN + desc_pool_get_size(pool);
 }
 

@@ -969,9 +969,9 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		}
 		if (fuzz_unhealthy_input || fuzz_do_not_continue)
 			break;
-		if (new_op(op, start, ic_get_cursor() - input_start, dma_start,
-			   dma_len) >= 8)
-			break;
+		// if (new_op(op, start, ic_get_cursor() - input_start, dma_start,
+		// 	   dma_len) >= 8)
+		// 	break;
 	} while (ic_advance_until_token(SEPARATOR, 4));
 }
 

@@ -222,18 +222,20 @@ void apply_breakpoints_linux() {
     // }
 
     /* breakpoints after the function finish */
-    add_breakpoint(sym_to_addr("qemu-system", "virtqueue_pop"), [](bxInstruction_c *i) {
-        bx_address elem_ptr = BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx;
-        printf("#virtqueue_pop: RIP: %lx, RAX: %lx\n", 
-            BX_CPU(x)->get_rip(), elem_ptr);
-        VirtQueueElement elem;
-        if (read_virtqueue_element(elem_ptr, &elem) == 0) {
-            printf("#virtqueue_pop: index: %u, len: %u, ndescs: %u, out_num: %u, in_num: %u\n",
-                elem.index, elem.len, elem.ndescs, elem.out_num, elem.in_num);
-            printf("#virtqueue_pop: in_sgl_size: %zu, out_sgl_size: %zu\n",
-                elem.in_sgl_size(), elem.out_sgl_size());
-        }
-    }, true);
+    if (log_ops) {
+        add_breakpoint(sym_to_addr("qemu-system", "virtqueue_pop"), [](bxInstruction_c *i) {
+            bx_address elem_ptr = BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx;
+            printf("#virtqueue_pop: RIP: %lx, RAX: %lx\n", 
+                BX_CPU(x)->get_rip(), elem_ptr);
+            VirtQueueElement elem;
+            if (read_virtqueue_element(elem_ptr, &elem) == 0) {
+                printf("#virtqueue_pop: index: %u, len: %u, ndescs: %u, out_num: %u, in_num: %u\n",
+                    elem.index, elem.len, elem.ndescs, elem.out_num, elem.in_num);
+                printf("#virtqueue_pop: in_sgl_size: %zu, out_sgl_size: %zu\n",
+                    elem.in_sgl_size(), elem.out_sgl_size());
+            }
+        }, true);
+    }
 }
 
 
