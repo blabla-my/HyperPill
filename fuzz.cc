@@ -72,6 +72,11 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 	int rc;
 	bx_address off_in_elem = 0;
 	if (vring) {
+		if (vring->queue && vring->queue->vdev && !vring->queue->vdev->to_fuzz) {
+			// device is not being fuzzed
+			// just ignore
+			return 0;
+		}
 		uint16_t vring_idx = 0;
 		uint8_t vring_elem[16] = {0};
 		switch (vring->filed_type(gpa)) {

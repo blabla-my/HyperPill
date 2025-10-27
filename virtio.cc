@@ -389,7 +389,7 @@ VirtioDev::VirtioDev() {
 	// memset(this, 0, sizeof(VirtioDev));
 	memset(this, 0, sizeof(name));
 	this->multiplier = 4;
-	this->config_space_start = 0;
+	this->to_fuzz = false;
 }
 
 void VirtioDev::enumerate_queues_from_common_cfg() {
@@ -418,6 +418,8 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 			queues[i]->desc_ring = new DescRing{queue_size, desc_ring_addr, queues[i]};
 			queues[i]->avail_ring = new AvailRing{queue_size, avail_ring_addr, queues[i]};
 			queues[i]->used_ring = new UsedRing{queue_size, used_ring_addr, queues[i]};
+			queues[i]->vdev = this;
+			queues[i]->queue_sel = i;
 			printf("#QUEUE_ENUM dev: %s, queue sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx\n", 
 				   name, i, queues[i]->desc_ring->size, desc_ring_addr, avail_ring_addr, used_ring_addr);
 		} else {
@@ -436,15 +438,17 @@ VQueueManager& get_vqueue_manager() {
 	return vqueue_manager;
 }
 
-bool VQueueManager::create_virtio_device(const std::string& name) {
+bool VQueueManager::create_virtio_device(const std::string& name, bool to_fuzz) {
 	if (virtio_devs.find(name) != virtio_devs.end()) {
 		printf("Virtio device %s already exists.\n", name.c_str());
+		virtio_devs[name]->to_fuzz = to_fuzz;
 		return true;
 	}
-	virtio_devs[name] = VirtioDev();
-	VirtioDev* dev_ptr = &virtio_devs[name];
-	strcpy(virtio_devs[name].name, name.c_str());
-	virtio_dev_list.push_back(&virtio_devs[name]);
+	virtio_devs[name] = new VirtioDev();
+	VirtioDev* dev_ptr = virtio_devs[name];
+	dev_ptr->to_fuzz = to_fuzz;
+	strcpy(virtio_devs[name]->name, name.c_str());
+	virtio_dev_list.push_back(virtio_devs[name]);
 	return true;
 }
 
@@ -455,39 +459,44 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 		printf("Virtio device %s not found.\n", name.c_str());
 		return;
 	}
-	VirtioDev &dev = virtio_devs[name];
+	VirtioDev *dev = virtio_devs[name];
 	switch (type) {
 		case ConfigSpace::COMMON:
-			dev.common_cfg = {address, size, type};
-			dev.enumerate_queues_from_common_cfg();
+			if (dev->common_cfg.address == address && dev->common_cfg.size == size) {
+				break;
+			}
+			dev->common_cfg = {address, size, type};
+			dev->enumerate_queues_from_common_cfg();
 			break;
 		case ConfigSpace::ISR:
-			dev.isr_cfg = {address, size, type};
+			if (dev->isr_cfg.address == address && dev->isr_cfg.size == size) {
+				break;
+			}
+			dev->isr_cfg = {address, size, type};
 			break;
 		case ConfigSpace::DEVICE:
-			dev.device_cfg = {address, size, type};
+			if (dev->device_cfg.address == address && dev->device_cfg.size == size) {
+				break;
+			}
+			dev->device_cfg = {address, size, type};
 			break;
 		case ConfigSpace::NOTIFY:
-			dev.notify_cfg = {address, size, type};
+			if (dev->notify_cfg.address == address && dev->notify_cfg.size == size) {
+				break;
+			}
+			dev->notify_cfg = {address, size, type};
 			break;
 		default:
 			printf("Unknown config space type %d for device %s.\n", type, name.c_str());
 			return;
-	}
-	if (!dev.config_space_start) {
-		dev.config_space_start = CFG_START(address); 
-	}
-	else {
-		printf("cfg start exist: %lx vs %lx\n", dev.config_space_start, CFG_START(address));
-		assert(dev.config_space_start == CFG_START(address));
 	}
 }
 
 void VQueueManager::group_vrings_by_page() {
 	for (const auto& it : virtio_devs) {
 		const auto& vdev = it.second;
-		for (size_t i = 0; i < vdev.queue_num; i++ ) {
-			const auto* queue = vdev.queues[i];
+		for (size_t i = 0; i < vdev->queue_num; i++ ) {
+			const auto* queue = vdev->queues[i];
 			group_vring_by_page(queue->avail_ring);
 			group_vring_by_page(queue->used_ring);
 			group_vring_by_page(queue->desc_ring);
@@ -520,21 +529,12 @@ const VRing* VQueueManager::get_belonging_vring(bx_address address){
 void VQueueManager::reset_all_queue(){
 	for (auto& it : virtio_devs) {
 		auto& vdev = it.second;
-		for (size_t i = 0; i < vdev.queue_num; i++ ) {
-			auto* queue = vdev.queues[i];
+		for (size_t i = 0; i < vdev->queue_num; i++ ) {
+			auto* queue = vdev->queues[i];
 			if (queue)
 				queue->reset();
 		}
 	}
-}
-
-VirtioDev* VQueueManager::get_vdev_by_config_space_addr(unsigned long addr) {
-	for (auto vdev: virtio_dev_list) {
-		if (vdev->config_space_start == CFG_START(addr)){
-			return vdev;
-		}
-	}
-	return NULL;
 }
 
 /* VirtQueueElement */

@@ -208,7 +208,7 @@ struct DescRing: VRing {
 
 struct VQueue {
     VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL), idx(0),
-        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs() {}
+        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs(), vdev(nullptr), queue_sel(0) {}
     void reset();
     void add_desc(vring_desc *desc);
     const vring_desc* get_belonging_desc(unsigned long addr, size_t size);
@@ -221,6 +221,8 @@ struct VQueue {
     size_t last_used_idx;  // Last used index processed
     DescChainFSM desc_chain_fsm;
     std::vector<vring_desc> generated_descs;
+    struct VirtioDev* vdev;
+    uint16_t queue_sel;
 };
 
 struct ConfigSpace {
@@ -264,7 +266,7 @@ struct VirtioDev {
     ConfigSpace isr_cfg;
     ConfigSpace device_cfg; // Device-specific configuration space
     ConfigSpace notify_cfg; // Notification configuration space
-    unsigned long config_space_start; // start address of the config space  
+    bool to_fuzz;
     void enumerate_queues_from_common_cfg();
 };
 
@@ -272,7 +274,7 @@ class VQueueManager {
 public:
     VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page(), all_queue_count(0UL) {}
     typedef tsl::robin_set<const VRing*> VRingSet;
-    bool create_virtio_device(const std::string& name);
+    bool create_virtio_device(const std::string& name, bool to_fuzz=false);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
     void group_vrings_by_page();
     const VRing* get_belonging_vring(bx_address address);
@@ -282,11 +284,10 @@ public:
         if (index >= virtio_dev_list.size()) return NULL;
         else return virtio_dev_list[index];
     }
-    VirtioDev* get_vdev_by_config_space_addr(unsigned long addr);
     size_t allocate_new_queue_idx() {return all_queue_count++;}
 private:
     void group_vring_by_page(const VRing* vring);
-    tsl::robin_map<std::string, VirtioDev> virtio_devs; // Map of Virtio devices by name
+    tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
     std::vector<VirtioDev*> virtio_dev_list;                                                           
     tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
     size_t all_queue_count;
