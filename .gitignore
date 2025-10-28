@@ -147,6 +147,9 @@ vendor/include
 /VM
 /download*
 GEMINI.md
+AGENTS.md
+compile_commands.json
+openspec/
 
 # /.cache
 .cache
