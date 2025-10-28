@@ -181,6 +181,7 @@ void add_opt_infer_range(size_t base, size_t len);
 void fuzz_emu_stop_normal();
 void fuzz_emu_stop_unhealthy();
 void fuzz_emu_stop_crash(const char *type);
+void fuzz_emu_stop_polling();
 
 extern uint64_t vmcs_addr;
 void redo_paging();

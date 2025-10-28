@@ -106,7 +106,9 @@ struct vring_desc {
 struct vring_desc_with_info {
     struct DescInfo desc_info;
     vring_desc desc;
-    bool used;
+#define MAX_USED_CNT 1
+    uint16_t used_cnt;
+    bool valid;
 };
 
 typedef uint16_t vring_avail_elem;
@@ -218,7 +220,7 @@ struct DescRing: VRing {
 
 struct VQueue {
     VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL), idx(0),
-        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs(), vdev(nullptr), queue_sel(0) {}
+        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs(), vdev(nullptr), queue_sel(0), polling_count(0) {}
     void reset();
     void add_desc(vring_desc *desc);
     const vring_desc* get_belonging_desc(unsigned long addr, size_t size);
@@ -233,6 +235,7 @@ struct VQueue {
     std::vector<vring_desc> generated_descs;
     struct VirtioDev* vdev;
     uint16_t queue_sel;
+    uint16_t polling_count;
 };
 
 struct ConfigSpace {

@@ -84,13 +84,17 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			return 0;
 		case VRing::FILED_TYPE::INDEX:
 			rc = vring->ingest_idx(&vring_idx);
-			if (rc < 0) {  
+			if (rc == -1) {  
 				// -1, ingest error
 				// -2, queue locates at page 0
 				// if (rc == -1) // ingest error
 				/* here we should not call fuzz_emu_stop_unhealthy */
 				// fuzz_emu_stop_unhealthy();
-				return -1;				
+				return rc;				
+			}
+			if (rc == -2) {
+				fuzz_emu_stop_polling();
+				return -2;
 			}
 			if (rc == 1) { // genereted index, already written
 				// just mark the region, do nothing
@@ -107,7 +111,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				// fuzz_emu_stop_unhealthy();
 				return -1;
 			} else if (rc == -2) {
-				fuzz_emu_stop_normal();
+				fuzz_emu_stop_polling();
 				return -2;
 			} else if (rc == 0) {
 				vring->write_elem(vring->element_index(gpa), vring_elem);

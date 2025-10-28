@@ -1,4 +1,5 @@
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,9 @@
 static DescPool* mutate_desc_pool1 = nullptr;
 static DescPool* mutate_desc_pool2 = nullptr;
 static uint8_t* crossover_buffer = nullptr;
+
+extern bool log_ops;
+#define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
 
 namespace DescMutator {
 
@@ -66,8 +70,10 @@ static void UpdateWithHints(vring_desc_with_info* desc, std::mt19937 &gen) {
         auto choosed_hint_idx = gen() % len;
         for (cur=hints; cur && choosed_hint_idx >0; cur = cur->next, choosed_hint_idx--);
         desc->desc.len = cur->size;
-        printf("Mutator: Updated desc len with hint: queue %d, desc %d, is_out %d, len %u\n",
-                desc->desc_info.queue_id,desc->desc_info.desc_idx, desc->desc_info.is_out, desc->desc.len);
+        DBG_PRINT {
+            printf("Mutator: Updated desc len with hint: queue %d, desc %d, is_out %d, len %u\n",
+                    desc->desc_info.queue_id,desc->desc_info.desc_idx, desc->desc_info.is_out, desc->desc.len);
+        }
     } else {
         // no hints, do nothing
     }
@@ -87,7 +93,7 @@ static void mutate_desc(DescPool* pool, std::mt19937 &gen) {
     if (pool->len == 0) {
         return;
     }
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 64; i++) {
         auto choosed_desc = &pool->array[gen() % pool->len];
         auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
         choosed_mutator(choosed_desc, gen);
@@ -157,7 +163,7 @@ vring_desc_with_info* DescPool::new_desc() {
     len++;
     srand(__rdtsc());
     ret->desc.addr = GUEST_MEM_START + (rand() % (GUEST_MEM_SIZE));
-    ret->desc.len = rand();
+    ret->desc.len = rand() % (GUEST_MEM_SIZE - (ret->desc.addr - GUEST_MEM_START));
     DBG_PRINT {
         printf("DescPool: new desc addr %lx len %x total %lx\n", 
             ret->desc.addr,
@@ -171,24 +177,29 @@ const vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info) {
         vring_desc_with_info* desc_with_info = &array[i];
         if (desc_with_info->desc_info.queue_id == desc_info->queue_id &&
             desc_with_info->desc_info.desc_idx == desc_info->desc_idx &&
-            desc_with_info->desc_info.is_out == desc_info->is_out &&
-            desc_with_info->used == false) {
-            DBG_PRINT {
-                printf("DescPool: reusing desc idx %x for queue %u is_out %d addr %lx len %x\n", 
-                    desc_with_info->desc_info.desc_idx,
-                    desc_with_info->desc_info.queue_id,
-                    desc_with_info->desc_info.is_out,
-                    desc_with_info->desc.addr,
-                    desc_with_info->desc.len);
-                desc_with_info->used = true;
-            }
-            return desc_with_info;
+            desc_with_info->desc_info.is_out == desc_info->is_out) {
+            // desc_with_info->used == false) {
+            if (desc_with_info->used_cnt < MAX_USED_CNT) {
+                desc_with_info->used_cnt ++;
+                DBG_PRINT {
+                    printf("DescPool: reusing desc idx %x for queue %u is_out %d addr %lx len %x cnt %x\n", 
+                        desc_with_info->desc_info.desc_idx,
+                        desc_with_info->desc_info.queue_id,
+                        desc_with_info->desc_info.is_out,
+                        desc_with_info->desc.addr,
+                        desc_with_info->desc.len,
+                        desc_with_info->used_cnt);
+                }
+                return desc_with_info;
+            }/*  else {
+                return nullptr;
+            } */
         }
     }
     auto new_desc = this->new_desc();
     if (new_desc) {
         new_desc->desc_info = *desc_info;
-        new_desc->used = true;
+        new_desc->used_cnt = true;
         return new_desc;
     }
     return nullptr;
@@ -219,7 +230,7 @@ size_t DescPool::deserialize(const uint8_t* data, size_t len) {
             return 0;
         desc_pool_pos += DESC_POOL_SEPARATOR_LEN;
         if (desc_pool_pos + sizeof(size_t) + desc_num * sizeof(vring_desc_with_info) - data <= len) {
-            this->len = 0;
+            memcpy(this, desc_pool_pos, sizeof(size_t) + desc_num * sizeof(vring_desc_with_info));
             DBG_PRINT {
                 printf("Deserialized desc pool with %ld(%ld) entries.\n", this->len, desc_num);
             }
@@ -245,8 +256,55 @@ size_t DescPool::serialize(void* dst, size_t max_len) const {
     memcpy(pos+DESC_POOL_SEPARATOR_LEN, this, get_size());
     DBG_PRINT {
         printf("Serialized desc pool with %ld entries.\n", len);
+        fflush(stdout);
     }
     return DESC_POOL_SEPARATOR_LEN + get_size();
+}
+void DescPool::mark_desc_valid(const DescInfo *desc_info) {
+    /* search reversely to find the latest one */
+    for (size_t i = len; i > 0; i--) {
+        vring_desc_with_info* desc_with_info = &array[i-1];
+        if (desc_with_info->desc_info.queue_id == desc_info->queue_id &&
+            desc_with_info->desc_info.desc_idx == desc_info->desc_idx &&
+            desc_with_info->desc_info.is_out == desc_info->is_out) {
+
+            desc_with_info->valid = true;
+            DBG_PRINT {
+                printf("DescPool: mark desc valid idx %x for queue %u is_out %d addr %lx len %x\n", 
+                    desc_with_info->desc_info.desc_idx,
+                    desc_with_info->desc_info.queue_id,
+                    desc_with_info->desc_info.is_out,
+                    desc_with_info->desc.addr,
+                    desc_with_info->desc.len);
+            }
+            return;
+        }
+    }
+}
+
+size_t DescPool::remove_invalid_descs() {
+    DescPool tmp_pool;
+    for (size_t i = 0; i < len; i++) {
+        vring_desc_with_info* desc_with_info = &array[i];
+        if (desc_with_info->valid) {
+            tmp_pool.add(desc_with_info);
+        } else {
+            DBG_PRINT {
+                printf("DescPool: removing invalid desc idx %x for queue %u is_out %d addr %lx len %x\n", 
+                    desc_with_info->desc_info.desc_idx,
+                    desc_with_info->desc_info.queue_id,
+                    desc_with_info->desc_info.is_out,
+                    desc_with_info->desc.addr,
+                    desc_with_info->desc.len);
+            }
+        }
+    }
+    if (tmp_pool.len == len) {
+        return 0;
+    } else {
+        memcpy(this, &tmp_pool, sizeof(DescPool));
+        return len;
+    }
 }
 
 /* static size_t crossover_desc_pool(desc_pool_t* dst_pool, const desc_pool_t* src_pool, std::mt19937 &gen) {

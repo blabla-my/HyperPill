@@ -230,7 +230,7 @@ uint8_t* final_input_get(size_t* length) {
     
     /* reset desc used state */
     for (size_t i = 0; i < desc_pool->len; i++) {
-        desc_pool->array[i].used = false;
+        desc_pool->array[i].used_cnt = 0;
     }
     
     auto sz = desc_pool->serialize(final_input+*output_len, MAXLEN - *output_len);

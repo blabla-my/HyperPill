@@ -4,6 +4,7 @@
 #include "pc_system.h"
 #include "sourcecov.h"
 #include "task.h"
+#include "virtio.h"
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -132,6 +133,11 @@ void fuzz_emu_stop_unhealthy(){
 	fuzz_emu_stop();
     fuzz_do_not_continue = 1;
     fuzz_unhealthy_input = 1;
+}
+
+void fuzz_emu_stop_polling() {
+	fuzz_emu_stop();
+	fuzz_do_not_continue = 1;
 }
 
 void fuzz_emu_stop_crash(const char *type){
@@ -293,9 +299,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
 	if (fuzz_should_abort) abort();
 
-	size_t len;
-	uint8_t *output = ic_get_output(&len);
-	if (len == 0 || fuzz_unhealthy_input || !done) {
+	if (final_size == 0 || fuzz_unhealthy_input || !done) {
+		printf("Skipping saving input (size: %ld, unhealthy: %d, done: %d)\n",
+		       final_size, fuzz_unhealthy_input, done);
+		fflush(stdout);
 		uint8_t *dummy = (uint8_t *)"AAA";
 		__fuzzer_set_output(dummy, 1);
 		reset_bx_vm();
@@ -305,6 +312,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	done = 1;
 
 	reset_bx_vm();
+	get_vqueue_manager().reset_all_queue();
 
 	/*
 	 * The IC_TEST mode

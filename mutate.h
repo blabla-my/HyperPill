@@ -20,9 +20,11 @@ struct DescPool {
     const vring_desc_with_info* get_item(size_t idx) const;
     bool add(const vring_desc_with_info* desc_with_info);
     vring_desc_with_info* new_desc();
+    void mark_desc_valid(const DescInfo* desc_info);
     const vring_desc_with_info* ingest_desc(const DescInfo* desc_info);
     size_t deserialize(const uint8_t* data, size_t len);
     size_t serialize(void* dst, size_t max_len) const;
+    size_t remove_invalid_descs();
 
     DescPool();
     ~DescPool();

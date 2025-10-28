@@ -128,7 +128,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 		
 		const vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 		if (!desc_with_info) { 
-			return -1;
+			return -2;
 		}
 		memcpy(desc_ptr, &desc_with_info->desc, sizeof(vring_desc_with_info));
 		auto addr_ptr = (uint64_t*)&desc_ptr->addr;
@@ -181,6 +181,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 /* VQueue */
 void VQueue::reset(){
 	desc_chain_fsm.reset();	
+	polling_count = 0;
 }
 
 void VQueue::add_desc(vring_desc *desc) {
@@ -524,7 +525,7 @@ void VQueueManager::reset_all_queue(){
 		auto& vdev = it.second;
 		for (size_t i = 0; i < vdev->queue_num; i++ ) {
 			auto* queue = vdev->queues[i];
-			if (queue)
+			if (queue && queue->vdev && queue->vdev->to_fuzz)
 				queue->reset();
 		}
 	}
