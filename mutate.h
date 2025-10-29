@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include "virtio.h"
 
-#define DESC_ARRAY_MAX_LEN 0x40
+#define DESC_ARRAY_MAX_LEN 0x20
 #define DESC_POOL_SEPARATOR "DESCPOOL"
 #define DESC_POOL_SEPARATOR_LEN 8
 

@@ -21,19 +21,19 @@ extern bool log_ops;
 namespace DescMutator {
 
 static void AlignLength(vring_desc_with_info* desc, std::mt19937 &gen) {
-    const size_t align[] = {16, 256, 512, 1024};
+    const size_t align[] = {512, 1024};
     auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
     int mul = gen() % 8 + 1;
     desc->desc.len = mul * choice;  
 }
 
 static void SmallLength(vring_desc_with_info* desc, std::mt19937 &gen) {
-    size_t new_len = gen() % 0x200; // [0,64]
+    size_t new_len = gen() % 0x10; // [0,64]
     desc->desc.len = new_len;
 }
 
 static void MiddleLength(vring_desc_with_info* desc, std::mt19937 &gen) {
-    size_t new_len = (gen() % 0xe00) + 0x200; // [256,4352]
+    size_t new_len = (gen() % 0x200) + 0x50; // [256,4352]
     desc->desc.len = new_len;
 }
 
@@ -93,7 +93,7 @@ static void mutate_desc(DescPool* pool, std::mt19937 &gen) {
     if (pool->len == 0) {
         return;
     }
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < DESC_ARRAY_MAX_LEN; i++) {
         auto choosed_desc = &pool->array[gen() % pool->len];
         auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
         choosed_mutator(choosed_desc, gen);

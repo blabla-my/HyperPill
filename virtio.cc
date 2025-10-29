@@ -117,20 +117,6 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 	else if (queue->desc_chain_fsm.is_inited()){
 		DescChainFSM::SGType sg_type = queue->desc_chain_fsm.consume();
 
-		uint16_t queue_idx = queue->idx;
-		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
-		auto desc_seq = queue->desc_chain_fsm.desc_seq();
-		DescInfo desc_info = {
-			.queue_id = queue_idx,
-			.desc_idx = desc_seq,
-			.is_out = is_out
-		};
-		
-		const vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
-		if (!desc_with_info) { 
-			return -2;
-		}
-		memcpy(desc_ptr, &desc_with_info->desc, sizeof(vring_desc_with_info));
 		auto addr_ptr = (uint64_t*)&desc_ptr->addr;
 		desc_ptr->next = (index+1) % size;
 		desc_ptr->flags = 0;
@@ -161,6 +147,22 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 			case DescChainFSM::SGType::NONE:
 				break;
 		}
+		uint16_t queue_idx = queue->idx;
+		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
+		auto desc_seq = queue->desc_chain_fsm.desc_seq();
+		DescInfo desc_info = {
+			.queue_id = queue_idx,
+			.desc_idx = desc_seq,
+			.is_out = is_out
+		};
+		
+		const vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
+		if (!desc_with_info) { 
+			return -2;
+		}
+		desc_ptr->addr = desc_with_info->desc.addr;
+		desc_ptr->len = desc_with_info->desc.len;
+
 		queue->desc_chain_fsm.add_used_index(index);
 		if (desc_ptr->len > 0x10000) { // record large desc size, having more chance to be identified by cmplog
 			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
