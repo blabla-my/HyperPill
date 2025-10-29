@@ -36,7 +36,7 @@
 // 0xf0000 - 0xfffff    Upper BIOS Area (64K)
 //
 
-void BX_MEM_C::writePhysicalPage(BX_CPU_C *cpu, bx_phy_address addr, unsigned len, void *data)
+void BX_MEM_C::writePhysicalPage(BX_CPU_C *cpu, bx_phy_address addr, unsigned len, void *data, bool hook_access)
 {
   Bit8u *data_ptr;
   bx_phy_address a20addr = A20ADDR(addr);

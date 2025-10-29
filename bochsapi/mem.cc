@@ -105,7 +105,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                 BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
                 bx_address gpa = lookup_gpa_by_hpa(phy);
                 const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa);
-                if (vring)
+                if (vring && vring->queue->vdev->to_fuzz)
                     printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x data: ",
                             phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len);
                 else
@@ -118,6 +118,15 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
         }
     
         prioraccess = -1;
+    } else if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_code_pages.contains(phy>>12)) {
+        bx_address gpa = lookup_gpa_by_hpa(phy);
+        if (log_ops || BX_CPU(id)->fuzztrace) {
+            auto vring = get_vqueue_manager().get_belonging_vring(gpa);
+            if (vring) {
+                printf("!dma write: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x\n",
+                        phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len);
+            }
+        }
     }
 }
 
@@ -237,11 +246,12 @@ void fuzz_reset_memory() {
 
 
 void BX_MEM_C::writePhysicalPage(BX_CPU_C *cpu, bx_phy_address addr,
-    unsigned len, void *data)
+    unsigned len, void *data, bool hook_access)
 {
 
     notify_write(addr);
-    fuzz_hook_memory_access(addr, len, 0, BX_WRITE, NULL) ;
+    if (hook_access)
+        fuzz_hook_memory_access(addr, len, 0, BX_WRITE, NULL) ;
 
     memcpy(addr_conv(addr), data, len);
 

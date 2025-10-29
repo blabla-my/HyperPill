@@ -140,7 +140,7 @@ public:
   BX_MEM_SMF void    readPhysicalPage(BX_CPU_C *cpu, bx_phy_address addr,
                                       unsigned len, void *data);
   BX_MEM_SMF void    writePhysicalPage(BX_CPU_C *cpu, bx_phy_address addr,
-                                       unsigned len, void *data);
+                                       unsigned len, void *data, bool hook_access = true);
 
   BX_MEM_SMF void    dmaReadPhysicalPage(bx_phy_address addr, unsigned len, Bit8u *data);
   BX_MEM_SMF void    dmaWritePhysicalPage(bx_phy_address addr, unsigned len, Bit8u *data);

@@ -100,7 +100,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				// just mark the region, do nothing
 				return 0;
 			}
-			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx, false);
 			memcpy(data, &vring_idx, len);
 			return 0;
 		case VRing::FILED_TYPE::VRING_ELEM:
@@ -120,6 +120,8 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				// just mark the region, do nothing
 			}
 			return 0;
+		case VRing::FILED_TYPE::EVENT_INDEX:
+			return 0; // not a vring element
 		default:
 			assert(false);
 			return -1;
@@ -129,7 +131,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		uint8_t* buf = ic_ingest_len(len);
 		if (!buf)
 			return -1;
-		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf);
+		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 		memcpy(data, buf, len);
 		return 0;
 	}

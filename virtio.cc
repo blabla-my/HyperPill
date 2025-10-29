@@ -40,7 +40,7 @@ void VRing::write_elem(int index, void* elem) const {
 	if (!addr_hpa) return;
 	if (index >= size) return;
 	// BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem, false);
 }
 
 /* AvailRing */
@@ -69,8 +69,10 @@ VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
 	}
 	else if (offset < sizeof(uint16_t)*2) {
 		return VRing::FILED_TYPE::INDEX;
-	} else {
+	} else if (offset < ring_offset() + size*element_size()) {
 		return VRing::FILED_TYPE::VRING_ELEM;
+	} else {
+		return VRing::FILED_TYPE::EVENT_INDEX;
 	}
 }
 

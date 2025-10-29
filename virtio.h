@@ -141,6 +141,8 @@ struct VRing {
     VRing() {}
     VRing(size_t size, bx_address addr_gpa, VQueue* vqueue);
     bx_address start() const {return addr_gpa;}
+    bx_address ring_start() const {return addr_gpa + ring_offset();}
+    virtual bx_address ring_end() const {return ring_start() + size*element_size();}
     virtual bx_address end() const {return addr_gpa;} 
     bx_address start_pagenum() const {
         return PAGE_NUM(start());
@@ -163,7 +165,8 @@ struct VRing {
     enum FILED_TYPE {
         FLAGS, 
         INDEX,
-        VRING_ELEM
+        VRING_ELEM,
+        EVENT_INDEX
     };
     virtual FILED_TYPE filed_type(bx_address address) const {return FILED_TYPE::VRING_ELEM;};
 
