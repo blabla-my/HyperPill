@@ -75,6 +75,7 @@ public:
     DescChainFSM() : state(WAIT), sg_num_in(0), sg_num_out(0), used_index() {}
     void init(unsigned max_len);
     SGType consume();
+    State get_state() {return state;}
     uint16_t desc_seq(); // return the number of last consumed desc; out, in, counts independently
     void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
     void add_used_index(uint16_t idx) {used_index.insert(idx);}

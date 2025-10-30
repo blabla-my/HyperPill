@@ -120,11 +120,14 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
         prioraccess = -1;
     } else if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_code_pages.contains(phy>>12)) {
         bx_address gpa = lookup_gpa_by_hpa(phy);
-        if (log_ops || BX_CPU(id)->fuzztrace) {
-            auto vring = get_vqueue_manager().get_belonging_vring(gpa);
-            if (vring) {
-                printf("!dma write: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x\n",
-                        phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len);
+        auto vring = get_vqueue_manager().get_belonging_vring(gpa);
+        if (data && vring && vring->filed_type(gpa) == VRing::FILED_TYPE::VRING_ELEM) {
+            const vring_used_elem* used_elem = (vring_used_elem*)data;
+            if (log_ops || BX_CPU(id)->fuzztrace) {
+                auto fsm_state = vring->queue->desc_chain_fsm.get_state();
+                printf("!used ring write: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x, "
+                        "used_elem.id : %x, used_elem.len: %x, data: %p, fsm_state: %d\n",
+                        phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len, used_elem->id, used_elem->len, data, fsm_state);
             }
         }
     }

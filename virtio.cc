@@ -95,11 +95,12 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 	bx_address offset = address - start();
 	if (offset < sizeof(uint16_t)){
 		return VRing::FILED_TYPE::FLAGS;
-	}
-	else if (offset < sizeof(uint16_t)*2) {
+	} else if (offset < sizeof(uint16_t)*2) {
 		return VRing::FILED_TYPE::INDEX;
-	} else {
+	} else if (offset < ring_offset() + size*element_size()) {
 		return VRing::FILED_TYPE::VRING_ELEM;
+	} else {
+		return VRing::FILED_TYPE::EVENT_INDEX;
 	}
 }
 
@@ -616,6 +617,7 @@ DescChainFSM::SGType DescChainFSM::consume() {
 			return SGType::IN;
 		} else if (sg_num_in_remain == 1) {
 			sg_num_in_remain--;
+			state = DONE;
 			return SGType::IN_TAIL;
 		} else if (sg_num_out_remain == 0 && sg_num_in_remain == 0) {
 			state = DONE;
