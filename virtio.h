@@ -52,8 +52,9 @@
 
 struct ConfigSpace;
 struct VQueue;
+struct vring_desc_with_info;
 /* desc chaining FSM */
-#define DESC_CHAIN_MAX_LEN 64
+#define DESC_CHAIN_MAX_LEN 8
 class DescChainFSM {
 public:
     enum State {
@@ -76,17 +77,19 @@ public:
     void init(unsigned max_len);
     SGType consume();
     State get_state() {return state;}
+    uint8_t get_inited_count() const {return inited_count;}
     uint16_t desc_seq(); // return the number of last consumed desc; out, in, counts independently
     void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
     void add_used_index(uint16_t idx) {used_index.insert(idx);}
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
+    void add_desc(const vring_desc_with_info* desc_with_info);
+    void increment_inited_count() {inited_count++;}
+    void invalidate_descs();
     bool has_used_index(uint16_t idx) {return used_index.contains(idx);}
     bool is_wait() const {return state == WAIT;}
     bool is_done() const {return state == DONE;}
     bool is_running() const {return state == RUNNING;}
     bool is_inited() const {return state == INITED or state == RUNNING;}
-    uint8_t get_inited_count() const {return inited_count;}
-    void increment_inited_count() {inited_count++;}
 private:
     State state;
     tsl::robin_set<uint16_t> used_index;
@@ -95,6 +98,8 @@ private:
     uint8_t sg_num_out;
     uint8_t sg_num_out_remain;
     uint8_t inited_count;
+    const vring_desc_with_info* generated_descs[DESC_CHAIN_MAX_LEN*2];
+    size_t generated_descs_size;
 };
 
 struct vring_desc {

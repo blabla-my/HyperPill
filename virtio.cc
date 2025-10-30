@@ -122,7 +122,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 
 		auto addr_ptr = (uint64_t*)&desc_ptr->addr;
 		desc_ptr->next = (index+1) % size;
-		desc_ptr->flags = 0;
+		// desc_ptr->flags = 0;
 
 		switch (sg_type) {
 			case DescChainFSM::SGType::OUT_HEAD:
@@ -167,6 +167,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 		desc_ptr->len = desc_with_info->desc.len;
 
 		queue->desc_chain_fsm.add_used_index(index);
+		queue->desc_chain_fsm.add_desc(desc_with_info);
 		if (desc_ptr->len > 0x10000) { // record large desc size, having more chance to be identified by cmplog
 			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
 		}
@@ -570,10 +571,9 @@ size_t VirtQueueElement::out_sgl_size() {
 }
 
 /* DescChainFSM */
-#define CHAINING_DESC_MAX 8
 void DescChainFSM::init(unsigned max_len) {
 	/* ingest random number as the length of chaining desc */	
-	max_len = max_len < CHAINING_DESC_MAX ? max_len : CHAINING_DESC_MAX;
+	max_len = max_len < DESC_CHAIN_MAX_LEN? max_len : DESC_CHAIN_MAX_LEN;
 	if (state == DescChainFSM::State::WAIT){
 		if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, max_len) < 0){
 			sg_num_out = 1;
@@ -584,10 +584,26 @@ void DescChainFSM::init(unsigned max_len) {
 		sg_num_out_remain = sg_num_out;
 		sg_num_in_remain = sg_num_in;
 		state = DescChainFSM::State::INITED;
+		if(!generated_descs_size) {
+			memset(generated_descs, 0, sizeof(vring_desc_with_info)*generated_descs_size);
+		}
+		generated_descs_size = 0;
 		DBG_PRINT {
 			printf("init desc chaining: out %u, in %u\n", sg_num_out, sg_num_in);
 		}
 	}	
+}
+
+void DescChainFSM::add_desc(const vring_desc_with_info *desc_with_info) {
+	if (generated_descs_size < DESC_CHAIN_MAX_LEN*2) {
+		generated_descs[generated_descs_size++] = desc_with_info;
+	}
+}
+
+void DescChainFSM::invalidate_descs() {
+	for (int i = 0; i < generated_descs_size; i++) {
+		desc_pool_get()->mark_desc_valid(generated_descs[i], false);
+	}
 }
 
 DescChainFSM::SGType DescChainFSM::consume() {

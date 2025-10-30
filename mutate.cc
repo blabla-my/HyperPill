@@ -23,7 +23,7 @@ namespace DescMutator {
 static void AlignLength(vring_desc_with_info* desc, std::mt19937 &gen) {
     const size_t align[] = {512, 1024};
     auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
-    int mul = gen() % 8 + 1;
+    int mul = gen() % 4 + 1;
     desc->desc.len = mul * choice;  
 }
 
@@ -93,7 +93,9 @@ static void mutate_desc(DescPool* pool, std::mt19937 &gen) {
     if (pool->len == 0) {
         return;
     }
-    for (int i = 0; i < DESC_ARRAY_MAX_LEN; i++) {
+
+    /* mutation */
+    for (int i = 0; i < 4; i++) {
         auto choosed_desc = &pool->array[gen() % pool->len];
         auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
         choosed_mutator(choosed_desc, gen);
@@ -117,7 +119,7 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
         mutate_desc_pool1 = new DescPool();
     }
     if (mutate_desc_pool1->deserialize(Data, Size)) {
-        size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size());
+        size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size() - DESC_SEPARATOR_LEN);
         std::mt19937 gen(Seed);
         mutate_desc(mutate_desc_pool1, gen);
         auto sz = mutate_desc_pool1->serialize(Data+new_size, MaxSize - new_size);
@@ -135,10 +137,6 @@ extern bool log_ops;
 DescPool::DescPool() {
     len = 0;
     memset(array, 0, sizeof(vring_desc_with_info) * DESC_ARRAY_MAX_LEN);
-}
-
-DescPool::~DescPool() {
-    free(array);
 }
 
 const size_t DescPool::get_size() const {return len * sizeof(array[0]) + sizeof(len);}
@@ -164,6 +162,7 @@ vring_desc_with_info* DescPool::new_desc() {
     srand(__rdtsc());
     ret->desc.addr = GUEST_MEM_START + (rand() % (GUEST_MEM_SIZE));
     ret->desc.len = rand() % (GUEST_MEM_SIZE - (ret->desc.addr - GUEST_MEM_START));
+    ret->desc.flags = rand() & 0xffff;
     DBG_PRINT {
         printf("DescPool: new desc addr %lx len %x total %lx\n", 
             ret->desc.addr,
@@ -199,7 +198,8 @@ const vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info) {
     auto new_desc = this->new_desc();
     if (new_desc) {
         new_desc->desc_info = *desc_info;
-        new_desc->used_cnt = true;
+        new_desc->used_cnt = MAX_USED_CNT;
+        new_desc->valid = true;
         return new_desc;
     }
     return nullptr;
@@ -260,25 +260,13 @@ size_t DescPool::serialize(void* dst, size_t max_len) const {
     }
     return DESC_POOL_SEPARATOR_LEN + get_size();
 }
-void DescPool::mark_desc_valid(const DescInfo *desc_info) {
-    /* search reversely to find the latest one */
-    for (size_t i = len; i > 0; i--) {
-        vring_desc_with_info* desc_with_info = &array[i-1];
-        if (desc_with_info->desc_info.queue_id == desc_info->queue_id &&
-            desc_with_info->desc_info.desc_idx == desc_info->desc_idx &&
-            desc_with_info->desc_info.is_out == desc_info->is_out) {
-
-            desc_with_info->valid = true;
-            DBG_PRINT {
-                printf("DescPool: mark desc valid idx %x for queue %u is_out %d addr %lx len %x\n", 
-                    desc_with_info->desc_info.desc_idx,
-                    desc_with_info->desc_info.queue_id,
-                    desc_with_info->desc_info.is_out,
-                    desc_with_info->desc.addr,
-                    desc_with_info->desc.len);
-            }
-            return;
-        }
+void DescPool::mark_desc_valid(const vring_desc_with_info* desc_info, bool valid) {
+    /* we assume that the pointer desc_info lies within the array */
+    auto index = desc_info - array;
+    assert(index >= 0 && index < DESC_ARRAY_MAX_LEN);
+    array[index].valid = valid;
+    DBG_PRINT {
+        printf("DescPool: mark desc valid: idx %lx, validity: %d\n", index, valid);
     }
 }
 
@@ -302,8 +290,10 @@ size_t DescPool::remove_invalid_descs() {
     if (tmp_pool.len == len) {
         return 0;
     } else {
-        memcpy(this, &tmp_pool, sizeof(DescPool));
-        return len;
+        size_t removed = len - tmp_pool.len;
+        len = tmp_pool.len;
+        memcpy(array, tmp_pool.array, sizeof(array));
+        return removed;
     }
 }
 
