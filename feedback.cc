@@ -73,8 +73,8 @@ void indicator_cb(void(*cb)(uint64_t)) {
 }
 
 void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
-    static void* virtio_by_core = getenv("VIRTIO_CORE"); 
-    if (virtio_by_core && !constant)
+    static void* constant_only = getenv("CMPLOG_CONSTANT_ONLY"); 
+    if (constant_only && !constant)
         return;
 
     uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
@@ -88,7 +88,7 @@ void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
     if(ignore_pc(PC))
         return;
 
-    if(virtio_by_core)
+    if(constant_only)
         goto TRACE_CMP;
 
     if (indicator_values.find(op1) != indicator_values.end()) {

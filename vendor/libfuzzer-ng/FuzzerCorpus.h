@@ -312,7 +312,8 @@ public:
   }
 
   uintptr_t AddHotCmps(InputInfo *II, const Unit &U){
-      static void *virtio_core = getenv("VIRTIO_CORE");
+      static void *constant_only = getenv("CMPLOG_CONSTANT_ONLY");
+      static void* sgl_size_infer = getenv("SGL_SIZE_INFER");
       std::set<uint64_t> hints;
       for(int i=0; i < TPC.cmplog_size; i++){
           auto &cmp = TPC.cmplog[i];
@@ -324,10 +325,10 @@ public:
           if(cmp_pc_counts[cmp.pc] > 50)
               continue;
           
-          if (virtio_core) {
+          if (constant_only) {
             DescInfo* desc_info = nullptr;
             /* check val1 (by default, val2 is the immedidate number) */
-            if((desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
+            if(sgl_size_infer && (desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
                 TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2, cmp.pc);                
             }           
             
@@ -393,6 +394,10 @@ public:
               for(int j = 0; j < 2; j++) {
                   uint64_t val = j == 0 ? Arg1 : Arg2;
                   uint64_t otherval = j == 0 ? Arg2 : Arg1;
+                  DescInfo* desc_info = nullptr;
+                  if(sgl_size_infer && otherval < 0x1000 && (desc_info = TPC.SearchDescSize(val)) != nullptr){ 
+                      TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, otherval, cmp.pc);                
+                  }           
 
                   if(__builtin_popcountll(val) < 2){
                       continue;
