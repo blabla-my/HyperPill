@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <cstdint>
 #include "conveyor.h"
+#include <linux/virtio_config.h>
+#include <sys/types.h>
 
 #define DBG_PRINT if (BX_CPU(0)->fuzztrace || log_ops)
 
@@ -24,6 +26,14 @@ VRing::VRing(size_t size, bx_address addr_gpa, VQueue* vqueue): size(size), addr
 	printf("VRing: hpa %lx, size: %lx, vqueue: %p\n", addr_hpa, size, queue);
 }
 
+void VRing::write_elem(int index, void* elem) const {
+	if (!addr_hpa) return;
+	if (index >= size) return;
+	// BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
+}
+
+/* AvailRing */
 int AvailRing::ingest_idx(uint16_t *idx) const {
 	// read last index
 	if (!addr_hpa) return -2;
@@ -36,14 +46,6 @@ int AvailRing::ingest_idx(uint16_t *idx) const {
 	return 0;
 }
 
-void VRing::write_elem(int index, void* elem) const {
-	if (!addr_hpa) return;
-	if (index >= size) return;
-	// BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem, false);
-}
-
-/* AvailRing */
 int AvailRing::ingest_elem(void* opaque, int index) const {
 	auto* avail_elem_ptr = (vring_avail_elem*)opaque;
 	if(ic_ingest_uint(avail_elem_ptr, sizeof(uint16_t), 0, size) < 0){
@@ -61,6 +63,7 @@ int AvailRing::ingest_elem(void* opaque, int index) const {
 	}
 	return 0;
 }
+
 VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
 	assert(address >= start() && address < end());
 	bx_address offset = address - start();
@@ -74,6 +77,24 @@ VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
 	} else {
 		return VRing::FILED_TYPE::EVENT_INDEX;
 	}
+}
+
+void VRing::set_flags(uint16_t flags) const {
+	if (!addr_hpa) return;
+	uint16_t flags_stack = flags;
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa, sizeof(uint16_t), &flags_stack);
+}
+
+void VRing::set_idx(uint16_t idx) const {
+	if (!addr_hpa) return;
+	uint16_t idx_stack = idx;
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + sizeof(uint16_t), sizeof(uint16_t), &idx_stack);
+}
+
+void VRing::set_event(uint16_t event) const {
+	if (!addr_hpa) return;
+	uint16_t event_stack = event;
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + sizeof(uint16_t) + size * element_size(), sizeof(uint16_t), &event_stack);
 }
 
 /* UsedRing */
@@ -195,6 +216,10 @@ void VQueue::add_desc(vring_desc *desc) {
 		generated_descs.push_back(*desc);
 }
 
+bool VQueue::inited() {
+	return desc_ring->start() != 0;
+}
+
 const vring_desc* VQueue::get_belonging_desc(unsigned long addr, size_t size) {
 	for (const vring_desc& d : generated_descs) {
 		if (addr >= d.addr && addr + size < d.addr + d.len) {
@@ -204,11 +229,12 @@ const vring_desc* VQueue::get_belonging_desc(unsigned long addr, size_t size) {
 	return NULL;
 }
 
+
 /* ConfigSpace */
-unsigned long ConfigSpace::read(size_t offset, size_t size) const {
+unsigned long ConfigSpace::read(size_t offset, size_t sz) const {
 	bx_address addr = address + offset;
 	bool inject_ok;
-	switch (size) {
+	switch (sz) {
 	case sizeof(uint8_t): 
 		inject_ok = inject_read(addr, 0);
 		break;
@@ -222,16 +248,16 @@ unsigned long ConfigSpace::read(size_t offset, size_t size) const {
 		inject_ok = inject_read(addr, 3);
 		break;
 	default:
-		printf("Unsupported read size %zu in ConfigSpace::read\n", size);
+		printf("Unsupported read size %zu in ConfigSpace::read\n", sz);
 		return 0;
 	}
 	if (!inject_ok) {
-		printf("Failed to inject read in ConfigSpace::read to %lx size %lx\n", addr+offset, size);
+		printf("Failed to inject read in ConfigSpace::read to %lx size %lx\n", addr+offset, sz);
 		return 0;
 	}
     start_cpu(true);
     
-	unsigned long mask = (1ULL << (size * 8)) - 1;
+	unsigned long mask = (1ULL << (sz * 8)) - 1;
     unsigned long value = BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
     return value;
 }
@@ -304,12 +330,12 @@ bool ConfigSpace::setup_queue() const {
 }
 
 size_t ConfigSpace::get_queue_size() const {
-	uint16_t size = read(VIRTIO_PCI_COMMON_Q_SIZE, sizeof(uint16_t));
-	if (size > VIRTIO_QUEUE_MAX) {
-		printf("Queue size %u exceeds maximum %u, clamping to max.\n", size, VIRTIO_QUEUE_MAX);
-		size = VIRTIO_QUEUE_MAX;
+	uint16_t sz = read(VIRTIO_PCI_COMMON_Q_SIZE, sizeof(uint16_t));
+	if (sz > VIRTIO_QUEUE_MAX) {
+		printf("Queue size %u exceeds maximum %u, clamping to max.\n", sz, VIRTIO_QUEUE_MAX);
+		sz = VIRTIO_QUEUE_MAX;
 	}
-	return (size_t)size;
+	return (size_t)sz;
 }
 
 size_t ConfigSpace::get_queue_num() const {
@@ -320,6 +346,10 @@ size_t ConfigSpace::get_queue_num() const {
 size_t ConfigSpace::get_queue_sel() const {
 	uint16_t sel = read(VIRTIO_PCI_COMMON_Q_SELECT, sizeof(uint16_t));
 	return (size_t)sel;
+}
+
+void ConfigSpace::set_queue_size(size_t sz) const {
+	write(VIRTIO_PCI_COMMON_Q_SIZE, sizeof(uint16_t), (uint16_t)sz);
 }
 
 void ConfigSpace::set_queue_num(size_t num) const {
@@ -350,10 +380,10 @@ bool ConfigSpace::set_queue_enable(size_t sel) const {
 	return write(VIRTIO_PCI_COMMON_Q_ENABLE, sizeof(uint16_t), 1);
 }
 
-bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
+bool ConfigSpace::write(size_t offset, size_t sz, unsigned long value) const {
 	bx_address addr = address + offset;
 	bool inject_ok;
-	switch (size) {
+	switch (sz) {
 	case sizeof(uint8_t): 
 		inject_ok = inject_write(addr, 0, value);
 		break;
@@ -367,11 +397,11 @@ bool ConfigSpace::write(size_t offset, size_t size, unsigned long value) const {
 		inject_ok = inject_write(addr, 3, value);
 		break;
 	default:
-		printf("Unsupported read size %zu in ConfigSpace::read\n", size);
+		printf("Unsupported read size %zu in ConfigSpace::read\n", sz);
 		return false;
 	}
 	if (!inject_ok) {
-		printf("Failed to inject write in ConfigSpace::write to %lx size %lx\n", addr+offset, size);
+		printf("Failed to inject write in ConfigSpace::write to %lx size %lx\n", addr+offset, sz);
 		return false;
 	}
 
@@ -390,6 +420,50 @@ VirtioDev::VirtioDev() {
 	memset(this, 0, sizeof(name));
 	this->multiplier = 4;
 	this->to_fuzz = false;
+}
+
+void VirtioDev::set_status(uint8_t status) {
+	common_cfg.write(VIRTIO_PCI_COMMON_STATUS, sizeof(uint8_t), status);
+}
+
+uint8_t VirtioDev::get_status() {
+	return (uint8_t)common_cfg.read(VIRTIO_PCI_COMMON_STATUS, sizeof(uint8_t));
+}
+
+void VirtioDev::set_device_features(uint64_t features) {
+	uint32_t features_lo = features & 0xffffffff;
+	uint32_t features_hi = (features>>32) & 0xffffffff;
+	common_cfg.write(VIRTIO_PCI_COMMON_DFSELECT, sizeof(uint32_t), 0);
+	common_cfg.write(VIRTIO_PCI_COMMON_DF, sizeof(uint32_t), features_lo);
+	common_cfg.write(VIRTIO_PCI_COMMON_DFSELECT, sizeof(uint32_t), 1);
+	common_cfg.write(VIRTIO_PCI_COMMON_DF, sizeof(uint32_t), features_hi);
+}
+
+void VirtioDev::set_guest_features(uint64_t features) {
+	uint32_t features_lo = features & 0xffffffff;
+	uint32_t features_hi = (features>>32) & 0xffffffff;
+	common_cfg.write(VIRTIO_PCI_COMMON_GFSELECT, sizeof(uint32_t), 0);
+	common_cfg.write(VIRTIO_PCI_COMMON_GF, sizeof(uint32_t), features_lo);
+	common_cfg.write(VIRTIO_PCI_COMMON_GFSELECT, sizeof(uint32_t), 1);
+	common_cfg.write(VIRTIO_PCI_COMMON_GF, sizeof(uint32_t), features_hi);
+}
+
+uint64_t VirtioDev::get_device_features() {
+	common_cfg.write(VIRTIO_PCI_COMMON_DFSELECT, sizeof(uint32_t), 0);
+	uint64_t features_lo = common_cfg.read(VIRTIO_PCI_COMMON_DF, sizeof(uint32_t));
+
+	common_cfg.write(VIRTIO_PCI_COMMON_DFSELECT, sizeof(uint32_t), 1);
+	uint64_t features_hi = common_cfg.read(VIRTIO_PCI_COMMON_DF, sizeof(uint32_t));
+	return (features_hi << 32) | features_lo; 
+}
+
+uint64_t VirtioDev::get_guest_features() {
+	common_cfg.write(VIRTIO_PCI_COMMON_GFSELECT, sizeof(uint32_t), 0);
+	uint64_t features_lo = common_cfg.read(VIRTIO_PCI_COMMON_GF, sizeof(uint32_t));
+
+	common_cfg.write(VIRTIO_PCI_COMMON_GFSELECT, sizeof(uint32_t), 1);
+	uint64_t features_hi = common_cfg.read(VIRTIO_PCI_COMMON_GF, sizeof(uint32_t));
+	return (features_hi << 32) | features_lo; 
 }
 
 void VirtioDev::enumerate_queues_from_common_cfg() {
@@ -432,10 +506,27 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 	common_cfg.set_queue_sel(old_queue_sel);
 }
 
+bool VirtioDev::inited() {
+	for (int i = 0; i < queue_num; i++) {
+		if (!queues[i]->inited()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 /* VQueueManager */
 static VQueueManager vqueue_manager;
 VQueueManager& get_vqueue_manager() {
 	return vqueue_manager;
+}
+
+VirtioDev* VQueueManager::get_vdev_by_name(const std::string& name) {
+    auto it = virtio_devs.find(name);
+    if (it == virtio_devs.end()) {
+        return NULL;
+    }
+    return it->second;
 }
 
 bool VQueueManager::create_virtio_device(const std::string& name, bool to_fuzz) {
@@ -448,7 +539,8 @@ bool VQueueManager::create_virtio_device(const std::string& name, bool to_fuzz) 
 	VirtioDev* dev_ptr = virtio_devs[name];
 	dev_ptr->to_fuzz = to_fuzz;
 	strcpy(virtio_devs[name]->name, name.c_str());
-	virtio_dev_list.push_back(virtio_devs[name]);
+	if (to_fuzz)
+		virtio_dev_list.push_back(virtio_devs[name]);
 	return true;
 }
 
@@ -535,6 +627,112 @@ void VQueueManager::reset_all_queue(){
 				queue->reset();
 		}
 	}
+}
+
+bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
+	if (vdev->inited())
+		return true;
+
+	vdev->set_status(VIRTIO_CONFIG_S_ACKNOWLEDGE | vdev->get_status());
+	vdev->set_status(VIRTIO_CONFIG_S_DRIVER | vdev->get_status());
+
+	/* set features */
+	uint64_t features = vdev->get_device_features();
+	assert(features & (1ULL << VIRTIO_F_VERSION_1));
+	features &= ~((1ULL << VIRTIO_RING_F_EVENT_IDX) | (1ULL << VIRTIO_RING_F_INDIRECT_DESC));
+	vdev->set_guest_features(features);
+	vdev->get_guest_features();
+
+	vdev->set_status(VIRTIO_CONFIG_S_FEATURES_OK | vdev->get_status());
+
+
+	for (size_t i = 0; i < vdev->queue_num; i++) {
+		VQueue* queue = vdev->queues[i];
+		if (!queue) continue;
+		if (queue->inited()) continue;
+
+		size_t queue_size = queue->desc_ring->size;
+		if (queue_size == 0) continue;
+
+		size_t desc_size = queue_size * sizeof(vring_desc);
+		size_t avail_size = sizeof(uint16_t) * 3 + queue_size * sizeof(vring_avail_elem);
+		size_t padding = ((avail_size + 0x3f) & (~0x3f)) - avail_size; // padding to 64byte
+		size_t used_size = sizeof(uint16_t) * 2 + queue_size * sizeof(vring_used_elem);
+
+		size_t total_size = desc_size + avail_size + padding + used_size;
+		size_t num_pages = (total_size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+		// bx_address gpa = GUEST_MEM_START; // + 0x4000000;
+		bx_address gpa = 0x10a8b8000UL;
+		while (gpa < GUEST_MEM_START + GUEST_MEM_SIZE) {
+			bool found = true;
+			for (size_t j = 0; j < num_pages; j++) {
+				if (rings_grouped_by_page.contains(PAGE_NUM(gpa + j * PAGE_SIZE))) {
+					found = false;
+					gpa += (j + 1) * PAGE_SIZE;
+					break;
+				}
+			}
+
+			if (found) {
+				bx_address desc_addr = gpa;
+				bx_address avail_addr = desc_addr + desc_size;
+				bx_address used_addr = avail_addr + avail_size + padding;
+				printf("VQueueManager: init queue for %s, desc %lx, avail %lx, used %lx\n", vdev->name, desc_addr, avail_addr, used_addr);
+
+				vdev->common_cfg.set_queue_sel(queue->queue_sel);
+				vdev->common_cfg.set_desc_ring_addr(desc_addr);
+				vdev->common_cfg.set_avail_ring_addr(avail_addr);
+				vdev->common_cfg.set_used_ring_addr(used_addr);
+
+				desc_addr = vdev->common_cfg.get_desc_ring_addr();
+				avail_addr = vdev->common_cfg.get_avail_ring_addr();
+				used_addr = vdev->common_cfg.get_used_ring_addr();
+
+				delete queue->desc_ring;
+				delete queue->avail_ring;
+				delete queue->used_ring;
+
+				queue->desc_ring = new DescRing(queue_size, desc_addr, queue);
+				queue->avail_ring = new AvailRing(queue_size, avail_addr, queue);
+				queue->used_ring = new UsedRing(queue_size, used_addr, queue);
+				
+				// Initialize descriptor table
+				for (size_t j = 0; j < queue_size; ++j) {
+					vring_desc desc_elem = {0}; // Initialize all fields to 0
+					desc_elem.next = (j + 1) % queue_size;
+					queue->desc_ring->write_elem(j, &desc_elem);
+				}
+				
+				queue->avail_ring->set_flags(0);
+				queue->avail_ring->set_idx(0);
+				queue->avail_ring->set_event(0);
+				queue->used_ring->set_flags(0);
+				queue->used_ring->set_idx(0);
+				queue->used_ring->set_event(0);				
+
+				group_vring_by_page(queue->desc_ring);
+				group_vring_by_page(queue->avail_ring);
+				group_vring_by_page(queue->used_ring);
+				break;
+			}
+		}
+	}
+	for (int i = 0; i < vdev->queue_num; i++) {
+		vdev->common_cfg.set_queue_sel(vdev->queues[i]->queue_sel);
+		vdev->common_cfg.set_queue_size(vdev->queues[i]->desc_ring->size);
+		vdev->common_cfg.set_queue_enable(vdev->queues[i]->queue_sel);
+	}
+	// vdev->set_status(VIRTIO_CONFIG_S_DRIVER_OK | vdev->get_status());
+	return true;
+}
+
+bool VQueueManager::init_queues() {
+	for (auto vdev : virtio_dev_list) {
+		if (!vdev->inited())
+			init_queues_for_dev(vdev);
+	}
+	return true;
 }
 
 /* VirtQueueElement */

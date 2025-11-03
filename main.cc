@@ -300,7 +300,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	if (fuzz_should_abort) abort();
 
 	if (final_size == 0 || fuzz_unhealthy_input || !done) {
-		printf("Skipping saving input (size: %ld, unhealthy: %d, done: %d)\n",
+		verbose_printf("Skipping saving input (size: %ld, unhealthy: %d, done: %d)\n",
 		       final_size, fuzz_unhealthy_input, done);
 		fflush(stdout);
 		uint8_t *dummy = (uint8_t *)"AAA";

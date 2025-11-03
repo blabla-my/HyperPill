@@ -223,17 +223,20 @@ uint8_t *ic_get_output(size_t *len)
 }
 
 uint8_t* final_input_get(size_t* length) {
+    static void* virtio_core = getenv("VIRTIO_CORE");
     if(!final_input) {
         final_input = (uint8_t*)malloc(MAXLEN + sizeof(DescPool));
     }
     memcpy(final_input, output, *output_len);
-    
-    /* reset desc used state */
-    for (size_t i = 0; i < desc_pool->len; i++) {
-        desc_pool->array[i].used_cnt = 0;
+    size_t sz = 0;
+
+    if (virtio_core) {
+        /* reset desc used state */
+        for (size_t i = 0; i < desc_pool->len; i++) {
+            desc_pool->array[i].used_cnt = 0;
+        }
+        sz = desc_pool->serialize(final_input+*output_len, MAXLEN - *output_len);
     }
-    
-    auto sz = desc_pool->serialize(final_input+*output_len, MAXLEN - *output_len);
 
     final_input_len = *output_len + sz;
     *length = final_input_len;

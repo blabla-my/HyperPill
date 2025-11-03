@@ -115,10 +115,11 @@ static void mutate_desc(DescPool* pool, std::mt19937 &gen) {
 extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                          size_t MaxSize, unsigned int Seed) {
+    void* virtio_core = getenv("VIRTIO_CORE");
     if (!mutate_desc_pool1) {
         mutate_desc_pool1 = new DescPool();
     }
-    if (mutate_desc_pool1->deserialize(Data, Size)) {
+    if (virtio_core && mutate_desc_pool1->deserialize(Data, Size)) {
         size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size() - DESC_SEPARATOR_LEN);
         std::mt19937 gen(Seed);
         mutate_desc(mutate_desc_pool1, gen);

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <sstream>
 #include <stddef.h>
+#include <linux/virtio_config.h>
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include <map>
@@ -13,6 +14,19 @@
 
 #include "task.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
+
+/* Status byte for guest to report progress, and synchronize features. */
+/* We have seen device and processed generic fields (VIRTIO_CONFIG_F_VIRTIO) */
+#define VIRTIO_CONFIG_S_ACKNOWLEDGE	1
+/* We have found a driver for the device. */
+#define VIRTIO_CONFIG_S_DRIVER		2
+/* Driver has used its parts of the config, and is happy */
+#define VIRTIO_CONFIG_S_DRIVER_OK	4
+/* Driver has finished configuring features */
+#define VIRTIO_CONFIG_S_FEATURES_OK	8
+/* Device entered invalid state, driver must reset it */
+#define VIRTIO_CONFIG_S_NEEDS_RESET	0x40
+/* We've given up on this device. */
 
 #define VIRTIO_PCI_COMMON_DFSELECT	0
 #define VIRTIO_PCI_COMMON_DF		4
@@ -43,6 +57,14 @@
 #define VRING_DESC_F_WRITE	2
 /* This means the buffer contains a list of buffer descriptors. */
 #define VRING_DESC_F_INDIRECT	4
+
+#define VIRTIO_RING_F_INDIRECT_DESC	28
+
+/* The Guest publishes the used index for which it expects an interrupt
+ * at the end of the avail ring. Host should ignore the avail->flags field. */
+/* The Host publishes the avail index for which it expects a kick
+ * at the end of the used ring. Guest should ignore the used->flags field. */
+#define VIRTIO_RING_F_EVENT_IDX		29
 
 #define VIRTIO_QUEUE_MAX 1024
 
@@ -177,6 +199,9 @@ struct VRing {
     virtual FILED_TYPE filed_type(bx_address address) const {return FILED_TYPE::VRING_ELEM;};
 
     virtual int ingest_idx(uint16_t* idx) const {return 0;};
+    void set_flags(uint16_t flags) const;
+    void set_idx(uint16_t idx) const;
+    void set_event(uint16_t event) const;
 };
 
 struct AvailRing: VRing {
@@ -203,7 +228,7 @@ struct UsedRing: VRing {
         align = VRING_USED_ALIGN;
     }
     bx_address end() const override {
-        return addr_gpa + 2*sizeof(uint16_t) + size*sizeof(vring_used_elem);
+        return addr_gpa + 2*sizeof(uint16_t) + size*sizeof(vring_used_elem) + sizeof(uint16_t);
     }
     size_t element_size() const override {return sizeof(vring_used_elem);}
     size_t ring_offset() const override {return sizeof(uint16_t)*2;}
@@ -233,6 +258,7 @@ struct VQueue {
     void reset();
     void add_desc(vring_desc *desc);
     const vring_desc* get_belonging_desc(unsigned long addr, size_t size);
+    bool inited();
     DescRing* desc_ring;  // Descriptor ring
     AvailRing* avail_ring; // Available ring
     UsedRing* used_ring;  // Used ring
@@ -256,7 +282,7 @@ struct ConfigSpace {
         DEVICE,
         NOTIFY
     } type;
-    unsigned long read(size_t offset, size_t size) const;
+    unsigned long read(size_t offset, size_t sz) const;
     bx_address get_avail_ring_addr() const;
     bx_address get_used_ring_addr() const;
     bx_address get_desc_ring_addr() const;
@@ -267,10 +293,11 @@ struct ConfigSpace {
     size_t get_queue_size() const;
     size_t get_queue_num() const;
     size_t get_queue_sel() const;
+    void set_queue_size(size_t sz) const;
     void set_queue_num(size_t num) const;
     bool set_queue_sel(size_t sel) const;
     bool set_queue_enable(size_t sel) const;
-    bool write(size_t offset, size_t size, unsigned long value) const;
+    bool write(size_t offset, size_t sz, unsigned long value) const;
     bool contains(unsigned long addr) const;
 };
 
@@ -290,6 +317,14 @@ struct VirtioDev {
     ConfigSpace notify_cfg; // Notification configuration space
     bool to_fuzz;
     void enumerate_queues_from_common_cfg();
+    bool inited();
+    void set_status(uint8_t status);
+    void set_device_features(uint64_t features);
+    void set_guest_features(uint64_t features);
+    uint8_t get_status();
+    uint64_t get_device_features();
+    uint64_t get_guest_features();
+    
 };
 
 class VQueueManager {
@@ -307,6 +342,9 @@ public:
         else return virtio_dev_list[index];
     }
     size_t allocate_new_queue_idx() {return all_queue_count++;}
+    bool init_queues_for_dev(VirtioDev* vdev);
+    bool init_queues();
+    VirtioDev* get_vdev_by_name(const std::string& name);
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
