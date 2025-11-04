@@ -152,8 +152,8 @@ void apply_breakpoints_linux() {
             // every error through asan should reach this
             printf("ASAN error report\n");
             fuzz_stacktrace();
-            fuzz_emu_stop_crash("ASAN");
-            }, true);
+            fuzz_emu_stop_crash("asan-scoped-error");
+            }, false);
     add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
             printf("ASAN GENERIC ERROR\n");
             fuzz_emu_stop_crash("asan-generic-error");
@@ -165,11 +165,11 @@ void apply_breakpoints_linux() {
     add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
             printf("ASAN GENERIC ERROR\n");
             fuzz_emu_stop_crash("asan-generic-error");
-            }, true);
+            }, false);
     add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](bxInstruction_c *i) {
             printf("ASAN Deadly Signal\n");
             fuzz_emu_stop_crash("asan-deadly-signal");
-            }, true);
+            }, false);
     add_breakpoint(sym_to_addr("libc.so", "abort@@GLIBC_2.2.5"), [](bxInstruction_c *i) {
             fuzz_emu_stop_crash("abort");
     });
@@ -243,17 +243,17 @@ void handle_syscall_hooks(bxInstruction_c *i)
 {
     // crashes often go for exit/abort
     /* Hook Syscalls */
+    static void* nocov = getenv("NOCOV");
     if (i->getIaOpcode() == 0x471) {
         switch(BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx) {
             case 231:
             case 60:    // exit
-                // fuzz_emu_stop_crash("exit-syscall");
-                return;
+                if (nocov)
+                    fuzz_emu_stop_crash("exit-syscall");
                 break;
             case 62:    // kill
             case 200:   // tkill
-                return;
-                if (BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
+                if (nocov && BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
                     fuzz_emu_stop_crash("kill-syscall");
                     return;
                 }

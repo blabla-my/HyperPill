@@ -498,10 +498,21 @@ void ic_dump(){
 }
 
 void ic_dump_file(const char* filepath) {
+    static void* virtio_core = getenv("VIRTIO_CORE");
     FILE *f = fopen(filepath, "wb");
+
+    uint8_t* data;
+    size_t size;
+    if (virtio_core) {
+        data = final_input_get(&size);
+    } else {
+        data = output;
+        size = *output_len;
+    }
+
     if (f) {
         printf("Dumping input to %s\n", filepath);
-        fwrite(output, 1, *output_len, f);
+        fwrite(data, 1, size, f);
         fclose(f);
     } else {
         perror("Failed to open file");

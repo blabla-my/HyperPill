@@ -167,9 +167,6 @@ void fuzz_emu_stop_crash(const char *type){
 		std::stringstream ss;
 		ss << type << "-" << std::hex << hash;
 		ic_dump_file(ss.str().c_str());
-		if(master_fuzzer) {
-			ic_dump();
-		}
 	}
 }
 
