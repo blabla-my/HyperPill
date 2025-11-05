@@ -20,24 +20,32 @@ extern bool log_ops;
 
 namespace DescMutator {
 
-static void AlignLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+static void AlignLength(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
     const size_t align[] = {512, 1024};
     auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
     int mul = gen() % 4 + 1;
     desc->desc.len = mul * choice;  
 }
 
-static void SmallLength(vring_desc_with_info* desc, std::mt19937 &gen) {
-    size_t new_len = gen() % 0x10; // [0,64]
+static void SmallLength(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    size_t new_len = gen() % 0x80; // [0,64]
     desc->desc.len = new_len;
 }
 
-static void MiddleLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+static void MiddleLength(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
     size_t new_len = (gen() % 0x200) + 0x50; // [256,4352]
     desc->desc.len = new_len;
 }
 
-static void MutateLength(vring_desc_with_info* desc, std::mt19937 &gen) {
+static void MutateLength(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
     size_t change = (gen() % 33); // [0,32]
     if (gen() % 2 == 0) {
         // increase length
@@ -52,7 +60,27 @@ static void MutateLength(vring_desc_with_info* desc, std::mt19937 &gen) {
     }
 }
 
-static void AlignAddress(vring_desc_with_info* desc, std::mt19937 &gen) {
+static void FlipBitLength(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    // Assuming desc->desc.len is a 32-bit unsigned integer
+    uint32_t bit_pos = gen() % 32; // Random bit position from 0 to 31
+    desc->desc.len ^= (1U << bit_pos); // Flip the bit
+}
+
+static void ByteFlipLength(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    // Assuming desc->desc.len is a 32-bit unsigned integer
+    uint32_t byte_pos = gen() % 4; // Random byte position from 0 to 3
+    uint32_t bit_pos = gen() % 8; // Random bit position within the byte from 0 to 7
+    uint32_t mask = (1U << bit_pos) << (byte_pos * 8); // Create a mask for the specific bit
+    desc->desc.len ^= mask; // Flip the bit in the chosen byte
+}
+
+static void AlignAddress(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
     const size_t align[] = {16, 256, 512, 1024};
     auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
     if (desc->desc.addr % choice != 0) {
@@ -60,7 +88,9 @@ static void AlignAddress(vring_desc_with_info* desc, std::mt19937 &gen) {
     }
 }
 
-static void UpdateWithHints(vring_desc_with_info* desc, std::mt19937 &gen) {
+static void UpdateWithHints(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    auto desc = &desc_pool->array[gen() % desc_pool->len];
     auto hints = GetDescSizeHints(desc->desc_info.queue_id, desc->desc_info.desc_idx, desc->desc_info.is_out);
     if (hints) {
         size_t len = 0;
@@ -79,12 +109,25 @@ static void UpdateWithHints(vring_desc_with_info* desc, std::mt19937 &gen) {
     }
 }
 
-std::vector<void (*)(vring_desc_with_info*, std::mt19937 &)> mutators = {
+static void RemoveDesc(DescPool* desc_pool, std::mt19937 &gen) {
+    if (desc_pool->len == 0) return;
+    size_t idx = gen() % desc_pool->len;
+    if (idx < desc_pool->len - 1) {
+        memmove(&desc_pool->array[idx], &desc_pool->array[idx + 1], (desc_pool->len - idx - 1) * sizeof(vring_desc_with_info));
+    }
+    desc_pool->len--;
+}
+
+std::vector<void (*)(DescPool*, std::mt19937 &)> mutators = {
     AlignLength,
     SmallLength,
     MiddleLength,
+    MutateLength,
+    FlipBitLength,
+    ByteFlipLength,
     AlignAddress,
-    UpdateWithHints
+    UpdateWithHints,
+    RemoveDesc
 };
 
 } // namespace DescMutator
@@ -95,10 +138,9 @@ static void mutate_desc(DescPool* pool, std::mt19937 &gen) {
     }
 
     /* mutation */
-    for (int i = 0; i < 4; i++) {
-        auto choosed_desc = &pool->array[gen() % pool->len];
+    for (int i = 0; i < 1; i++) {
         auto choosed_mutator = DescMutator::mutators[gen() % DescMutator::mutators.size()];
-        choosed_mutator(choosed_desc, gen);
+        choosed_mutator(pool, gen);
     }
 }
 
@@ -120,9 +162,14 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
         mutate_desc_pool1 = new DescPool();
     }
     if (virtio_core && mutate_desc_pool1->deserialize(Data, Size)) {
-        size_t new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size() - DESC_SEPARATOR_LEN);
         std::mt19937 gen(Seed);
-        mutate_desc(mutate_desc_pool1, gen);
+        size_t new_size;
+        if (gen() % 2 == 0) { // Randomly choose between default mutate and custom mutate
+            new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size() - DESC_SEPARATOR_LEN);
+        } else {
+            new_size = LLVMFuzzerMutate(Data, Size, MaxSize - mutate_desc_pool1->get_size() - DESC_SEPARATOR_LEN);
+            mutate_desc(mutate_desc_pool1, gen);
+        }
         auto sz = mutate_desc_pool1->serialize(Data+new_size, MaxSize - new_size);
         return new_size + sz;
     } else {
