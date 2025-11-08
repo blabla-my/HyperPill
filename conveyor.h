@@ -16,6 +16,7 @@
 // #define DESC_SEPARATOR "DESC_END"
 #define DESC_SEPARATOR "\xad\xde"
 #define DESC_SEPARATOR_LEN 8
+#define MAX_OPS_LEN 2048
 
 #define conveyor_round(ptr, min, max) \
     do { \
@@ -76,19 +77,7 @@ void ic_subtract(size_t l);
 
 int new_op(uint8_t op, uint32_t start, uint32_t end, uint32_t dma_start, uint32_t dma_len);
 
-/* for virtio fuzz */
-typedef struct {
-    unsigned long pos;
-    unsigned long len;
-    // unsigned long addr;
-} buffer_pos;
-typedef std::vector<buffer_pos> buffer_pos_list;
-typedef buffer_pos_list::const_iterator buffer_pos_iterator;
-bool buffer_pos_empty();
-void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len);
-void reset_buffer_pos();
-buffer_pos_iterator buffer_pos_begin();
-buffer_pos_iterator buffer_pos_end();
+
 
 extern "C" {
 void __fuzzer_set_output(uint8_t *data, size_t size);

@@ -63,7 +63,7 @@ DMAData* dma_data_get() {return &dma_data;}
 static uint8_t *last_token;
 static size_t bufsize;
 
-static std::vector<buffer_pos> desc_buffer_pos; /* mark buffer positions in current input */
+
 
 static uint8_t *zeros;
 
@@ -92,7 +92,7 @@ int new_op(uint8_t op, uint32_t start, uint32_t end, uint32_t dma_start, uint32_
 
 // Ingest a new input
 void ic_new_input(const uint8_t* in, size_t len) {
-    bufsize = MAXLEN;
+    bufsize = MAX_OPS_LEN;
     if(!output) {
         output = (uint8_t*)malloc(bufsize);
         output_len = &output_lenn;
@@ -612,23 +612,13 @@ size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_
 }
 
 /* for virtio fuzz */
-bool buffer_pos_empty() {
-    return desc_buffer_pos.empty();
-}
+
 
 
 void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len) {
     __trace_pc_add_desc_region(queue_idx, desc_idx, is_out, pos, len);
 }
 
-buffer_pos_iterator buffer_pos_begin() {
-    return desc_buffer_pos.cbegin();
-}
 
-buffer_pos_iterator buffer_pos_end() {
-    return desc_buffer_pos.cend();
-}
 
-void reset_buffer_pos() {
-    desc_buffer_pos.clear();
-}
+

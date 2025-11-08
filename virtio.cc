@@ -416,8 +416,7 @@ bool ConfigSpace::contains(unsigned long addr) const {
 
 /* VirtioDev */
 VirtioDev::VirtioDev() {
-	// memset(this, 0, sizeof(VirtioDev));
-	memset(this, 0, sizeof(name));
+	memset(this, 0, sizeof(VirtioDev));
 	this->multiplier = 4;
 	this->to_fuzz = false;
 }

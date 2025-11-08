@@ -1,4 +1,5 @@
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -174,12 +175,15 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
         /* select one of the ops, dma_data, desc_pool to mutate */
         std::mt19937 gen(Seed);
         int choice = gen() % 3;
+        size_t real_max_size;
         switch (choice) {
             case 0: // mutate ops
-                new_ops_len = LLVMFuzzerMutate(ops, ops_len, MaxSize);
+                real_max_size = MAX_OPS_LEN < MaxSize ? MAX_OPS_LEN : MaxSize;
+                new_ops_len = LLVMFuzzerMutate(ops, ops_len, real_max_size);
                 return input_serialize(Data, MaxSize, ops, new_ops_len, mutate_dma_data, mutate_desc_pool1);
             case 1: // mutate dma_data
-                mutate_dma_data->len = LLVMFuzzerMutate(mutate_dma_data->dma_data, mutate_dma_data->len, MaxSize);
+                real_max_size = DMA_DATA_MAX_LENGTH < MaxSize ? DMA_DATA_MAX_LENGTH : MaxSize;
+                mutate_dma_data->len = LLVMFuzzerMutate(mutate_dma_data->dma_data, mutate_dma_data->len, real_max_size);
                 return input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
             case 2: // mutate desc pool
                 mutate_desc(mutate_desc_pool1, gen);
@@ -198,7 +202,7 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
 extern bool log_ops;
 
 size_t DMAData::deserialize(const uint8_t* data, size_t size) {
-    len = *(size_t*)data;
+    len = *(uint32_t*)data;
     assert(get_size() == size);
     memcpy(dma_data, data+sizeof(len), len);    
     cursor = 0;
@@ -311,7 +315,7 @@ const vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info) {
     return nullptr;
 }
 size_t DescPool::deserialize(const uint8_t* data, size_t size) {
-    len = *(size_t*)data;
+    len = *(uint32_t*)data;
     assert(get_size() == size);
     memcpy(array, data+sizeof(len), sizeof(vring_desc_with_info) * len);    
     return get_size();
