@@ -189,7 +189,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 
 		queue->desc_chain_fsm.add_used_index(index);
 		queue->desc_chain_fsm.add_desc(desc_with_info);
-		if (desc_ptr->len > 0x10000) { // record large desc size, having more chance to be identified by cmplog
+		if (desc_ptr->len > 0x1000) { // record large desc size, having more chance to be identified by cmplog
 			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
 		}
 	}
@@ -795,12 +795,6 @@ void DescChainFSM::init(unsigned max_len) {
 void DescChainFSM::add_desc(const vring_desc_with_info *desc_with_info) {
 	if (generated_descs_size < DESC_CHAIN_MAX_LEN*2) {
 		generated_descs[generated_descs_size++] = desc_with_info;
-	}
-}
-
-void DescChainFSM::invalidate_descs() {
-	for (int i = 0; i < generated_descs_size; i++) {
-		desc_pool_get()->mark_desc_valid(generated_descs[i], false);
 	}
 }
 

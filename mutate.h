@@ -9,25 +9,41 @@
 #define DESC_POOL_SEPARATOR "DESCPOOL"
 #define DESC_POOL_SEPARATOR_LEN 8
 
+#define DMA_DATA_MAX_LENGTH 0x1000
+
+#define DMA_DATA_SEPARATOR "DMADATA"
+#define DMA_DATA_SEPARATOR_LEN 7
+
 struct vring_desc_with_info;
+
+struct DMAData {
+    uint32_t len;
+    uint8_t dma_data[DMA_DATA_MAX_LENGTH];
+    uint32_t cursor;
+
+    const size_t get_size() const {return sizeof(len) + len; }
+    size_t deserialize(const uint8_t* data, size_t size);
+    size_t serialize(void* dst, size_t max_len) const;
+    uint8_t* ingest_data(size_t data_len);
+
+    DMAData();
+} __attribute__((packed));
+
 struct DescInfo;
 
 struct DescPool {
-    size_t len;
+    uint32_t len;
     vring_desc_with_info array[DESC_ARRAY_MAX_LEN];
 
     const size_t get_size() const;
     const vring_desc_with_info* get_item(size_t idx) const;
     bool add(const vring_desc_with_info* desc_with_info);
     vring_desc_with_info* new_desc();
-    void mark_desc_valid(const vring_desc_with_info* desc_info, bool valid);
     const vring_desc_with_info* ingest_desc(const DescInfo* desc_info);
-    size_t deserialize(const uint8_t* data, size_t len);
+    size_t deserialize(const uint8_t* data, size_t size);
     size_t serialize(void* dst, size_t max_len) const;
-    size_t remove_invalid_descs();
 
     DescPool();
-    // ~DescPool();
 } __attribute__((packed));
 
 #endif

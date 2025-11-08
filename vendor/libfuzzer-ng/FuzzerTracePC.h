@@ -35,7 +35,7 @@ struct DescInfo {
     uint16_t queue_id;
     uint16_t desc_idx;
     bool is_out;
-};
+} __attribute__((packed));
 
 struct DescSize {
     DescInfo desc_info;

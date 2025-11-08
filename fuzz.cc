@@ -3,6 +3,7 @@
 #include "config.h"
 #include "conveyor.h"
 #include "virtio.h"
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <tsl/robin_map.h>
@@ -128,7 +129,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		}
 	} else { /* reading buffer */
 		/* mark the input region */
-		uint8_t* buf = ic_ingest_len(len);
+		uint8_t* buf = dma_data_get()->ingest_data(len);
 		if (!buf)
 			return -1;
 		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
@@ -929,17 +930,21 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	uint8_t op;
 
 	static void *fuzz_legacy, *fuzz_hypercalls;
-	static void *bypass_virtio_core;
+	static void *virtio_core;
 	static int inited;
 	if (!inited) {
 		inited = 1;
 		fuzz_legacy = getenv("FUZZ_LEGACY");
 		fuzz_hypercalls = getenv("FUZZ_HYPERCALLS");
 		log_ops = getenv("LOG_OPS") || BX_CPU(id)->fuzztrace;
-		bypass_virtio_core = getenv("VIRTIO_CORE");
+		virtio_core = getenv("VIRTIO_CORE");
 	}
 
-	ic_new_input(Data, Size);
+	if (virtio_core) {
+		input_deserialize(Data, Size, nullptr, nullptr, dma_data_get(), desc_pool_get());
+	} else {
+		ic_new_input(Data, Size);
+	}
 	uint16_t start = 0;
 	int nops = 0;
 	uint8_t *input_start = ic_get_cursor();
@@ -958,7 +963,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 				ic_subtract(4);
 				continue;
 			}
-		} else if (bypass_virtio_core) {
+		} else if (virtio_core) {
 			if (ic_ingest8(&op, 0, OP_NOTIFY, true)) {
 				ic_erase_backwards_until_token();
 				ic_subtract(4);

@@ -54,9 +54,11 @@ static size_t output_with_desc_pool_len;
 static uint8_t *final_input;
 static size_t final_input_len;
 
-static DescPool* desc_pool;
+static DescPool desc_pool;
+static DMAData dma_data;
 
-DescPool* desc_pool_get() {return desc_pool;}
+DescPool* desc_pool_get() {return &desc_pool;}
+DMAData* dma_data_get() {return &dma_data;}
 
 static uint8_t *last_token;
 static size_t bufsize;
@@ -97,18 +99,9 @@ void ic_new_input(const uint8_t* in, size_t len) {
         zeros = (uint8_t*)malloc(bufsize);
         output_mutation_mask = (uint8_t*)malloc(bufsize);
     }
-    if(!desc_pool) {
-        desc_pool = new DescPool();
-    }
     input = in;
     input_cursor = input;
     input_len = len;
-    auto sz = desc_pool->deserialize(input, input_len);
-    if (!sz) {
-        memset(desc_pool, 0, sizeof(DescPool));    
-    } else {
-        input_len -= sz;
-    }
 
     assert(output);
     output_cursor = output;
@@ -225,21 +218,20 @@ uint8_t *ic_get_output(size_t *len)
 uint8_t* final_input_get(size_t* length) {
     static void* virtio_core = getenv("VIRTIO_CORE");
     if(!final_input) {
-        final_input = (uint8_t*)malloc(MAXLEN + sizeof(DescPool));
+        final_input = (uint8_t*)malloc(MAXLEN + sizeof(DescPool) + sizeof(DMAData));
     }
-    memcpy(final_input, output, *output_len);
     size_t sz = 0;
 
     if (virtio_core) {
         /* reset desc used state */
-        for (size_t i = 0; i < desc_pool->len; i++) {
-            desc_pool->array[i].used_cnt = 0;
+        for (size_t i = 0; i < desc_pool.len; i++) {
+            desc_pool.array[i].used_cnt = 0;
         }
-        sz = desc_pool->serialize(final_input+*output_len, MAXLEN - *output_len);
+        *length = final_input_len = input_serialize(final_input, MAXLEN, nullptr, 0UL, dma_data_get(), desc_pool_get());
+    } else {
+        memcpy(final_input, output, *output_len);
+        *length = final_input_len = *output_len;
     }
-
-    final_input_len = *output_len + sz;
-    *length = final_input_len;
 
     __fuzzer_set_output(final_input,
             final_input_len);
@@ -250,7 +242,6 @@ uint8_t* final_input_get(size_t* length) {
 const size_t final_input_len_get() {
     return final_input_len;
 }
-
 
 int ic_ingest8(uint8_t *result, uint8_t min, uint8_t max, bool protect) {
     const void *src = size_ptr(sizeof(uint8_t));
@@ -570,6 +561,54 @@ void ic_subtract(size_t l){
         *output_len = output_cursor - output;
     }
     debug_printf("Subtracted %lx. Cursor is now at %lx\n", l, *output_len);
+}
+
+/* only when VIRTIO_CORE is enabled, we call input_deserialize to deserialize input*/
+void input_deserialize(const uint8_t *data, size_t size, 
+                         uint8_t *ops, size_t *ops_len, 
+                         DMAData *dma_data, DescPool *desc_pool) {
+    if (size <= sizeof(input_hdr)) {
+        ic_new_input(data, size);
+        if (ops_len)
+            *ops_len = size;
+        return;
+    }
+    input_hdr* hdr = (input_hdr*)data;
+    assert(hdr->ops_size + hdr->dma_data_size + hdr->desc_pool_size + sizeof(*hdr) == size);
+    //     ic_new_input(data, size);
+    //     if (ops_len)
+    //         *ops_len = size;
+    //     return;
+    // }
+    data += sizeof(*hdr);
+    dma_data->deserialize(data + hdr->ops_size, hdr->dma_data_size);
+    desc_pool->deserialize(data + hdr->ops_size + hdr->dma_data_size, hdr->desc_pool_size);
+    if (ops && ops_len) {
+        if (ops != data)
+            memcpy(ops, data, hdr->ops_size);
+        *ops_len = hdr->ops_size;
+    } else {
+        ic_new_input(data, hdr->ops_size);
+    }
+}
+size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_len, DMAData *dma_data, DescPool *desc_pool) {
+    if (!ops) {
+        ops = output;
+        ops_len = *output_len;
+    } 
+    assert(sizeof(input_hdr) + ops_len + dma_data->get_size() + desc_pool->get_size() <= max_size);
+    input_hdr hdr = {
+        .ops_size = (uint32_t)ops_len, 
+        .dma_data_size = (uint32_t)dma_data->get_size(), 
+        .desc_pool_size = (uint32_t)desc_pool->get_size()
+    };
+    memcpy(data, &hdr, sizeof(hdr));
+    data += sizeof(hdr);
+    if (ops != data)
+        memcpy(data, ops, hdr.ops_size);
+    dma_data->serialize(data+hdr.ops_size, hdr.dma_data_size);
+    desc_pool->serialize(data+hdr.ops_size+hdr.dma_data_size, hdr.desc_pool_size);
+    return sizeof(hdr) + hdr.ops_size + hdr.dma_data_size + hdr.desc_pool_size;
 }
 
 /* for virtio fuzz */

@@ -328,7 +328,7 @@ public:
           if (constant_only) {
             DescInfo* desc_info = nullptr;
             /* check val1 (by default, val2 is the immedidate number) */
-            if(sgl_size_infer && (desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
+            if(sgl_size_infer && cmp.val2 < 0x1000 && (desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
                 TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2, cmp.pc);                
             }           
             

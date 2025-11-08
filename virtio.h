@@ -106,7 +106,6 @@ public:
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
     void add_desc(const vring_desc_with_info* desc_with_info);
     void increment_inited_count() {inited_count++;}
-    void invalidate_descs();
     bool has_used_index(uint16_t idx) {return used_index.contains(idx);}
     bool is_wait() const {return state == WAIT;}
     bool is_done() const {return state == DONE;}
@@ -135,9 +134,8 @@ struct vring_desc_with_info {
     struct DescInfo desc_info;
     vring_desc desc;
 #define MAX_USED_CNT 1
-    uint16_t used_cnt;
-    bool valid;
-};
+    uint8_t used_cnt;
+} __attribute__((packed));
 
 typedef uint16_t vring_avail_elem;
 
