@@ -127,13 +127,15 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			assert(false);
 			return -1;
 		}
-	} else { /* reading buffer */
+	} else if (gpa >= GUEST_MEM_START && len < GUEST_MEM_SIZE) { /* reading buffer */
 		/* mark the input region */
 		uint8_t* buf = dma_data_get()->ingest_data(len);
 		if (!buf)
 			return -1;
 		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 		memcpy(data, buf, len);
+		return 0;
+	} else {
 		return 0;
 	}
 	return 1;
