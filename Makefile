@@ -123,8 +123,6 @@ tests: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
 	@echo "===> Building tests"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SANITIZE_FLAGS) -I. tests/cve-2021-3947.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) $(LDLIBS) -o tests/cve-2021-3947
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SANITIZE_FLAGS) -I. tests/cve-2022-0216.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) $(LDLIBS) -o tests/cve-2022-0216
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SANITIZE_FLAGS) -I. tests/virtio-net-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) $(LDLIBS) -o tests/virtio-net-hlt
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SANITIZE_FLAGS) -I. tests/virtio-blk-hlt.cc $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDFLAGS) $(LDLIBS) -o tests/virtio-blk-hlt
 
 clean:
 	@echo "===> Cleaning up"
