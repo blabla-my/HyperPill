@@ -943,7 +943,8 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	}
 
 	if (virtio_core) {
-		input_deserialize(Data, Size, nullptr, nullptr, dma_data_get(), desc_pool_get());
+		reset_input_output();
+		input_deserialize(Data, Size, input_get(), input_len_get(), dma_data_get(), desc_pool_get());
 	} else {
 		ic_new_input(Data, Size);
 	}

@@ -31,6 +31,9 @@
 
 fuzzer::DescPool* desc_pool_get();
 fuzzer::DMAData* dma_data_get();
+uint8_t* input_get();
+size_t* input_len_get();
+void reset_input_output();
 
 
 uint8_t* final_input_get(size_t* length);

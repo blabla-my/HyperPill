@@ -167,7 +167,7 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
     if (!mutate_dma_data) {
         mutate_dma_data = new fuzzer::DMAData();
     }
-    if (virtio_core ) {
+    if (virtio_core) {
         /* first, deserialize the input */
         uint8_t* ops = Data + sizeof(fuzzer::input_hdr);
         size_t ops_len = Size - sizeof(fuzzer::input_hdr);

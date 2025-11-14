@@ -1,3 +1,4 @@
+#include "vendor/libfuzzer-ng/FuzzerCorpus.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include "virtio.h"
 #include <cstddef>
@@ -38,14 +39,14 @@ do {                                                                       \
 
 extern bool log_ops;
 
-static const uint8_t *input;
-static const uint8_t *input_cursor;
+static uint8_t input[MAX_OPS_LEN];
+static const uint8_t *input_cursor = input;
 static size_t input_len;
 
-static uint8_t *output;
-static uint8_t *output_mutation_mask;
-static uint8_t *output_cursor;
-static size_t *output_len;
+static uint8_t output[MAX_OPS_LEN];
+static uint8_t output_mutation_mask[MAX_OPS_LEN];
+static uint8_t *output_cursor = output;
+static size_t output_len;
 static size_t output_lenn;
 
 static uint8_t *output_with_desc_pool;
@@ -59,6 +60,15 @@ static fuzzer::DMAData dma_data;
 
 fuzzer::DescPool* desc_pool_get() {return &desc_pool;}
 fuzzer::DMAData* dma_data_get() {return &dma_data;}
+
+uint8_t* input_get() {return (uint8_t*)input;}
+size_t* input_len_get() {return &input_len;}
+void reset_input_output() {
+    input_cursor = input;
+    input_len = 0;
+    output_cursor = output;
+    output_len = 0;
+}
 
 static uint8_t *last_token;
 static size_t bufsize;
@@ -92,21 +102,13 @@ int new_op(uint8_t op, uint32_t start, uint32_t end, uint32_t dma_start, uint32_
 
 // Ingest a new input
 void ic_new_input(const uint8_t* in, size_t len) {
-    bufsize = MAX_OPS_LEN;
-    if(!output) {
-        output = (uint8_t*)malloc(bufsize);
-        output_len = &output_lenn;
-        zeros = (uint8_t*)malloc(bufsize);
-        output_mutation_mask = (uint8_t*)malloc(bufsize);
-    }
-    input = in;
-    input_cursor = input;
+    memcpy(input, in, len);
     input_len = len;
+    input_cursor = input;
 
-    assert(output);
     output_cursor = output;
-    *output_len = 0;
-    memset(output_mutation_mask, 0, bufsize-*output_len);
+    output_len = 0;
+    memset(output_mutation_mask, 0, bufsize-output_len);
     last_token = output;
 }
 
@@ -154,7 +156,7 @@ static inline uint8_t* append(const void* src, size_t len){
     }
     memcpy(output_cursor, src, len);
     output_cursor += len;
-    *output_len = output_cursor - output;
+    output_len = output_cursor - output;
     return output_cursor;
 }
 
@@ -174,7 +176,7 @@ void* ic_insert(void* src, size_t len, size_t pos){
     memmove(output+pos+len, output+pos, len);
     memcpy(output+pos, src, len);
     output_cursor += len;
-    *output_len = output_cursor - output;
+    output_len = output_cursor - output;
     return output_cursor;
 }
 
@@ -211,7 +213,7 @@ uint8_t *ic_get_output(size_t *len)
     //         *output_len);
     // __fuzzer_set_op_log((void*)&op_log);
     // op_log.len = 0;
-    *len = *output_len;
+    *len = output_len;
     return output;
 }
 
@@ -229,8 +231,8 @@ uint8_t* final_input_get(size_t* length) {
         }
         *length = final_input_len = input_serialize(final_input, MAXLEN, nullptr, 0UL, dma_data_get(), desc_pool_get());
     } else {
-        memcpy(final_input, output, *output_len);
-        *length = final_input_len = *output_len;
+        memcpy(final_input, output, output_len);
+        *length = final_input_len = output_len;
     }
 
     __fuzzer_set_output(final_input,
@@ -462,7 +464,7 @@ void *ic_advance_until_token(const char* token, size_t len) {
             token,
             len);
     if (token_position) {
-        if(*output_len){
+        if(output_len){
             last_token = append(token, len);
             if(!last_token)
                 return NULL;
@@ -482,7 +484,7 @@ void ic_dump(){
         printf("\\x%02x",input[i]);
     }
     printf("\nOUTPUT:\n");
-    for(int i=0; i<*output_len; i++){
+    for(int i=0; i<output_len; i++){
         printf("\\x%02x",output[i]);
     }
     printf("\n");
@@ -498,7 +500,7 @@ void ic_dump_file(const char* filepath) {
         data = final_input_get(&size);
     } else {
         data = output;
-        size = *output_len;
+        size = output_len;
     }
 
     if (f) {
@@ -546,21 +548,21 @@ size_t ic_length_until_token(const char* token, size_t len) {
 void ic_erase_backwards_until_token(void) {
     if(last_token) {
         output_cursor = last_token;
-        *output_len = output_cursor - output;
+        output_len = output_cursor - output;
     } else {
         output_cursor = output;
-        *output_len = 0;
+        output_len = 0;
     }
-    debug_printf("Erased Backwards. Cursor is now at %lx\n", *output_len);
-    memset(output_mutation_mask, 0, bufsize-*output_len);
+    debug_printf("Erased Backwards. Cursor is now at %lx\n", output_len);
+    memset(output_mutation_mask, 0, bufsize-output_len);
 }
 
 void ic_subtract(size_t l){
     if(output_cursor - output >=l){
         output_cursor -= l;
-        *output_len = output_cursor - output;
+        output_len = output_cursor - output;
     }
-    debug_printf("Subtracted %lx. Cursor is now at %lx\n", l, *output_len);
+    debug_printf("Subtracted %lx. Cursor is now at %lx\n", l, output_len);
 }
 
 /* only when VIRTIO_CORE is enabled, we call input_deserialize to deserialize input*/
@@ -594,7 +596,7 @@ void input_deserialize(const uint8_t *data, size_t size,
 size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_len, fuzzer::DMAData *dma_data, fuzzer::DescPool *desc_pool) {
     if (!ops) {
         ops = output;
-        ops_len = *output_len;
+        ops_len = output_len;
     } 
     assert(sizeof(fuzzer::input_hdr) + ops_len + dma_data->get_size() + desc_pool->get_size() <= max_size);
     fuzzer::input_hdr hdr = {
