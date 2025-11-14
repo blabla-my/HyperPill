@@ -27,8 +27,86 @@
 #include <random>
 #include <unordered_set>
 #include <map>
+#include <stdint.h>
+#include <stddef.h>
+
+#define MAX_OPS_LEN 2048
 
 namespace fuzzer {
+
+// Definitions from virtio.h and FuzzerTracePC.h
+#define GUEST_MEM_START 0x100000000UL
+#define GUEST_MEM_SIZE  0x80000000UL
+#define MAX_USED_CNT 1
+
+struct DescInfo {
+    uint16_t queue_id;
+    uint16_t desc_idx;
+    bool is_out;
+} __attribute__((packed));
+
+struct vring_desc {
+	uint64_t addr;
+	uint32_t len;
+	uint16_t flags;
+	uint16_t next;
+};
+
+struct vring_desc_with_info {
+    struct DescInfo desc_info;
+    vring_desc desc;
+    uint8_t used_cnt;
+} __attribute__((packed));
+
+
+#define DESC_ARRAY_MAX_LEN 0x20
+#define DMA_DATA_MAX_LENGTH 0x1000
+
+struct DMAData {
+    uint32_t len;
+    uint8_t dma_data[DMA_DATA_MAX_LENGTH];
+    uint32_t cursor;
+
+    const size_t get_size() const {return sizeof(len) + len; }
+    size_t deserialize(const uint8_t* data, size_t size);
+    size_t serialize(void* dst, size_t max_len) const;
+    uint8_t* ingest_data(size_t data_len);
+
+    DMAData();
+} __attribute__((packed));
+
+struct DescPool {
+    uint32_t len;
+    vring_desc_with_info array[DESC_ARRAY_MAX_LEN];
+
+    const size_t get_size() const;
+    const vring_desc_with_info* get_item(size_t idx) const;
+    bool add(const vring_desc_with_info* desc_with_info);
+    vring_desc_with_info* new_desc();
+    const vring_desc_with_info* ingest_desc(const DescInfo* desc_info);
+    size_t deserialize(const uint8_t* data, size_t size);
+    size_t serialize(void* dst, size_t max_len) const;
+
+    DescPool();
+} __attribute__((packed));
+
+// From conveyor.h
+struct input_hdr {
+    uint32_t ops_size;
+    uint32_t dma_data_size;
+    uint32_t desc_pool_size;
+}__attribute__((packed));
+
+// From mutate.h
+#define DESC_POOL_SEPARATOR "DESCPOOL"
+#define DESC_POOL_SEPARATOR_LEN 8
+
+#define DMA_DATA_SEPARATOR "DMADATA"
+#define DMA_DATA_SEPARATOR_LEN 7
+
+void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool);
+size_t input_serialize(uint8_t* data, size_t max_size, const uint8_t* ops, size_t ops_len, const DMAData* dma_data, const DescPool* desc_pool);
+
   
 template <typename T, typename Pred = std::less<T>>
     struct ptr_compare : Pred
@@ -68,6 +146,7 @@ struct HotPos {
     uint16_t pos;
     uint64_t hint;
     uint64_t pc;
+    enum {OPS, DMA, DESC} type;
 };
 
 struct InputInfo {
@@ -95,6 +174,17 @@ struct InputInfo {
   std::vector<struct HotPos> HotSpots;
   std::vector<std::shared_ptr<Syscall>> InputSyscalls;
   std::vector<Op> InputOps;
+
+  Unit Ops;
+  DMAData DmaData;
+  DescPool DescPool;
+
+  void Parse() {
+    Ops.resize(MAX_OPS_LEN);
+    size_t ops_len = MAX_OPS_LEN;
+    input_deserialize(U.data(), U.size(), Ops.data(), &ops_len, &DmaData, &DescPool);
+    Ops.resize(ops_len);
+  }
 
   // Delete feature Idx and its frequency from FeatureFreqs.
   bool DeleteFeatureFreq(uint32_t Idx) {
@@ -326,7 +416,7 @@ public:
               continue;
           
           if (constant_only) {
-            DescInfo* desc_info = nullptr;
+            ::DescInfo* desc_info = nullptr;
             /* check val1 (by default, val2 is the immedidate number) */
             if(sgl_size_infer && cmp.val2 < 0x1000 && (desc_info = TPC.SearchDescSize(cmp.val1)) != nullptr){ 
                 TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, cmp.val2, cmp.pc);                
@@ -394,7 +484,7 @@ public:
               for(int j = 0; j < 2; j++) {
                   uint64_t val = j == 0 ? Arg1 : Arg2;
                   uint64_t otherval = j == 0 ? Arg2 : Arg1;
-                  DescInfo* desc_info = nullptr;
+                  ::DescInfo* desc_info = nullptr;
                   if(sgl_size_infer && otherval < 0x1000 && (desc_info = TPC.SearchDescSize(val)) != nullptr){ 
                       TPC.AddToDescSizeHints(desc_info->queue_id, desc_info->desc_idx, desc_info->is_out, otherval, cmp.pc);                
                   }           
@@ -463,6 +553,7 @@ public:
     II.MayDeleteFile = MayDeleteFile;
     II.UniqFeatureSet = FeatureSet;
     II.HasFocusFunction = HasFocusFunction;
+    II.Parse();
     // Assign maximal energy to the new seed.
     II.Energy = RareFeatures.empty() ? 1.0 : log(RareFeatures.size());
     II.SumIncidence = static_cast<double>(RareFeatures.size());
@@ -617,6 +708,7 @@ public:
     UpdateOpLog(II, op_log);
 
     II->U = U;
+    II->Parse();
     II->Reduced = true;
     II->TimeOfUnit = TimeOfUnit;
     DistributionNeedsUpdate = true;

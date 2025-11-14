@@ -54,11 +54,11 @@ static size_t output_with_desc_pool_len;
 static uint8_t *final_input;
 static size_t final_input_len;
 
-static DescPool desc_pool;
-static DMAData dma_data;
+static fuzzer::DescPool desc_pool;
+static fuzzer::DMAData dma_data;
 
-DescPool* desc_pool_get() {return &desc_pool;}
-DMAData* dma_data_get() {return &dma_data;}
+fuzzer::DescPool* desc_pool_get() {return &desc_pool;}
+fuzzer::DMAData* dma_data_get() {return &dma_data;}
 
 static uint8_t *last_token;
 static size_t bufsize;
@@ -218,7 +218,7 @@ uint8_t *ic_get_output(size_t *len)
 uint8_t* final_input_get(size_t* length) {
     static void* virtio_core = getenv("VIRTIO_CORE");
     if(!final_input) {
-        final_input = (uint8_t*)malloc(MAXLEN + sizeof(DescPool) + sizeof(DMAData));
+        final_input = (uint8_t*)malloc(MAXLEN + sizeof(fuzzer::DescPool) + sizeof(fuzzer::DMAData));
     }
     size_t sz = 0;
 
@@ -566,14 +566,14 @@ void ic_subtract(size_t l){
 /* only when VIRTIO_CORE is enabled, we call input_deserialize to deserialize input*/
 void input_deserialize(const uint8_t *data, size_t size, 
                          uint8_t *ops, size_t *ops_len, 
-                         DMAData *dma_data, DescPool *desc_pool) {
-    if (size <= sizeof(input_hdr)) {
+                         fuzzer::DMAData *dma_data, fuzzer::DescPool *desc_pool) {
+    if (size <= sizeof(fuzzer::input_hdr)) {
         ic_new_input(data, size);
         if (ops_len)
             *ops_len = size;
         return;
     }
-    input_hdr* hdr = (input_hdr*)data;
+    fuzzer::input_hdr* hdr = (fuzzer::input_hdr*)data;
     assert(hdr->ops_size + hdr->dma_data_size + hdr->desc_pool_size + sizeof(*hdr) == size);
     //     ic_new_input(data, size);
     //     if (ops_len)
@@ -591,13 +591,13 @@ void input_deserialize(const uint8_t *data, size_t size,
         ic_new_input(data, hdr->ops_size);
     }
 }
-size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_len, DMAData *dma_data, DescPool *desc_pool) {
+size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_len, fuzzer::DMAData *dma_data, fuzzer::DescPool *desc_pool) {
     if (!ops) {
         ops = output;
         ops_len = *output_len;
     } 
-    assert(sizeof(input_hdr) + ops_len + dma_data->get_size() + desc_pool->get_size() <= max_size);
-    input_hdr hdr = {
+    assert(sizeof(fuzzer::input_hdr) + ops_len + dma_data->get_size() + desc_pool->get_size() <= max_size);
+    fuzzer::input_hdr hdr = {
         .ops_size = (uint32_t)ops_len, 
         .dma_data_size = (uint32_t)dma_data->get_size(), 
         .desc_pool_size = (uint32_t)desc_pool->get_size()

@@ -479,8 +479,8 @@ void TracePC::AddToDescSizes(uint16_t queue_id, uint16_t desc_idx, bool is_out, 
   if (desc_sizes_size >= sizeof(desc_sizes) / sizeof(desc_sizes[0])) {
       return;
   }
-  DescInfo desc_info = DescInfo{.queue_id = queue_id, .desc_idx = desc_idx, .is_out = is_out};
-  DescSize desc_size = DescSize{.desc_info = desc_info, .size = size, .next = nullptr};
+  ::DescInfo desc_info = ::DescInfo{.queue_id = queue_id, .desc_idx = desc_idx, .is_out = is_out};
+  ::DescSize desc_size = ::DescSize{.desc_info = desc_info, .size = size, .next = nullptr};
   desc_sizes[desc_sizes_size++] = desc_size;
 }
 
@@ -493,7 +493,7 @@ void TracePC::ClearDescSizes() {
 
 ATTRIBUTE_TARGET_POPCNT ALWAYS_INLINE
 ATTRIBUTE_NO_SANITIZE_ALL
-DescInfo* TracePC::SearchDescSize(unsigned long val) {
+::DescInfo* TracePC::SearchDescSize(unsigned long val) {
   for (size_t i = 0; i < desc_sizes_size; i++) {
       if (val == desc_sizes[i].size) { 
           return &desc_sizes[i].desc_info;
@@ -509,8 +509,8 @@ void TracePC::AddToDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_o
       Printf("TracePC: AddToDescSizeHints: Too many desc size hints\n");
       return;
   }
-  DescInfo desc_info = DescInfo{.queue_id = queue_id, .desc_idx = desc_idx, .is_out = is_out};
-  DescSize desc_size = DescSize{.desc_info = desc_info, .size = size, .next = nullptr};
+  ::DescInfo desc_info = ::DescInfo{.queue_id = queue_id, .desc_idx = desc_idx, .is_out = is_out};
+  ::DescSize desc_size = ::DescSize{.desc_info = desc_info, .size = size, .next = nullptr};
 
   /* first iteration, we find whether this has been added before */
   for (size_t i = 0; i < desc_size_hints_size; i++) {

@@ -174,13 +174,13 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 		uint16_t queue_idx = queue->idx;
 		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
 		auto desc_seq = queue->desc_chain_fsm.desc_seq();
-		DescInfo desc_info = {
+		fuzzer::DescInfo desc_info = {
 			.queue_id = queue_idx,
 			.desc_idx = desc_seq,
 			.is_out = is_out
 		};
 		
-		const vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
+		const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 		if (!desc_with_info) { 
 			return -2;
 		}
@@ -791,7 +791,7 @@ void DescChainFSM::init(unsigned max_len) {
 	}	
 }
 
-void DescChainFSM::add_desc(const vring_desc_with_info *desc_with_info) {
+void DescChainFSM::add_desc(const fuzzer::vring_desc_with_info *desc_with_info) {
 	if (generated_descs_size < DESC_CHAIN_MAX_LEN*2) {
 		generated_descs[generated_descs_size++] = desc_with_info;
 	}

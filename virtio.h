@@ -15,6 +15,10 @@
 #include "task.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 
+namespace fuzzer {
+struct vring_desc_with_info;
+}
+
 /* Status byte for guest to report progress, and synchronize features. */
 /* We have seen device and processed generic fields (VIRTIO_CONFIG_F_VIRTIO) */
 #define VIRTIO_CONFIG_S_ACKNOWLEDGE	1
@@ -104,7 +108,7 @@ public:
     void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
     void add_used_index(uint16_t idx) {used_index.insert(idx);}
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
-    void add_desc(const vring_desc_with_info* desc_with_info);
+    void add_desc(const fuzzer::vring_desc_with_info* desc_with_info);
     void increment_inited_count() {inited_count++;}
     bool has_used_index(uint16_t idx) {return used_index.contains(idx);}
     bool is_wait() const {return state == WAIT;}
@@ -119,7 +123,7 @@ private:
     uint8_t sg_num_out;
     uint8_t sg_num_out_remain;
     uint8_t inited_count;
-    const vring_desc_with_info* generated_descs[DESC_CHAIN_MAX_LEN*2];
+    const fuzzer::vring_desc_with_info* generated_descs[DESC_CHAIN_MAX_LEN*2];
     size_t generated_descs_size;
 };
 

@@ -2,6 +2,7 @@
 #define CONVEYOR_H
 
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
+#include "vendor/libfuzzer-ng/FuzzerCorpus.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -16,7 +17,6 @@
 // #define DESC_SEPARATOR "DESC_END"
 #define DESC_SEPARATOR "\xad\xde"
 #define DESC_SEPARATOR_LEN 8
-#define MAX_OPS_LEN 2048
 
 #define conveyor_round(ptr, min, max) \
     do { \
@@ -29,20 +29,12 @@
         *(ptr) += min; \
     } while(0)
 
-DescPool* desc_pool_get();
-DMAData* dma_data_get();
+fuzzer::DescPool* desc_pool_get();
+fuzzer::DMAData* dma_data_get();
 
 
 uint8_t* final_input_get(size_t* length);
 const size_t final_input_len_get();
-
-struct input_hdr {
-    uint32_t ops_size;
-    uint32_t dma_data_size;
-    uint32_t desc_pool_size;
-}__attribute__((packed));
-void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool);
-size_t input_serialize(uint8_t* data, size_t max_size, uint8_t* ops, size_t ops_len, DMAData* dma_data, DescPool* desc_pool);
 
 const size_t remaining_input_len();
 void ic_setup(size_t max_input);
