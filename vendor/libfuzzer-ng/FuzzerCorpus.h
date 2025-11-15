@@ -92,9 +92,12 @@ struct DescPool {
 
 // From conveyor.h
 struct input_hdr {
+    uint32_t magic;
     uint32_t ops_size;
     uint32_t dma_data_size;
     uint32_t desc_pool_size;
+    void set_magic() {magic = 0xdeadbeef;}
+    bool check_magic() {return magic == 0xdeadbeef;}
 }__attribute__((packed));
 
 // From mutate.h

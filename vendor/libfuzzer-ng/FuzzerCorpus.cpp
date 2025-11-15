@@ -124,7 +124,24 @@ size_t DescPool::serialize(void* dst, size_t max_len) const {
 }
 
 void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool) {
+    if (sizeof(input_hdr) > size) {
+        // fallback to ops only
+        memcpy(ops, data, size);
+        *ops_len = size;
+        dma_data->len = 0;
+        dma_data->cursor = 0;
+        desc_pool->len = 0;
+        return;
+    }
     struct input_hdr* hdr = (struct input_hdr*)data;
+    if (!hdr->check_magic()) {
+        memcpy(ops, data, size);
+        *ops_len = size;
+        dma_data->len = 0;
+        dma_data->cursor = 0;
+        desc_pool->len = 0;
+        return;
+    }
     size_t current_offset = sizeof(struct input_hdr);
 
     // Deserialize ops
@@ -154,6 +171,7 @@ size_t input_serialize(uint8_t* data, size_t max_size, const uint8_t* ops, size_
     hdr.ops_size = ops_len;
     hdr.dma_data_size = dma_data->get_size();
     hdr.desc_pool_size = desc_pool->get_size();
+    hdr.set_magic();
 
     size_t total_size = sizeof(struct input_hdr) + hdr.ops_size + hdr.dma_data_size + hdr.desc_pool_size;
     assert(total_size <= max_size);

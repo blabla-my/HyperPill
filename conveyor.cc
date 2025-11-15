@@ -71,11 +71,11 @@ void reset_input_output() {
 }
 
 static uint8_t *last_token;
-static size_t bufsize;
+static size_t bufsize=MAX_OPS_LEN;
 
 
 
-static uint8_t *zeros;
+static uint8_t zeros[MAX_OPS_LEN];
 
 typedef struct __attribute__((packed)){
     uint8_t op;
@@ -229,7 +229,7 @@ uint8_t* final_input_get(size_t* length) {
         for (size_t i = 0; i < desc_pool.len; i++) {
             desc_pool.array[i].used_cnt = 0;
         }
-        *length = final_input_len = input_serialize(final_input, MAXLEN, nullptr, 0UL, dma_data_get(), desc_pool_get());
+        *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, output, output_len, dma_data_get(), desc_pool_get());
     } else {
         memcpy(final_input, output, output_len);
         *length = final_input_len = output_len;
@@ -569,13 +569,19 @@ void ic_subtract(size_t l){
 void input_deserialize(const uint8_t *data, size_t size, 
                          uint8_t *ops, size_t *ops_len, 
                          fuzzer::DMAData *dma_data, fuzzer::DescPool *desc_pool) {
-    if (size <= sizeof(fuzzer::input_hdr)) {
+    if (size < sizeof(fuzzer::input_hdr)) {
         ic_new_input(data, size);
         if (ops_len)
             *ops_len = size;
         return;
     }
     fuzzer::input_hdr* hdr = (fuzzer::input_hdr*)data;
+    if (!hdr->check_magic()) {
+        ic_new_input(data, size);
+        if (ops_len)
+            *ops_len = size;
+        return;
+    }
     assert(hdr->ops_size + hdr->dma_data_size + hdr->desc_pool_size + sizeof(*hdr) == size);
     //     ic_new_input(data, size);
     //     if (ops_len)
@@ -604,6 +610,7 @@ size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_
         .dma_data_size = (uint32_t)dma_data->get_size(), 
         .desc_pool_size = (uint32_t)desc_pool->get_size()
     };
+    hdr.set_magic();
     memcpy(data, &hdr, sizeof(hdr));
     data += sizeof(hdr);
     if (ops != data)
