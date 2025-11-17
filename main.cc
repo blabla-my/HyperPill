@@ -264,6 +264,7 @@ static void usage() {
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	static void *ic_test = getenv("FUZZ_IC_TEST");
+	static void *virtio_core = getenv("VIRTIO_CORE");
 	static int done;
 	if (BX_CPU(id)->fuzztrace)
 		printf("NEW INPUT\n");

@@ -229,7 +229,10 @@ uint8_t* final_input_get(size_t* length) {
         for (size_t i = 0; i < desc_pool.len; i++) {
             desc_pool.array[i].used_cnt = 0;
         }
-        *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, output, output_len, dma_data_get(), desc_pool_get());
+        if (input_len && !output_len)
+            *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, input, input_len, dma_data_get(), desc_pool_get());
+        else
+            *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, output, output_len, dma_data_get(), desc_pool_get());
     } else {
         memcpy(final_input, output, output_len);
         *length = final_input_len = output_len;

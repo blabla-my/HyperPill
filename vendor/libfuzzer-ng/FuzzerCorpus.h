@@ -107,7 +107,7 @@ struct input_hdr {
 #define DMA_DATA_SEPARATOR "DMADATA"
 #define DMA_DATA_SEPARATOR_LEN 7
 
-void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool);
+bool input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool);
 size_t input_serialize(uint8_t* data, size_t max_size, const uint8_t* ops, size_t ops_len, const DMAData* dma_data, const DescPool* desc_pool);
 
   
@@ -181,11 +181,12 @@ struct InputInfo {
   Unit Ops;
   DMAData DmaData;
   DescPool DescPool;
+  bool parse_valid = false;
 
   void Parse() {
     Ops.resize(MAX_OPS_LEN);
     size_t ops_len = MAX_OPS_LEN;
-    input_deserialize(U.data(), U.size(), Ops.data(), &ops_len, &DmaData, &DescPool);
+    parse_valid = input_deserialize(U.data(), U.size(), Ops.data(), &ops_len, &DmaData, &DescPool);
     Ops.resize(ops_len);
   }
 
@@ -440,21 +441,42 @@ public:
             for (int i=0; i<val_size; i++){
                 pattern.push_back((Arg1 >> (8*i)) & 0xFF);
             }
-            auto start = U.begin();
-            auto end = U.end();
-            while ((start = std::search(start, U.end(),
-                            pattern.begin(), pattern.end())) != U.end()) {
-                count +=1;
-                found_pos = std::distance(U.begin(), start);
-                if(count > 1)
-                    break;
-                start++;
+            int count = 0;
+            HotPos pos;
+
+            if (II && II->parse_valid) {
+                auto search_in = [&](const uint8_t *data, size_t size, int type_val) {
+                  if (count > 1) return;
+                  auto start = data;
+                  auto end = data + size;
+                  while ((start = std::search(start, end, pattern.begin(), pattern.end())) != end) {
+                    count++;
+                    if (count > 1) return;
+                    found_pos = std::distance(data, start);
+                    pos = {val_size, found_pos, hint_val, cmp.pc, static_cast<decltype(pos.type)>(type_val)};
+                    start++;
+                  }
+                };
+                search_in(II->Ops.data(), II->Ops.size(), HotPos::OPS);
+                search_in(II->DmaData.dma_data, II->DmaData.len, HotPos::DMA);
+            } else {
+                auto start = U.begin();
+                auto end = U.end();
+                while ((start = std::search(start, U.end(),
+                                pattern.begin(), pattern.end())) != U.end()) {
+                    count +=1;
+                    found_pos = std::distance(U.begin(), start);
+                    if(count > 1)
+                        break;
+                    start++;
+                }
             }
+
             if(count == 1){
                 if(II){
-                    II->HotSpots.push_back({val_size, found_pos, hint_val, cmp.pc});
-                    // Printf("Hotspot Pos %d\tHint: %lx (vs %lx)\tPC: %lx\n",
-                    //         found_pos, hint_val, found_val, cmp.pc);
+                    II->HotSpots.push_back(pos);
+                    Printf("Hotspot added: Size=%u, Pos=%u, Hint=0x%lx, PC=0x%lx, Type=%u\n",
+                            pos.size, pos.pos, pos.hint, pos.pc, pos.type);
                     cmp_pc_counts[cmp.pc]++;
                     hinted_pcs[std::make_tuple(cmp.pc, hint_val)] = U.size();
                     hints.insert(hint_val);

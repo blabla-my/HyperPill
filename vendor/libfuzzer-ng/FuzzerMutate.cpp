@@ -437,7 +437,6 @@ size_t MutationDispatcher::Mutate_ReplaceHotspotHint(uint8_t *Data, size_t Size,
     if(OurBaseII->HotSpots.size() == 0) {
         return 0;
     }
-    //printf("Hotspot &II = %p %lx\n", OurBaseII, OurBaseII->HotSpots.size());
     auto *II = OurBaseII;
     size_t i = Rand(II->HotSpots.size());
     auto &h = II->HotSpots[i];

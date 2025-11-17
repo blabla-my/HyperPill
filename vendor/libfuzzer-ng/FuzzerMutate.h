@@ -137,6 +137,8 @@ public:
 
   void SetBaseII(const InputInfo *II) { OurBaseII  = II; }
 
+  const InputInfo *GetBaseII() const { return OurBaseII; }
+
   Random &GetRand() { return Rand; }
 
   uint16_t LastChangedIdx;

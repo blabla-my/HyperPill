@@ -123,7 +123,7 @@ size_t DescPool::serialize(void* dst, size_t max_len) const {
     return serialized_len;
 }
 
-void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool) {
+bool input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool) {
     if (sizeof(input_hdr) > size) {
         // fallback to ops only
         memcpy(ops, data, size);
@@ -131,7 +131,7 @@ void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* o
         dma_data->len = 0;
         dma_data->cursor = 0;
         desc_pool->len = 0;
-        return;
+        return false;
     }
     struct input_hdr* hdr = (struct input_hdr*)data;
     if (!hdr->check_magic()) {
@@ -140,7 +140,7 @@ void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* o
         dma_data->len = 0;
         dma_data->cursor = 0;
         desc_pool->len = 0;
-        return;
+        return false;
     }
     size_t current_offset = sizeof(struct input_hdr);
 
@@ -154,16 +154,13 @@ void input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* o
     }
 
     // Deserialize dma_data
-    if (hdr->dma_data_size > 0) {
-        dma_data->deserialize(data + current_offset, hdr->dma_data_size);
-        current_offset += hdr->dma_data_size;
-    }
+    dma_data->deserialize(data + current_offset, hdr->dma_data_size);
+    current_offset += hdr->dma_data_size;
 
     // Deserialize desc_pool
-    if (hdr->desc_pool_size > 0) {
-        desc_pool->deserialize(data + current_offset, hdr->desc_pool_size);
-        current_offset += hdr->desc_pool_size;
-    }
+    desc_pool->deserialize(data + current_offset, hdr->desc_pool_size);
+    current_offset += hdr->desc_pool_size;
+    return true;
 }
 
 size_t input_serialize(uint8_t* data, size_t max_size, const uint8_t* ops, size_t ops_len, const DMAData* dma_data, const DescPool* desc_pool) {
