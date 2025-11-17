@@ -1020,6 +1020,12 @@ LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize) {
   return fuzzer::F->GetMD().DefaultMutate(Data, Size, MaxSize);
 }
 
+ATTRIBUTE_INTERFACE size_t
+LLVMFuzzerMutateParadox(uint8_t *Data, size_t Size, size_t MaxSize, int type) {
+  assert(fuzzer::F);
+  return fuzzer::F->GetMD().ParadoxMutate(Data, Size, MaxSize, type);
+}
+
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL                   
 void __fuzzer_set_output(uint8_t *data, size_t size) {      

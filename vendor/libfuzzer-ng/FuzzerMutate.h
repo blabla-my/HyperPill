@@ -39,22 +39,30 @@ public:
   size_t Mutate_CustomCrossOver(uint8_t *Data, size_t Size, size_t MaxSize);
   /// Mutates data by shuffling bytes.
   size_t Mutate_ShuffleBytes(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ShuffleBytesWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Mutates data by erasing bytes.
   size_t Mutate_EraseBytes(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_EraseBytesWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Mutates data by inserting a byte.
   size_t Mutate_InsertByte(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_InsertByteWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Mutates data by inserting several repeated bytes.
   size_t Mutate_InsertRepeatedBytes(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_InsertRepeatedBytesWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Mutates data by changing one byte.
   size_t Mutate_ChangeByte(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ChangeByteWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Mutates data by changing one bit.
   size_t Mutate_ChangeBit(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ChangeBitWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Mutates data by copying/inserting a part of data into a different place.
   size_t Mutate_CopyPart(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_CopyPartWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 
 
   // CMP Hotspot Mutations
   size_t Mutate_ReplaceHotspotHint(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ReplaceHotspotHintWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   size_t Mutate_ChangeByteAroundHotspot(uint8_t *Data, size_t Size, size_t MaxSize);
 
   size_t Mutate_Test(uint8_t *Data, size_t Size, size_t MaxSize);
@@ -86,21 +94,29 @@ public:
   /// Mutates data by adding a word from the manual dictionary.
   size_t Mutate_AddWordFromManualDictionary(uint8_t *Data, size_t Size,
                                             size_t MaxSize);
+  size_t Mutate_AddWordFromManualDictionaryWithType(uint8_t *Data, size_t Size,
+                                            size_t MaxSize, int type);
 
   /// Mutates data by adding a word from the TORC.
   size_t Mutate_AddWordFromTORC(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_AddWordFromTORCWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 
   /// Mutates data by adding a word from the persistent automatic dictionary.
   size_t Mutate_AddWordFromPersistentAutoDictionary(uint8_t *Data, size_t Size,
                                                     size_t MaxSize);
+  size_t Mutate_AddWordFromPersistentAutoDictionaryWithType(uint8_t *Data, size_t Size,
+                                                    size_t MaxSize, int type);
 
   /// Tries to find an ASCII integer in Data, changes it to another ASCII int.
   size_t Mutate_ChangeASCIIInteger(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ChangeASCIIIntegerWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   /// Change a 1-, 2-, 4-, or 8-byte integer in interesting ways.
   size_t Mutate_ChangeBinaryInteger(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ChangeBinaryIntegerWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 
   /// CrossOver Data with CrossOverWith.
   size_t Mutate_CrossOver(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_CrossOverWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 
   /// Applies one of the configured mutations.
   /// Returns the new size of data which could be up to MaxSize.
@@ -115,6 +131,7 @@ public:
   /// Applies one of the default mutations. Provided as a service
   /// to mutation authors.
   size_t DefaultMutate(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t ParadoxMutate(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 
   /// Creates a cross-over of two pieces of Data, returns its size.
   size_t CrossOver(const uint8_t *Data1, size_t Size1, const uint8_t *Data2,
@@ -149,6 +166,11 @@ public:
     const char *Name;
   };
 
+  struct MutatorWithType {
+    size_t (MutationDispatcher::*Fn)(uint8_t *Data, size_t Size, size_t Max, int type);
+    const char *Name;
+  };
+
   size_t AddWordFromDictionary(Dictionary &D, uint8_t *Data, size_t Size,
                                size_t MaxSize);
   void TestSyscallMutateImpl(uint8_t *Data, size_t Size,
@@ -157,7 +179,10 @@ public:
   size_t VmcsMutateImpl(uint8_t *Data, size_t Size, size_t MaxSize);
   size_t MutateImpl(uint8_t *Data, size_t Size, size_t MaxSize,
                     std::vector<Mutator> &Mutators);
-
+  size_t ParadoxMutateImpl(uint8_t *Data, size_t Size, size_t MaxSize, int type, 
+                    std::vector<Mutator> &Mutators);
+    size_t ParadoxMutateImplWithT(uint8_t *Data, size_t Size, size_t MaxSize, int type,
+                      std::vector<MutatorWithType> &Mutators);
   size_t InsertPartOf(const uint8_t *From, size_t FromSize, uint8_t *To,
                       size_t ToSize, size_t MaxToSize);
   size_t CopyPartOf(const uint8_t *From, size_t FromSize, uint8_t *To,
@@ -201,6 +226,7 @@ public:
 
   std::vector<Mutator> Mutators;
   std::vector<Mutator> DefaultMutators;
+  std::vector<MutatorWithType> ParadoxMutators;
   std::vector<Mutator> CurrentMutatorSequence;
   
   std::vector<Mutator> NonDestructiveMutators;
