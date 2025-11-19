@@ -38,6 +38,7 @@ const size_t remaining_input_len();
 void ic_setup(size_t max_input);
 void ic_new_input(const uint8_t* in, size_t len);
 uint8_t *ic_get_output(size_t *len);
+void ic_modify_output(size_t offset, size_t len, void* src);
 int ic_ingest8(uint8_t *result, uint8_t min, uint8_t max, bool protect);
 int ic_ingest16(uint16_t *result, uint16_t min, uint16_t max, bool protect);
 int ic_ingest32(uint32_t *result, uint32_t min, uint32_t max, bool protect);

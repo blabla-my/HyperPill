@@ -222,6 +222,13 @@ uint8_t *ic_get_output(size_t *len)
     return output;
 }
 
+void ic_modify_output(size_t offset, size_t len, void *src) {
+    /* update output buffer at given position */
+    if (offset+len < *output_len) {
+        memcpy(output + offset, src, len);
+    }
+}
+
 uint8_t* final_input_get(size_t* length) {
     static void* virtio_core = getenv("VIRTIO_CORE");
     if(!final_input) {

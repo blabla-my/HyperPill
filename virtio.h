@@ -105,6 +105,7 @@ public:
     void add_used_index(uint16_t idx) {used_index.insert(idx);}
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
     void add_desc(const vring_desc_with_info* desc_with_info);
+    const vring_desc_with_info* get_desc_by_gpa(uint64_t gpa);
     void increment_inited_count() {inited_count++;}
     void invalidate_descs();
     bool has_used_index(uint16_t idx) {return used_index.contains(idx);}
@@ -329,7 +330,7 @@ struct VirtioDev {
 
 class VQueueManager {
 public:
-    VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page(), all_queue_count(0UL) {}
+    VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs() {}
     typedef tsl::robin_set<const VRing*> VRingSet;
     bool create_virtio_device(const std::string& name, bool to_fuzz=false);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
@@ -345,12 +346,16 @@ public:
     bool init_queues_for_dev(VirtioDev* vdev);
     bool init_queues();
     VirtioDev* get_vdev_by_name(const std::string& name);
+    void add_desc(const vring_desc_with_info* desc) {generated_descs.push_back(desc);}
+    void reset_generated_desc() {generated_descs.clear();}
+    const vring_desc_with_info* get_desc_by_gpa(uint64_t gpa);
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
     std::vector<VirtioDev*> virtio_dev_list;                                                           
     tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
     size_t all_queue_count;
+    std::vector<const vring_desc_with_info*> generated_descs;
 };
 
 VQueueManager& get_vqueue_manager();
