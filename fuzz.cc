@@ -128,13 +128,27 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			return -1;
 		}
 	} else if (gpa >= GUEST_MEM_START && len < GUEST_MEM_SIZE) { /* reading buffer */
-		/* mark the input region */
-		uint8_t* buf = dma_data_get()->ingest_data(len);
-		if (!buf)
-			return -1;
-		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
-		memcpy(data, buf, len);
-		return 0;
+		/* get the corresponding desc */
+		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
+		if (desc_with_info) {
+			uint8_t* buf = dma_data_get()->ingest_data(len);
+			if (!buf)
+				return -1;
+			auto offset = gpa - desc_with_info->desc.addr;
+			auto is_out = desc_with_info->desc_info.is_out;
+			printf("reading buffer: offset %lx, desc idx %d, is_out: %d, desc addr %lx, desc length %x, read length %lx\n", offset, desc_with_info->desc_info.desc_idx, is_out, desc_with_info->desc.addr, desc_with_info->desc.len, len);
+			if (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && len >= 4) { /* first field of request buffer */
+				/* test for virtio-blk */
+				uint32_t val = *(uint32_t*)buf;
+				*(uint32_t*)buf = val % 0x200; 	
+				printf("set type to %x at %lx\n", *(uint32_t*)buf, gpa);
+			}
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
+			memcpy(data, buf, len);
+			return 0;
+		} else { /* the DMA is not issued by fuzzer, do nothing */
+			return 0;
+		}
 	} else {
 		return 0;
 	}

@@ -189,6 +189,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 
 		queue->desc_chain_fsm.add_used_index(index);
 		queue->desc_chain_fsm.add_desc(desc_with_info);
+		get_vqueue_manager().add_desc(desc_with_info);
 		if (desc_ptr->len > 0x1000) { // record large desc size, having more chance to be identified by cmplog
 			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
 		}
@@ -733,6 +734,16 @@ bool VQueueManager::init_queues() {
 	}
 	return true;
 }
+
+const fuzzer::vring_desc_with_info* VQueueManager::get_desc_by_gpa(uint64_t gpa) {
+	for (const auto* desc : generated_descs) {
+		if (gpa >= desc->desc.addr && gpa < desc->desc.addr + desc->desc.len) {
+			return desc;
+		}
+	}
+    return nullptr;
+}
+
 
 /* VirtQueueElement */
 int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem){

@@ -311,6 +311,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
 	reset_bx_vm();
 	get_vqueue_manager().reset_all_queue();
+	get_vqueue_manager().reset_generated_desc();
 
 	/*
 	 * The IC_TEST mode
