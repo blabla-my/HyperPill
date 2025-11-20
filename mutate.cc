@@ -162,7 +162,7 @@ vring_desc_with_info* DescPool::new_desc() {
     len++;
     srand(__rdtsc());
     ret->desc.addr = GUEST_MEM_START + (rand() % (GUEST_MEM_SIZE));
-    ret->desc.len = rand() % (GUEST_MEM_SIZE - (ret->desc.addr - GUEST_MEM_START));
+    ret->desc.len = rand() % 0x10000;
     ret->desc.flags = rand() & 0xffff;
     DBG_PRINT {
         printf("DescPool: new desc addr %lx len %x total %lx\n", 
