@@ -178,6 +178,8 @@ struct InputInfo {
   std::vector<std::shared_ptr<Syscall>> InputSyscalls;
   std::vector<Op> InputOps;
 
+  std::set<uint32_t> switch_values;
+
   Unit Ops;
   DMAData DmaData;
   DescPool DescPool;
@@ -475,8 +477,6 @@ public:
             if(count == 1){
                 if(II){
                     II->HotSpots.push_back(pos);
-                    Printf("Hotspot added: Size=%u, Pos=%u, Hint=0x%lx, PC=0x%lx, Type=%u\n",
-                            pos.size, pos.pos, pos.hint, pos.pc, pos.type);
                     cmp_pc_counts[cmp.pc]++;
                     hinted_pcs[std::make_tuple(cmp.pc, hint_val)] = U.size();
                     hints.insert(hint_val);
@@ -603,6 +603,16 @@ public:
     DistributionNeedsUpdate = true;
     PrintCorpus();
     // ValidateFeatureSet();
+
+    II.switch_values = TPC.switch_values;
+    if (!II.switch_values.empty()) {
+      Printf("Hot Switch Values: ");
+      for (auto & v : TPC.switch_values) {
+        Printf("%x ", v);
+      }
+      Printf("\n");
+    }
+
     return &II;
   }
 

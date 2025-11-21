@@ -4,12 +4,18 @@
 #include "pc_system.h"
 #include "sourcecov.h"
 #include "task.h"
+#include "vendor/libfuzzer-ng/FuzzerInternal.h"
 #include "virtio.h"
 #include <cstdint>
 #include <sstream>
 #include <string>
 #include <sys/types.h>
 #include <filesystem>
+
+namespace fuzzer {
+	extern TracePC TPC;
+	extern Fuzzer* F;
+};
 
 int in_timer_mode = 0;
 uint64_t timer_mod[5] = {0};
@@ -287,6 +293,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	fuzz_unhealthy_input = false;
 	fuzz_should_abort = false;
 	reset_cur_cov();
+	/* this should be put before fuzz_run_input() since we will access it after LLVMFuzzerTestOneInput finishes */
+	fuzzer::TPC.switch_values.clear();
 
 	fuzzing = true;
 	fuzz_run_input(Data, Size);
@@ -312,6 +320,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	reset_bx_vm();
 	get_vqueue_manager().reset_all_queue();
 	get_vqueue_manager().reset_generated_desc();
+	get_vqueue_manager().reset_seen_buffer();
 
 	/*
 	 * The IC_TEST mode

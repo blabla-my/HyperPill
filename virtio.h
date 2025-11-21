@@ -351,6 +351,10 @@ public:
     void add_desc(const fuzzer::vring_desc_with_info* desc) {generated_descs.push_back(desc);}
     void reset_generated_desc() {generated_descs.clear();}
     const fuzzer::vring_desc_with_info* get_desc_by_gpa(uint64_t gpa);
+
+    void add_seen_buffer(uint64_t start, uint64_t size);
+    void reset_seen_buffer() {seen_buffers.clear();}
+    uint64_t overlapped_size(uint64_t start, uint64_t size); /* if non-overlap, return 0 */
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
@@ -358,6 +362,7 @@ private:
     tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
     size_t all_queue_count;
     std::vector<const fuzzer::vring_desc_with_info*> generated_descs;
+    tsl::robin_map<uint64_t, size_t> seen_buffers;
 };
 
 VQueueManager& get_vqueue_manager();

@@ -2,6 +2,8 @@
 #include "bochs.h"
 #include "config.h"
 #include "conveyor.h"
+#include "vendor/libfuzzer-ng/FuzzerInternal.h"
+#include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include "virtio.h"
 #include <cstddef>
 #include <cstdint>
@@ -9,6 +11,11 @@
 #include <tsl/robin_map.h>
 
 #include <ctime>
+
+namespace fuzzer {
+	extern TracePC TPC;
+	extern Fuzzer* F;
+};
 
 enum cmds {
 	OP_READ,
@@ -127,30 +134,37 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			assert(false);
 			return -1;
 		}
-	} else if (gpa >= GUEST_MEM_START && len < GUEST_MEM_SIZE) { /* reading buffer */
+	} else { /* reading buffer */
 		/* get the corresponding desc */
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
+			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
+			get_vqueue_manager().add_seen_buffer(gpa, len);
+
+			assert(overlapped_size <= len);
+			/* ingest random data */
 			uint8_t* buf = dma_data_get()->ingest_data(len);
 			if (!buf)
 				return -1;
+			/* fetch overlapped data */
+			if (overlapped_size)
+				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
+
 			auto offset = gpa - desc_with_info->desc.addr;
 			auto is_out = desc_with_info->desc_info.is_out;
-			printf("reading buffer: offset %lx, desc idx %d, is_out: %d, desc addr %lx, desc length %x, read length %lx\n", offset, desc_with_info->desc_info.desc_idx, is_out, desc_with_info->desc.addr, desc_with_info->desc.len, len);
 			if (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && len >= 4) { /* first field of request buffer */
 				/* test for virtio-blk */
 				uint32_t val = *(uint32_t*)buf;
 				*(uint32_t*)buf = val % 0x200; 	
-				printf("set type to %x at %lx\n", *(uint32_t*)buf, gpa);
+				fuzzer::TPC.switch_values.insert(*(uint32_t*)buf);
 			}
+			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 			memcpy(data, buf, len);
 			return 0;
 		} else { /* the DMA is not issued by fuzzer, do nothing */
 			return 0;
 		}
-	} else {
-		return 0;
 	}
 	return 1;
 }
@@ -187,6 +201,12 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	// 		}
 	// 	} 	
 	// }
+
+	if (bypass_virtio_core) {
+		int rc = ingest_vring(addr, len, data);
+		if (rc <= 0) 
+			return;
+	}
 	
 	if (seen_dma.find(addr - 1) != seen_dma.end()) {
 		seen_dma[addr + len - 1] = seen_dma[addr - 1] + len;
@@ -197,12 +217,6 @@ void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void *data) {
 	size_t sectionlen = seen_dma[addr + len - 1];
 	// might have multiple dma reads per op
 	dma_len += len;
-
-	if (bypass_virtio_core) {
-		int rc = ingest_vring(addr, len, data);
-		if (rc <= 0) 
-			return;
-	}
 
 	if (sectionlen < 0x100) {
 		// if DMA read is a reasonable size, obtain fuzz input for the

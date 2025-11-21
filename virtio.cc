@@ -744,6 +744,27 @@ const fuzzer::vring_desc_with_info* VQueueManager::get_desc_by_gpa(uint64_t gpa)
     return nullptr;
 }
 
+void VQueueManager::add_seen_buffer(uint64_t start, size_t size) {
+	if (!seen_buffers.contains(start)) {
+		seen_buffers[start] = size;
+		return;
+	}
+	if (seen_buffers[start] >= size) {
+	} else {
+		seen_buffers[start] = size;
+	}
+}
+
+uint64_t VQueueManager::overlapped_size(uint64_t start, uint64_t size) {
+	if (!seen_buffers.contains(start)) {
+		return 0;
+	}
+	if (seen_buffers[start] >= size) {
+		return size;
+	} else {
+		return seen_buffers[start];
+	}
+}
 
 /* VirtQueueElement */
 int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem){
