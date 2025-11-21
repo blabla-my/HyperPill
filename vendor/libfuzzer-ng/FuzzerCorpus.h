@@ -96,6 +96,8 @@ struct InputInfo {
   std::vector<std::shared_ptr<Syscall>> InputSyscalls;
   std::vector<Op> InputOps;
 
+  std::set<uint32_t> switch_values;
+
   // Delete feature Idx and its frequency from FeatureFreqs.
   bool DeleteFeatureFreq(uint32_t Idx) {
     if (FeatureFreqs.empty())
@@ -487,6 +489,16 @@ public:
     DistributionNeedsUpdate = true;
     PrintCorpus();
     // ValidateFeatureSet();
+
+    II.switch_values = TPC.switch_values;
+    // if (!II.switch_values.empty()) {
+    //   Printf("Hot Switch Values: ");
+    //   for (auto & v : TPC.switch_values) {
+    //     Printf("%x ", v);
+    //   }
+    //   Printf("\n");
+    // }
+
     return &II;
   }
 

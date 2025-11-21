@@ -185,6 +185,8 @@ class TracePC {
   static uintptr_t GetNextInstructionPc(uintptr_t PC);
   bool PcIsFuncEntry(const PCTableEntry *TE) { return TE->PCFlags & 1; }
 
+  std::set<uint32_t> switch_values;
+
 private:
   bool UseCounters = false;
   uint32_t UseValueProfileMask = false;

@@ -2,12 +2,19 @@
 #include "bochs.h"
 #include "config.h"
 #include "conveyor.h"
+#include "vendor/libfuzzer-ng/FuzzerInternal.h"
+#include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include "virtio.h"
 #include <cstdint>
 #include <cstdlib>
 #include <tsl/robin_map.h>
 
 #include <ctime>
+
+namespace fuzzer {
+	extern TracePC TPC;
+	extern Fuzzer* F;
+};
 
 enum cmds {
 	OP_READ,
@@ -133,28 +140,26 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
 			get_vqueue_manager().add_seen_buffer(gpa, len);
 
-			auto remaining_size= len - overlapped_size;
-			assert(remaining_size <= len);
-			if (remaining_size) { /* should not be too large */
-				/* ingest random data */
-				uint8_t* buf = ic_ingest_len(len);
-				if (!buf)
-					return -1;
-				/* fetch overlapped data */
-				if (overlapped_size)
-					BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
+			assert(overlapped_size <= len);
+			/* ingest random data */
+			uint8_t* buf = ic_ingest_len(len);
+			if (!buf)
+				return -1;
+			/* fetch overlapped data */
+			if (overlapped_size)
+				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
 
-				auto offset = gpa - desc_with_info->desc.addr;
-				auto is_out = desc_with_info->desc_info.is_out;
-				if (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && len >= 4) { /* first field of request buffer */
-					/* test for virtio-blk */
-					uint32_t val = *(uint32_t*)buf;
-					*(uint32_t*)buf = val % 0x200; 	
-				}
-				/* adjust addr = addr + len - remaining_len to avoid duplicated region */
-				BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
-				memcpy(data, buf, len);
+			auto offset = gpa - desc_with_info->desc.addr;
+			auto is_out = desc_with_info->desc_info.is_out;
+			if (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && len >= 4) { /* first field of request buffer */
+				/* test for virtio-blk */
+				uint32_t val = *(uint32_t*)buf;
+				*(uint32_t*)buf = val % 0x200; 	
+				fuzzer::TPC.switch_values.insert(*(uint32_t*)buf);
 			}
+			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
+			memcpy(data, buf, len);
 			return 0;
 		} else { /* the DMA is not issued by fuzzer, do nothing */
 			return 0;
