@@ -61,6 +61,38 @@ MutationDispatcher::MutationDispatcher(Random &Rand,
            /* {&MutationDispatcher::Mutate_ChangeByteAroundHotspot, */
            /* "FlipHotspotBits"}, */
       });
+  ParadoxMutators.insert(
+      ParadoxMutators.begin(),
+      {
+          // Erase System-call - Ez
+          // Insert System-call
+          // Remove System-call bytes - Ez
+          // Mutate System-Call CFU Bytes -Ez
+          // Mutate System-Call Argument Bytes -Ez
+          // Crossover Inputs (Combine system-calls)
+          // Crossover Inputs (Combine two CFU Parts)
+          // Hotspot Hints
+          {&MutationDispatcher::Mutate_EraseBytesWithType, "EraseBytes"},
+          {&MutationDispatcher::Mutate_InsertByteWithType, "InsertByte"},
+          {&MutationDispatcher::Mutate_InsertRepeatedBytesWithType,
+           "InsertRepeatedBytes"},
+          {&MutationDispatcher::Mutate_ChangeByteWithType, "ChangeByte"},
+          {&MutationDispatcher::Mutate_ChangeBitWithType, "ChangeBit"},
+          {&MutationDispatcher::Mutate_ShuffleBytesWithType, "ShuffleBytes"},
+          {&MutationDispatcher::Mutate_ChangeASCIIIntegerWithType, "ChangeASCIIInt"},
+          {&MutationDispatcher::Mutate_ChangeBinaryIntegerWithType, "ChangeBinInt"},
+          {&MutationDispatcher::Mutate_CopyPartWithType, "CopyPart"},
+          {&MutationDispatcher::Mutate_CrossOverWithType, "CrossOver"},
+          {&MutationDispatcher::Mutate_AddWordFromManualDictionaryWithType,
+           "ManualDict"},
+          {&MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionaryWithType,
+           "PersAutoDict"},
+
+           {&MutationDispatcher::Mutate_ReplaceHotspotHintWithType,
+           "ReplaceHotspot"},
+           /* {&MutationDispatcher::Mutate_ChangeByteAroundHotspot, */
+           /* "FlipHotspotBits"}, */
+      });
   DestructiveMutators.insert(
       DestructiveMutators.begin(),
       {
@@ -86,7 +118,7 @@ MutationDispatcher::MutationDispatcher(Random &Rand,
            {&MutationDispatcher::Mutate_ChangeByteAroundHotspot,
            "FlipHotspotBits"},
       });
-  
+
   if(Options.UseCmp) {
     DefaultMutators.push_back(
         {&MutationDispatcher::Mutate_AddWordFromTORC, "CMP"});
@@ -372,6 +404,11 @@ size_t MutationDispatcher::Mutate_ShuffleBytes(uint8_t *Data, size_t Size,
   return Size;
 }
 
+size_t MutationDispatcher::Mutate_ShuffleBytesWithType(uint8_t *Data, size_t Size,
+                                               size_t MaxSize, int type) {
+  return Mutate_ShuffleBytes(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_EraseBytes(uint8_t *Data, size_t Size,
                                              size_t MaxSize) {
   if (Size <= 1) return 0;
@@ -384,6 +421,11 @@ size_t MutationDispatcher::Mutate_EraseBytes(uint8_t *Data, size_t Size,
   return Size - N;
 }
 
+size_t MutationDispatcher::Mutate_EraseBytesWithType(uint8_t *Data, size_t Size,
+                                             size_t MaxSize, int type) {
+  return Mutate_EraseBytes(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_InsertByte(uint8_t *Data, size_t Size,
                                              size_t MaxSize) {
   if (Size >= MaxSize) return 0;
@@ -392,6 +434,11 @@ size_t MutationDispatcher::Mutate_InsertByte(uint8_t *Data, size_t Size,
   memmove(Data + Idx + 1, Data + Idx, Size - Idx);
   Data[Idx] = RandCh(Rand);
   return Size + 1;
+}
+
+size_t MutationDispatcher::Mutate_InsertByteWithType(uint8_t *Data, size_t Size,
+                                             size_t MaxSize, int type) {
+  return Mutate_InsertByte(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::Mutate_InsertRepeatedBytes(uint8_t *Data,
@@ -413,6 +460,12 @@ size_t MutationDispatcher::Mutate_InsertRepeatedBytes(uint8_t *Data,
   return Size + N;
 }
 
+size_t MutationDispatcher::Mutate_InsertRepeatedBytesWithType(uint8_t *Data,
+                                                      size_t Size,
+                                                      size_t MaxSize, int type) {
+  return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_ChangeByte(uint8_t *Data, size_t Size,
                                              size_t MaxSize) {
   if (Size > MaxSize) return 0;
@@ -422,6 +475,11 @@ size_t MutationDispatcher::Mutate_ChangeByte(uint8_t *Data, size_t Size,
   return Size;
 }
 
+size_t MutationDispatcher::Mutate_ChangeByteWithType(uint8_t *Data, size_t Size,
+                                             size_t MaxSize, int type) {
+  return Mutate_ChangeByte(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_ChangeBit(uint8_t *Data, size_t Size,
                                             size_t MaxSize) {
   if (Size > MaxSize) return 0;
@@ -429,6 +487,11 @@ size_t MutationDispatcher::Mutate_ChangeBit(uint8_t *Data, size_t Size,
   LastChangedIdx = Idx;
   Data[Idx] ^= 1 << Rand(8);
   return Size;
+}
+
+size_t MutationDispatcher::Mutate_ChangeBitWithType(uint8_t *Data, size_t Size,
+                                            size_t MaxSize, int type) {
+  return Mutate_ChangeBit(Data, Size, MaxSize);
 }
 
 
@@ -445,6 +508,31 @@ size_t MutationDispatcher::Mutate_ReplaceHotspotHint(uint8_t *Data, size_t Size,
         return 0;
     //if(h.size > 4)
     // Printf("Replacing %lx at %lx\n", h.size, h.pos);
+    memcpy(Data + h.pos, &h.hint, h.size);
+    return Size;
+}
+
+size_t MutationDispatcher::Mutate_ReplaceHotspotHintWithType(uint8_t *Data, size_t Size,
+                                            size_t MaxSize, int type) {
+    const std::vector<fuzzer::HotPos> *spots;                                         
+    if (type == fuzzer::HotPos::OPS) {
+      spots = &OurBaseII->OPSSpots;
+    } else if (type == fuzzer::HotPos::DMA) {
+      spots = &OurBaseII->OPSSpots;
+    } else {
+      spots = &OurBaseII->OPSSpots;
+    }
+    if(spots->size() == 0) {
+        return 0;
+    }
+    size_t i = Rand(spots->size());
+    auto &h = (*spots)[i];
+
+    if(h.pos + h.size > Size || h.hint == 0)
+        return 0;
+    //if(h.size > 4)
+    // Printf("Replacing %lx at %lx\n", h.size, h.pos);
+    Printf("Replace Hotspot with type %d\n", type);
     memcpy(Data + h.pos, &h.hint, h.size);
     return Size;
 }
@@ -474,6 +562,12 @@ size_t MutationDispatcher::Mutate_AddWordFromManualDictionary(uint8_t *Data,
                                                               size_t Size,
                                                               size_t MaxSize) {
   return AddWordFromDictionary(ManualDictionary, Data, Size, MaxSize);
+}
+
+size_t MutationDispatcher::Mutate_AddWordFromManualDictionaryWithType(uint8_t *Data,
+                                                              size_t Size,
+                                                              size_t MaxSize, int type) {
+  return Mutate_AddWordFromManualDictionary(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::ApplyDictionaryEntry(uint8_t *Data, size_t Size,
@@ -591,9 +685,19 @@ size_t MutationDispatcher::Mutate_AddWordFromTORC(
   return Size;
 }
 
+size_t MutationDispatcher::Mutate_AddWordFromTORCWithType(
+    uint8_t *Data, size_t Size, size_t MaxSize, int type) {
+  return Mutate_AddWordFromTORC(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionary(
     uint8_t *Data, size_t Size, size_t MaxSize) {
   return AddWordFromDictionary(PersistentAutoDictionary, Data, Size, MaxSize);
+}
+
+size_t MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionaryWithType(
+    uint8_t *Data, size_t Size, size_t MaxSize, int type) {
+  return Mutate_AddWordFromPersistentAutoDictionary(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::AddWordFromDictionary(Dictionary &D, uint8_t *Data,
@@ -660,6 +764,11 @@ size_t MutationDispatcher::Mutate_CopyPart(uint8_t *Data, size_t Size,
     return InsertPartOf(Data, Size, Data, Size, MaxSize);
 }
 
+size_t MutationDispatcher::Mutate_CopyPartWithType(uint8_t *Data, size_t Size,
+                                           size_t MaxSize, int type) {
+  return Mutate_CopyPart(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_ChangeASCIIInteger(uint8_t *Data, size_t Size,
                                                      size_t MaxSize) {
   if (Size > MaxSize) return 0;
@@ -692,6 +801,11 @@ size_t MutationDispatcher::Mutate_ChangeASCIIInteger(uint8_t *Data, size_t Size,
     Val /= 10;
   }
   return Size;
+}
+
+size_t MutationDispatcher::Mutate_ChangeASCIIIntegerWithType(uint8_t *Data, size_t Size,
+                                                     size_t MaxSize, int type) {
+  return Mutate_ChangeASCIIInteger(Data, Size, MaxSize);
 }
 
 template<class T>
@@ -733,6 +847,12 @@ size_t MutationDispatcher::Mutate_ChangeBinaryInteger(uint8_t *Data,
   return 0;
 }
 
+size_t MutationDispatcher::Mutate_ChangeBinaryIntegerWithType(uint8_t *Data,
+                                                      size_t Size,
+                                                      size_t MaxSize, int type) {
+  return Mutate_ChangeBinaryInteger(Data, Size, MaxSize);
+}
+
 size_t MutationDispatcher::Mutate_CrossOver(uint8_t *Data, size_t Size,
                                             size_t MaxSize) {
   if (Size > MaxSize) return 0;
@@ -761,6 +881,11 @@ size_t MutationDispatcher::Mutate_CrossOver(uint8_t *Data, size_t Size,
   assert(NewSize > 0 && "CrossOver returned empty unit");
   assert(NewSize <= MaxSize && "CrossOver returned overisized unit");
   return NewSize;
+}
+
+size_t MutationDispatcher::Mutate_CrossOverWithType(uint8_t *Data, size_t Size,
+                                            size_t MaxSize, int type) {
+  return Mutate_CrossOver(Data, Size, MaxSize);
 }
 
 void MutationDispatcher::StartMutationSequence() {
@@ -882,6 +1007,11 @@ size_t MutationDispatcher::DefaultMutate(uint8_t *Data, size_t Size,
   return MutateImpl(Data, Size, MaxSize, DefaultMutators);
 }
 
+size_t MutationDispatcher::ParadoxMutate(uint8_t *Data, size_t Size,
+                                         size_t MaxSize, int type) {
+  return ParadoxMutateImplWithT(Data, Size, MaxSize, type, ParadoxMutators);
+}
+
 //RemoveOp-InsertOpBytes-malloc
 // Mutates Data in place, returns new size.
 size_t MutationDispatcher::MutateImpl(uint8_t *Data, size_t Size,
@@ -904,6 +1034,49 @@ size_t MutationDispatcher::MutateImpl(uint8_t *Data, size_t Size,
   *Data = ' ';
   return 1;   // Fallback, should not happen frequently.
 }
+
+size_t MutationDispatcher::ParadoxMutateImpl(uint8_t *Data, size_t Size,
+                                      size_t MaxSize, int type,
+                                      std::vector<Mutator> &Mutators) {
+  assert(MaxSize > 0);
+  // Some mutations may fail (e.g. can't insert more bytes if Size == MaxSize),
+  // in which case they will return 0.
+  // Try several times before returning un-mutated data.
+  for (int Iter = 0; Iter < 100; Iter++) {
+    auto M = Mutators[Rand(Mutators.size())];
+    size_t NewSize = (this->*(M.Fn))(Data, Size, MaxSize);
+    if (NewSize && NewSize <= MaxSize) {
+      if (Options.OnlyASCII)
+        ToASCII(Data, NewSize);
+      CurrentMutatorSequence.push_back(M);
+      return NewSize;
+    }
+  }
+  *Data = ' ';
+  return 1;   // Fallback, should not happen frequently.
+}
+
+size_t MutationDispatcher::ParadoxMutateImplWithT(uint8_t *Data, size_t Size,
+                                      size_t MaxSize, int type,
+                                      std::vector<MutatorWithType> &Mutators) {
+  assert(MaxSize > 0);
+  // Some mutations may fail (e.g. can't insert more bytes if Size == MaxSize),
+  // in which case they will return 0.
+  // Try several times before returning un-mutated data.
+  for (int Iter = 0; Iter < 100; Iter++) {
+    auto M = Mutators[Rand(Mutators.size())];
+    size_t NewSize = (this->*(M.Fn))(Data, Size, MaxSize, type); // Pass 'type' here
+    if (NewSize && NewSize <= MaxSize) {
+      if (Options.OnlyASCII)
+        ToASCII(Data, NewSize);
+      // CurrentMutatorSequence.push_back(M); // This will not work as M is MutatorWithType
+      return NewSize;
+    }
+  }
+  *Data = ' ';
+  return 1;   // Fallback, should not happen frequently.
+}
+
 
 // Mask represents the set of Data bytes that are worth mutating.
 size_t MutationDispatcher::MutateWithMask(uint8_t *Data, size_t Size,

@@ -175,6 +175,8 @@ struct InputInfo {
   std::vector<std::pair<uint32_t, uint16_t>> FeatureFreqs;
 
   std::vector<struct HotPos> HotSpots;
+  std::vector<struct HotPos> DMASpots;
+  std::vector<struct HotPos> OPSSpots;
   std::vector<std::shared_ptr<Syscall>> InputSyscalls;
   std::vector<Op> InputOps;
 
@@ -447,20 +449,28 @@ public:
             HotPos pos;
 
             if (II && II->parse_valid) {
-                auto search_in = [&](const uint8_t *data, size_t size, int type_val) {
+                auto search_in = [&](const uint8_t *data, size_t size, int type_val, uint16_t offset) {
                   if (count > 1) return;
                   auto start = data;
                   auto end = data + size;
                   while ((start = std::search(start, end, pattern.begin(), pattern.end())) != end) {
                     count++;
                     if (count > 1) return;
-                    found_pos = std::distance(data, start);
-                    pos = {val_size, found_pos, hint_val, cmp.pc, static_cast<decltype(pos.type)>(type_val)};
+                    found_pos = std::distance(data, start) + offset;
+                    pos = {.size = val_size, .pos = found_pos, .hint = hint_val, .pc = cmp.pc, .type = static_cast<decltype(pos.type)>(type_val)};
                     start++;
                   }
+                  if (pos.type == fuzzer::HotPos::OPS) {
+                    II->OPSSpots.push_back(pos);
+                  } else if (pos.type == fuzzer::HotPos::DMA) {
+                    II->DMASpots.push_back(pos);
+                  }
+                  cmp_pc_counts[cmp.pc]++;
+                  hinted_pcs[std::make_tuple(cmp.pc, hint_val)] = U.size();
+                  hints.insert(hint_val);
                 };
-                search_in(II->Ops.data(), II->Ops.size(), HotPos::OPS);
-                search_in(II->DmaData.dma_data, II->DmaData.len, HotPos::DMA);
+                search_in(II->Ops.data(), II->Ops.size(), HotPos::OPS, 0);
+                search_in(II->DmaData.dma_data, II->DmaData.len, HotPos::DMA, 0);
             } else {
                 auto start = U.begin();
                 auto end = U.end();

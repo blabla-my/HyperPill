@@ -365,6 +365,66 @@ static size_t ReplaceHotspotHint(uint8_t* data, size_t size, size_t MaxSize, std
     return size;
 }
 
+
+static size_t ChangeASCIIInteger(uint8_t* data, size_t size, size_t MaxSize, std::mt19937 &gen) {
+    if (size == 0) return size;
+    size_t b = gen() % size;
+    while (b < size && !isdigit(data[b])) b++;
+    if (b == size) return size;
+    size_t e = b;
+    while (e < size && isdigit(data[e])) e++;
+    uint64_t val = 0;
+    for (size_t i = b; i < e; i++)
+        val = val * 10 + data[i] - '0';
+    
+    switch(gen() % 5) {
+        case 0: val++; break;
+        case 1: val--; break;
+        case 2: val /= 2; break;
+        case 3: val *= 2; break;
+        case 4: val = gen() % (val * val + 1); break;
+    }
+
+    for (size_t i = b; i < e; i++) {
+        size_t idx = e + b - i - 1;
+        if (idx < size) {
+            data[idx] = (val % 10) + '0';
+            val /= 10;
+        }
+    }
+    return size;
+}
+
+template<class T>
+void ChangeBinaryInteger(uint8_t* data, size_t size, std::mt19937 &gen) {
+    if (size < sizeof(T)) return;
+    size_t off = gen() % (size - sizeof(T) + 1);
+    T val;
+    memcpy(&val, data + off, sizeof(val));
+    val += (gen() % 21) - 10;
+    memcpy(data + off, &val, sizeof(val));
+}
+
+static size_t Mutate_ChangeBinaryInteger(uint8_t* data, size_t size, size_t MaxSize, std::mt19937 &gen) {
+    switch (gen() % 4) {
+        case 3: ChangeBinaryInteger<uint64_t>(data, size, gen); break;
+        case 2: ChangeBinaryInteger<uint32_t>(data, size, gen); break;
+        case 1: ChangeBinaryInteger<uint16_t>(data, size, gen); break;
+        case 0: ChangeBinaryInteger<uint8_t>(data, size, gen); break;
+    }
+    return size;
+}
+
+static size_t CopyPart(uint8_t* data, size_t size, size_t MaxSize, std::mt19937 &gen) {
+    if (size == 0) return size;
+    size_t to_beg = gen() % size;
+    size_t copy_size = gen() % (size - to_beg) + 1;
+    copy_size = std::min(copy_size, size);
+    size_t from_beg = gen() % (size - copy_size + 1);
+    memmove(data + to_beg, data + from_beg, copy_size);
+    return size;
+}
+
 static size_t InsertFUZZString(uint8_t* data, size_t size, size_t MaxSize, std::mt19937 &gen) {
     const char* fuzz_str = "FUZZ";
     const size_t fuzz_str_len = 4;
@@ -395,6 +455,9 @@ std::vector<size_t (*)(uint8_t*, size_t, size_t, std::mt19937 &)> mutators = {
     ShuffleBytes,
     ReplaceHotspotHint,
     InsertFUZZString,
+    ChangeASCIIInteger,
+    Mutate_ChangeBinaryInteger,
+    CopyPart,
 };
 
 } // namespace OpsMutator
@@ -448,6 +511,7 @@ static size_t mutate_ops(uint8_t* ops, size_t ops_len, size_t MaxSize, std::mt19
  * generally discouraged unless you're at a dead end.
  */
 extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
+extern "C" size_t LLVMFuzzerMutateParadox(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                          size_t MaxSize, unsigned int Seed) {
     void* virtio_core = getenv("VIRTIO_CORE");
@@ -471,18 +535,20 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
             case 0: // mutate ops
             {
                 size_t MaxOpsSize = MAX_OPS_LEN < MaxSize ? MAX_OPS_LEN : MaxSize;
-                ops_len = LLVMFuzzerMutate(ops, ops_len, MaxOpsSize);
+                ops_len = LLVMFuzzerMutateParadox(ops, ops_len, MaxOpsSize, fuzzer::HotPos::OPS);
+                // ops_len = mutate_ops(ops, ops_len, MaxOpsSize, gen);
                 return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
             }
-            case 1: // mutate desc pool
-                mutate_desc(mutate_desc_pool1, gen);
-                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
-            case 2: // mutate dma data
+            case 1: // mutate dma data
             {
                 size_t MaxDMASize = DMA_DATA_MAX_LENGTH < MaxSize ? DMA_DATA_MAX_LENGTH : MaxSize;
-                mutate_dma(mutate_dma_data, MaxDMASize, gen);
+                // mutate_dma(mutate_dma_data, MaxDMASize, gen);
+                mutate_dma_data->len = LLVMFuzzerMutateParadox(mutate_dma_data->dma_data, mutate_dma_data->len, MaxDMASize, fuzzer::HotPos::DMA);
                 return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
             }
+            case 2: // mutate desc pool
+                mutate_desc(mutate_desc_pool1, gen);
+                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
             default:
                 assert(false);
         }
