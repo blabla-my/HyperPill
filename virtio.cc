@@ -186,7 +186,6 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 		}
 		desc_ptr->addr = desc_with_info->desc.addr;
 		desc_ptr->len = desc_with_info->desc.len;
-
 		queue->desc_chain_fsm.add_used_index(index);
 		queue->desc_chain_fsm.add_desc(desc_with_info);
 		get_vqueue_manager().add_desc(desc_with_info);

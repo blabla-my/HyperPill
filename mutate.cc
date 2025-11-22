@@ -38,6 +38,19 @@ static void AlignLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     desc->desc.len = mul * choice;  
 }
 
+static void AlignLengthForAll(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
+    for (int i = 0; i < desc_pool->len; i++) {
+        auto desc_with_info = &desc_pool->array[i];
+        const auto& info = desc_with_info->desc_info;
+        if (info.desc_idx == 0 && info.is_out == 1) {
+            continue;
+        }
+        const size_t align[] = {512, 1024};
+        auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
+        desc_with_info->desc.len = choice;
+    }
+}
+
 static void SmallLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
     auto desc = &desc_pool->array[gen() % desc_pool->len];
@@ -132,11 +145,11 @@ std::vector<void (*)(fuzzer::DescPool*, std::mt19937 &)> mutators = {
     SmallLength,
     MiddleLength,
     MutateLength,
-    FlipBitLength,
-    ByteFlipLength,
+    // FlipBitLength,
+    // ByteFlipLength,
     AlignAddress,
     UpdateWithHints,
-    RemoveDesc
+    // RemoveDesc
 };
 
 } // namespace DescMutator

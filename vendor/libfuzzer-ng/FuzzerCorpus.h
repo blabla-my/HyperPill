@@ -614,13 +614,8 @@ public:
     PrintCorpus();
     // ValidateFeatureSet();
 
-    II.switch_values = TPC.switch_values;
-    if (!II.switch_values.empty()) {
-      Printf("Hot Switch Values: ");
-      for (auto & v : TPC.switch_values) {
-        Printf("%x ", v);
-      }
-      Printf("\n");
+    if (!TPC.switch_values.empty()) {
+      TPC.switch_selector.update(TPC.switch_values);
     }
 
     return &II;

@@ -17,6 +17,7 @@
 
 #include <set>
 #include <unordered_map>
+#include <random>
 
 
 struct CmpLogEntry {
@@ -97,6 +98,47 @@ struct MemMemTable {
     EmptyWord.Set(nullptr, 0);
     return EmptyWord;
   }
+};
+
+class WeightedSelector {
+    std::vector<uint32_t> keys; 
+    std::vector<double> weights;
+    std::unordered_map<uint32_t, uint32_t> freq;
+    std::discrete_distribution<int> dist;
+    std::mt19937 gen;
+  public:
+    WeightedSelector() : keys(), weights(), freq(), dist(), gen(std::random_device{}()) {}
+    void update(const std::set<uint32_t>& values) {
+      for (auto& k : values) {
+        if (freq.find(k) == freq.end()){
+          freq[k] = 0;
+        }
+        freq[k]++;
+      }    
+      keys.clear();
+      weights.clear();
+      
+      Printf("Hot Switch: ");
+      for (const auto& pair : freq) {
+          keys.push_back(pair.first);   // Save the actual value (e.g., 0x100)
+          weights.push_back((double)pair.second); // Save the weight (e.g., 50.0)
+          Printf("%x:%x ", pair.first, pair.second);
+      }
+      Printf("\n");
+
+      std::discrete_distribution<int>::param_type params(weights.begin(), weights.end());
+      dist.param(params);
+    }
+
+    uint32_t get_next() {
+      bool use_uniform = (gen() % 2) == 1;
+      if (!keys.empty() && use_uniform == false) {
+        int index = dist(gen);
+        return keys[index];
+      } else {
+        return gen() % 0x200;
+      }
+    }
 };
 
 class TracePC {
@@ -186,6 +228,7 @@ class TracePC {
   bool PcIsFuncEntry(const PCTableEntry *TE) { return TE->PCFlags & 1; }
 
   std::set<uint32_t> switch_values;
+  WeightedSelector switch_selector;
 
 private:
   bool UseCounters = false;
