@@ -518,7 +518,7 @@ size_t MutationDispatcher::Mutate_ReplaceHotspotHintWithType(uint8_t *Data, size
     if (type == fuzzer::HotPos::OPS) {
       spots = &OurBaseII->OPSSpots;
     } else if (type == fuzzer::HotPos::DMA) {
-      spots = &OurBaseII->OPSSpots;
+      spots = &OurBaseII->DMASpots;
     } else {
       spots = &OurBaseII->OPSSpots;
     }

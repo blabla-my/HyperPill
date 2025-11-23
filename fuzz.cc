@@ -153,10 +153,10 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			auto offset = gpa - desc_with_info->desc.addr;
 			auto is_out = desc_with_info->desc_info.is_out;
 			if (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && len >= 4) { /* first field of request buffer */
-				// uint32_t val = *(uint32_t*)buf;
-				uint32_t val = fuzzer::TPC.switch_selector.get_next();
-				*(uint32_t*)buf = val; 	
-				fuzzer::TPC.switch_values.insert(val);
+				uint32_t val = *(uint32_t*)buf;
+				// uint32_t val = fuzzer::TPC.switch_selector.get_next();
+				*(uint32_t*)buf = val % 0x200; 	
+				// fuzzer::TPC.switch_values.insert(*(uint32_t*)buf);
 			}
 			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
