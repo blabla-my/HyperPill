@@ -13,6 +13,7 @@ namespace fuzzer {
 size_t DMAData::deserialize(const uint8_t* data, size_t size) {
     len = *(uint32_t*)data;
     assert(get_size() == size);
+    memset(dma_data, 0, sizeof(dma_data));
     memcpy(dma_data, data+sizeof(len), len);
     cursor = 0;
     return get_size();
