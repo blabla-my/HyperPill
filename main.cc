@@ -312,6 +312,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		uint8_t *dummy = (uint8_t *)"AAA";
 		__fuzzer_set_output(dummy, 1);
 		reset_bx_vm();
+		get_vqueue_manager().reset_all_queue();
+		get_vqueue_manager().reset_generated_desc();
+		get_vqueue_manager().reset_seen_buffer();
 		done = 1;
 		return 0;
 	}

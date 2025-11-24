@@ -542,7 +542,8 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
         fuzzer::input_deserialize(Data, Size, ops, &ops_len, mutate_dma_data, mutate_desc_pool1);
         /* select one of the ops, dma_data, desc_pool to mutate */
         std::mt19937 gen(Seed);
-        int choice = gen() % 3;
+        std::uniform_int_distribution<> distrib(0, 2);
+        int choice = distrib(gen);
         size_t real_max_size;
         switch (choice) {
             case 0: // mutate ops

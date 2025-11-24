@@ -423,7 +423,10 @@ size_t MutationDispatcher::Mutate_EraseBytes(uint8_t *Data, size_t Size,
 
 size_t MutationDispatcher::Mutate_EraseBytesWithType(uint8_t *Data, size_t Size,
                                              size_t MaxSize, int type) {
-  return Mutate_EraseBytes(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)                                              
+    return Mutate_EraseBytes(Data, Size, MaxSize);
+  else
+    return Mutate_EraseBytes(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::Mutate_InsertByte(uint8_t *Data, size_t Size,
@@ -438,7 +441,10 @@ size_t MutationDispatcher::Mutate_InsertByte(uint8_t *Data, size_t Size,
 
 size_t MutationDispatcher::Mutate_InsertByteWithType(uint8_t *Data, size_t Size,
                                              size_t MaxSize, int type) {
-  return Mutate_InsertByte(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)
+    return Mutate_InsertByte(Data, Size, MaxSize);
+  else
+    return Mutate_InsertByte(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::Mutate_InsertRepeatedBytes(uint8_t *Data,
@@ -463,7 +469,10 @@ size_t MutationDispatcher::Mutate_InsertRepeatedBytes(uint8_t *Data,
 size_t MutationDispatcher::Mutate_InsertRepeatedBytesWithType(uint8_t *Data,
                                                       size_t Size,
                                                       size_t MaxSize, int type) {
-  return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)                                                      
+    return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
+  else
+    return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::Mutate_ChangeByte(uint8_t *Data, size_t Size,
@@ -532,7 +541,7 @@ size_t MutationDispatcher::Mutate_ReplaceHotspotHintWithType(uint8_t *Data, size
         return 0;
     //if(h.size > 4)
     // Printf("Replacing %lx at %lx\n", h.size, h.pos);
-    Printf("Replace Hotspot with type %d\n", type);
+    // Printf("Replace Hotspot with type %d\n", type);
     memcpy(Data + h.pos, &h.hint, h.size);
     return Size;
 }
@@ -557,6 +566,32 @@ size_t MutationDispatcher::Mutate_ChangeByteAroundHotspot(uint8_t *Data, size_t 
 
     return Size;
 }
+size_t MutationDispatcher::Mutate_ChangeByteAroundHotspotWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type) {
+    const std::vector<fuzzer::HotPos> *spots;                                         
+    if (type == fuzzer::HotPos::OPS) {
+      spots = &OurBaseII->OPSSpots;
+    } else if (type == fuzzer::HotPos::DMA) {
+      spots = &OurBaseII->DMASpots;
+    } else {
+      spots = &OurBaseII->OPSSpots;
+    }
+    if(!OurBaseII || !spots->size()) {
+        return 0;
+    }
+    size_t i = Rand(spots->size());
+    auto &h = (*spots)[i];
+
+    size_t pos = (h.pos + Rand(h.size));
+    size_t offset = (4-(biased_rand(5, 5, Rand))) *(Rand(3)-1);
+    if((int)offset + int(pos) > 0) {
+        pos += offset;
+    }
+    if(pos >= Size)
+        return 0;
+    Data[pos] = Rand(256);
+
+    return Size;
+}
 
 size_t MutationDispatcher::Mutate_AddWordFromManualDictionary(uint8_t *Data,
                                                               size_t Size,
@@ -567,7 +602,10 @@ size_t MutationDispatcher::Mutate_AddWordFromManualDictionary(uint8_t *Data,
 size_t MutationDispatcher::Mutate_AddWordFromManualDictionaryWithType(uint8_t *Data,
                                                               size_t Size,
                                                               size_t MaxSize, int type) {
-  return Mutate_AddWordFromManualDictionary(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)                                              
+    return Mutate_AddWordFromManualDictionary(Data, Size, MaxSize);
+  else
+    return Mutate_AddWordFromManualDictionary(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::ApplyDictionaryEntry(uint8_t *Data, size_t Size,
@@ -697,7 +735,10 @@ size_t MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionary(
 
 size_t MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionaryWithType(
     uint8_t *Data, size_t Size, size_t MaxSize, int type) {
-  return Mutate_AddWordFromPersistentAutoDictionary(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)
+    return Mutate_AddWordFromPersistentAutoDictionary(Data, Size, MaxSize);
+  else
+    return Mutate_AddWordFromPersistentAutoDictionary(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::AddWordFromDictionary(Dictionary &D, uint8_t *Data,
@@ -766,7 +807,10 @@ size_t MutationDispatcher::Mutate_CopyPart(uint8_t *Data, size_t Size,
 
 size_t MutationDispatcher::Mutate_CopyPartWithType(uint8_t *Data, size_t Size,
                                            size_t MaxSize, int type) {
-  return Mutate_CopyPart(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)                                            
+    return Mutate_CopyPart(Data, Size, MaxSize);
+  else
+    return Mutate_CopyPart(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::Mutate_ChangeASCIIInteger(uint8_t *Data, size_t Size,
@@ -885,7 +929,10 @@ size_t MutationDispatcher::Mutate_CrossOver(uint8_t *Data, size_t Size,
 
 size_t MutationDispatcher::Mutate_CrossOverWithType(uint8_t *Data, size_t Size,
                                             size_t MaxSize, int type) {
-  return Mutate_CrossOver(Data, Size, MaxSize);
+  if (type == fuzzer::HotPos::OPS)                                            
+    return Mutate_CrossOver(Data, Size, MaxSize);
+  else
+    return Mutate_CrossOver(Data, Size, MaxSize);
 }
 
 void MutationDispatcher::StartMutationSequence() {

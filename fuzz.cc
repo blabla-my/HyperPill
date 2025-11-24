@@ -139,10 +139,17 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
 			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
-			get_vqueue_manager().add_seen_buffer(gpa, len);
-
 			assert(overlapped_size <= len);
+			
+			uint64_t offset = gpa - desc_with_info->desc.addr;
+			bool is_out = desc_with_info->desc_info.is_out;
+			bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0);
+			
+			if (offset > 0x100) 
+				return 0;
+
 			/* ingest random data */
+			// uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch);
 			uint8_t* buf = dma_data_get()->ingest_data(len);
 			if (!buf)
 				return -1;
@@ -150,17 +157,10 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			if (overlapped_size)
 				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
 
-			auto offset = gpa - desc_with_info->desc.addr;
-			auto is_out = desc_with_info->desc_info.is_out;
-			if (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && len >= 4) { /* first field of request buffer */
-				uint32_t val = *(uint32_t*)buf;
-				// uint32_t val = fuzzer::TPC.switch_selector.get_next();
-				*(uint32_t*)buf = val % 0x200; 	
-				// fuzzer::TPC.switch_values.insert(*(uint32_t*)buf);
-			}
 			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 			memcpy(data, buf, len);
+			get_vqueue_manager().add_seen_buffer(gpa, len);
 			return 0;
 		} else { /* the DMA is not issued by fuzzer, do nothing */
 			return 0;

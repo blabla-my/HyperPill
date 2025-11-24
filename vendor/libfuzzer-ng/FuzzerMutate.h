@@ -64,6 +64,7 @@ public:
   size_t Mutate_ReplaceHotspotHint(uint8_t *Data, size_t Size, size_t MaxSize);
   size_t Mutate_ReplaceHotspotHintWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
   size_t Mutate_ChangeByteAroundHotspot(uint8_t *Data, size_t Size, size_t MaxSize);
+  size_t Mutate_ChangeByteAroundHotspotWithType(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 
   size_t Mutate_Test(uint8_t *Data, size_t Size, size_t MaxSize);
 

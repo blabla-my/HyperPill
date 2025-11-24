@@ -1,4 +1,5 @@
 #include "FuzzerCorpus.h"
+#include <random>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -9,6 +10,11 @@
 #endif
 
 namespace fuzzer {
+
+const static std::vector<uint32_t> intervals = {0, 0x20, 0x100, 0x120};
+const static std::vector<double> weights = {100, 5, 60, 5};
+static std::piecewise_constant_distribution<double> dmadata_integer_distribution(
+    intervals.begin(), intervals.end(), weights.begin());
 
 size_t DMAData::deserialize(const uint8_t* data, size_t size) {
     len = *(uint32_t*)data;
@@ -31,15 +37,30 @@ size_t DMAData::serialize(void* dst, size_t max_len) const {
     return serialized_len;
 }
 
-uint8_t* DMAData::ingest_data(size_t data_len) {
-    srand(__rdtsc());
+uint8_t* DMAData::ingest_data(size_t data_len, bool integer) {
+    auto seed = __rdtsc();
+    std::mt19937 gen(seed);
     uint8_t* addr = this->dma_data + cursor;
     if (this->cursor + data_len <= this->len) {
         this->cursor += data_len;
     } else if (this->cursor + data_len < DMA_DATA_MAX_LENGTH) {
-        // Extend data with random values
-        for (size_t i = this->len; i < this->cursor + data_len; i++) {
-            this->dma_data[i] = rand() & 0xff;
+        auto remaining_len = this->cursor + data_len - this->len;
+        if (integer) {
+            while(remaining_len >= sizeof(uint32_t)) {
+                auto val = (uint32_t)(dmadata_integer_distribution(gen));
+                auto p = addr + data_len - remaining_len;
+                *(uint32_t*)p = val;
+                remaining_len -= sizeof(uint32_t);
+            }
+            if (remaining_len > 0) {
+                auto val = (uint32_t)(dmadata_integer_distribution(gen));
+                auto p = addr + data_len - remaining_len;
+                memcpy(p, &val, remaining_len);
+            }
+        } else {
+            for (size_t i = this->len; i < this->cursor + data_len; i++) {
+                this->dma_data[i] = rand() & 0xff;
+            }
         }
         this->len = this->cursor + data_len;
         this->cursor += data_len;
