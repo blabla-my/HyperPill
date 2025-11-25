@@ -63,16 +63,17 @@ fuzzer::DMAData* dma_data_get() {return &dma_data;}
 
 uint8_t* input_get() {return (uint8_t*)input;}
 size_t* input_len_get() {return &input_len;}
+
+static uint8_t *last_token = 0;
+static size_t bufsize=MAX_OPS_LEN;
+
 void reset_input_output() {
     input_cursor = input;
     input_len = 0;
     output_cursor = output;
     output_len = 0;
+    last_token = output;
 }
-
-static uint8_t *last_token;
-static size_t bufsize=MAX_OPS_LEN;
-
 
 
 static uint8_t zeros[MAX_OPS_LEN];
@@ -575,64 +576,7 @@ void ic_subtract(size_t l){
     debug_printf("Subtracted %lx. Cursor is now at %lx\n", l, output_len);
 }
 
-/* only when VIRTIO_CORE is enabled, we call input_deserialize to deserialize input*/
-void input_deserialize(const uint8_t *data, size_t size, 
-                         uint8_t *ops, size_t *ops_len, 
-                         fuzzer::DMAData *dma_data, fuzzer::DescPool *desc_pool) {
-    if (size < sizeof(fuzzer::input_hdr)) {
-        ic_new_input(data, size);
-        if (ops_len)
-            *ops_len = size;
-        return;
-    }
-    fuzzer::input_hdr* hdr = (fuzzer::input_hdr*)data;
-    if (!hdr->check_magic()) {
-        ic_new_input(data, size);
-        if (ops_len)
-            *ops_len = size;
-        return;
-    }
-    assert(hdr->ops_size + hdr->dma_data_size + hdr->desc_pool_size + sizeof(*hdr) == size);
-    //     ic_new_input(data, size);
-    //     if (ops_len)
-    //         *ops_len = size;
-    //     return;
-    // }
-    data += sizeof(*hdr);
-    dma_data->deserialize(data + hdr->ops_size, hdr->dma_data_size);
-    desc_pool->deserialize(data + hdr->ops_size + hdr->dma_data_size, hdr->desc_pool_size);
-    if (ops && ops_len) {
-        if (ops != data)
-            memcpy(ops, data, hdr->ops_size);
-        *ops_len = hdr->ops_size;
-    } else {
-        ic_new_input(data, hdr->ops_size);
-    }
-}
-size_t input_serialize(uint8_t *data, size_t max_size, uint8_t *ops, size_t ops_len, fuzzer::DMAData *dma_data, fuzzer::DescPool *desc_pool) {
-    if (!ops) {
-        ops = output;
-        ops_len = output_len;
-    } 
-    assert(sizeof(fuzzer::input_hdr) + ops_len + dma_data->get_size() + desc_pool->get_size() <= max_size);
-    fuzzer::input_hdr hdr = {
-        .ops_size = (uint32_t)ops_len, 
-        .dma_data_size = (uint32_t)dma_data->get_size(), 
-        .desc_pool_size = (uint32_t)desc_pool->get_size()
-    };
-    hdr.set_magic();
-    memcpy(data, &hdr, sizeof(hdr));
-    data += sizeof(hdr);
-    if (ops != data)
-        memcpy(data, ops, hdr.ops_size);
-    dma_data->serialize(data+hdr.ops_size, hdr.dma_data_size);
-    desc_pool->serialize(data+hdr.ops_size+hdr.dma_data_size, hdr.desc_pool_size);
-    return sizeof(hdr) + hdr.ops_size + hdr.dma_data_size + hdr.desc_pool_size;
-}
-
 /* for virtio fuzz */
-
-
 
 void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len) {
     __trace_pc_add_desc_region(queue_idx, desc_idx, is_out, pos, len);
