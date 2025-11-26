@@ -444,7 +444,7 @@ size_t MutationDispatcher::Mutate_InsertByteWithType(uint8_t *Data, size_t Size,
   if (type == fuzzer::HotPos::OPS)
     return Mutate_InsertByte(Data, Size, MaxSize);
   else
-    return Mutate_InsertByte(Data, Size, MaxSize);
+    return 0;
 }
 
 size_t MutationDispatcher::Mutate_InsertRepeatedBytes(uint8_t *Data,
@@ -472,7 +472,7 @@ size_t MutationDispatcher::Mutate_InsertRepeatedBytesWithType(uint8_t *Data,
   if (type == fuzzer::HotPos::OPS)                                                      
     return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
   else
-    return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
+    return 0;
 }
 
 size_t MutationDispatcher::Mutate_ChangeByte(uint8_t *Data, size_t Size,

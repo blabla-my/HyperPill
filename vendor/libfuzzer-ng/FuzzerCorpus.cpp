@@ -38,8 +38,8 @@ size_t DMAData::serialize(void* dst, size_t max_len) const {
 }
 
 uint8_t* DMAData::ingest_data(size_t data_len, bool integer) {
-    auto seed = __rdtsc();
-    std::mt19937 gen(seed);
+    static auto seed = __rdtsc();
+    static std::mt19937 gen(seed);
     uint8_t* addr = this->dma_data + cursor;
     if (this->cursor + data_len <= this->len) {
         this->cursor += data_len;
@@ -58,8 +58,17 @@ uint8_t* DMAData::ingest_data(size_t data_len, bool integer) {
                 memcpy(p, &val, remaining_len);
             }
         } else {
-            for (size_t i = this->len; i < this->cursor + data_len; i++) {
-                this->dma_data[i] = rand() & 0xff;
+            auto remaining_len = this->cursor + data_len - this->len;
+            while (remaining_len >= sizeof(uint32_t)) {
+                uint32_t val = gen();
+                auto p = addr + data_len - remaining_len;
+                *(uint32_t*)p = val;
+                remaining_len -= sizeof(uint32_t);
+            }
+            if (remaining_len > 0) {
+                uint32_t val = gen();
+                auto p = addr + data_len - remaining_len;
+                memcpy(p, &val, remaining_len);
             }
         }
         this->len = this->cursor + data_len;
