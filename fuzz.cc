@@ -156,7 +156,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			/* fetch overlapped data */
 			if (overlapped_size)
 				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
-
+			
 			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 			memcpy(data, buf, len);
@@ -284,8 +284,17 @@ static uint16_t pio_region_size(uint16_t addr) {
 }
 
 bool inject_halt() {
+	bx_address phy;
+	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	if (phy > maxaddr || !res) {
+		printf("failed to write instruction to %lx (vaddr: %lx)\n",
+		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		return false;
+	}
 	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_HLT);
 	BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
+	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+	cpu_physical_memory_write(phy, "\xf4", 1);
 	return true;
 }
 
@@ -940,6 +949,13 @@ bool op_notify() {
 		printf("failed to inject notify at %lx (base %lx)!\n", addr, vdev->notify_cfg.address);
 		return false;
 	}
+	start_cpu();
+	return true;
+}
+
+bool op_trigger_aio() {
+	if (!inject_out(0x80, 0x1, 0x0))
+		return false;
 	start_cpu();
 	return true;
 }
