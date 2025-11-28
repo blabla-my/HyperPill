@@ -12,7 +12,7 @@
 namespace fuzzer {
 
 const static std::vector<uint32_t> intervals = {0, 0x20, 0x100, 0x120};
-const static std::vector<double> weights = {100, 5, 60, 5};
+const static std::vector<double> weights = {100, 5, 100, 5};
 static std::piecewise_constant_distribution<double> dmadata_integer_distribution(
     intervals.begin(), intervals.end(), weights.begin());
 
@@ -37,7 +37,7 @@ size_t DMAData::serialize(void* dst, size_t max_len) const {
     return serialized_len;
 }
 
-uint8_t* DMAData::ingest_data(size_t data_len, bool integer) {
+uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val) {
     static auto seed = __rdtsc();
     static std::mt19937 gen(seed);
     uint8_t* addr = this->dma_data + cursor;
@@ -45,31 +45,23 @@ uint8_t* DMAData::ingest_data(size_t data_len, bool integer) {
         this->cursor += data_len;
     } else if (this->cursor + data_len < DMA_DATA_MAX_LENGTH) {
         auto remaining_len = this->cursor + data_len - this->len;
-        if (integer) {
-            while(remaining_len >= sizeof(uint32_t)) {
-                auto val = (uint32_t)(dmadata_integer_distribution(gen));
-                auto p = addr + data_len - remaining_len;
-                *(uint32_t*)p = val;
-                remaining_len -= sizeof(uint32_t);
-            }
-            if (remaining_len > 0) {
-                auto val = (uint32_t)(dmadata_integer_distribution(gen));
-                auto p = addr + data_len - remaining_len;
-                memcpy(p, &val, remaining_len);
-            }
-        } else {
-            auto remaining_len = this->cursor + data_len - this->len;
-            while (remaining_len >= sizeof(uint32_t)) {
-                uint32_t val = gen();
-                auto p = addr + data_len - remaining_len;
-                *(uint32_t*)p = val;
-                remaining_len -= sizeof(uint32_t);
-            }
-            if (remaining_len > 0) {
-                uint32_t val = gen();
-                auto p = addr + data_len - remaining_len;
-                memcpy(p, &val, remaining_len);
-            }
+        if (switch_val && remaining_len >= sizeof(uint32_t)) {
+            /* if we meet possible switch field */
+            uint32_t switch_value = dmadata_integer_distribution(gen);
+            auto p = addr + data_len - remaining_len;
+            *(uint32_t*)p = switch_value;
+            remaining_len -= sizeof(uint32_t);
+        }
+        while (remaining_len >= sizeof(uint32_t)) {
+            uint32_t val = gen();
+            auto p = addr + data_len - remaining_len;
+            *(uint32_t*)p = val;
+            remaining_len -= sizeof(uint32_t);
+        }
+        if (remaining_len > 0) {
+            uint32_t val = gen();
+            auto p = addr + data_len - remaining_len;
+            memcpy(p, &val, remaining_len);
         }
         this->len = this->cursor + data_len;
         this->cursor += data_len;

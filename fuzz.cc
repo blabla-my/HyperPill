@@ -149,8 +149,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				return 0;
 
 			/* ingest random data */
-			// uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch);
-			uint8_t* buf = dma_data_get()->ingest_data(len);
+			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch);
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
