@@ -12,7 +12,7 @@
 namespace fuzzer {
 
 const static std::vector<uint32_t> intervals = {0, 0x20, 0x100, 0x120};
-const static std::vector<double> weights = {100, 5, 100, 5};
+const static std::vector<double> weights = {100, 20, 100, 50};
 static std::piecewise_constant_distribution<double> dmadata_integer_distribution(
     intervals.begin(), intervals.end(), weights.begin());
 
