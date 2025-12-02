@@ -161,7 +161,7 @@ std::string stacktrace_to_string(){
     return ss.str();
 }
 
-uint64_t pivot_hash(uint64_t hash){
+inline uint64_t pivot_hash(uint64_t hash){
     hash ^= hash >> 30;
     hash *= 0xbf58476d1ce4e5b9U;
     hash ^= hash >> 27;
