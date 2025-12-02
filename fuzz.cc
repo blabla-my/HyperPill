@@ -2,9 +2,10 @@
 #include "bochs.h"
 #include "config.h"
 #include "conveyor.h"
+#include "virtio.h"
+#include "cov.h"
 #include "vendor/libfuzzer-ng/FuzzerInternal.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
-#include "virtio.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -160,6 +161,9 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 			memcpy(data, buf, len);
 			get_vqueue_manager().add_seen_buffer(gpa, len);
+			update_virtio_req_counter(desc_with_info->desc_info.queue_id,
+									  desc_with_info->desc_info.desc_idx,
+									  is_out);
 			return 0;
 		} else { /* the DMA is not issued by fuzzer, do nothing */
 			return 0;

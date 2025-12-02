@@ -5,6 +5,7 @@
 #include "task.h"
 #include "time.h"
 #include "conveyor.h"
+#include "cov.h"
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -15,7 +16,6 @@
 #include <unistd.h> 
 #include <asm/ptrace.h>
 
-tsl::robin_map<bx_address, bool> ignore_edges;
 tsl::robin_set<bx_address> seen_edges;
 tsl::robin_map<bx_address, uint64_t> all_edges;
 tsl::robin_map<bx_address, uint64_t> edge_to_idx;
@@ -34,8 +34,33 @@ struct calltrace_t {
 std::vector<calltrace_t> our_stacktrace;
 tsl::robin_set<uint64_t> seen_stacktraces;
 
+#define EDGE_COUNTER_SIZE (32 << 12)
+#define VIRTIO_REQ_COUNTER_SIZE (256)
+#define TOTAL_COUNTER_SIZE (EDGE_COUNTER_SIZE + VIRTIO_REQ_COUNTER_SIZE)
+
 __attribute__((section(
-    "__libfuzzer_extra_counters"))) unsigned char libfuzzer_coverage[32 << 12];
+    "__libfuzzer_extra_counters"))) unsigned char libfuzzer_coverage[TOTAL_COUNTER_SIZE] = {0};
+
+/* forward declaration so functions below can call it before its definition */
+uint64_t edge_hash(uint64_t a, uint64_t b);
+uint64_t pivot_hash(uint64_t hash);
+
+uint64_t update_edge_counter(uint64_t prev_rip, uint64_t new_rip) {
+    uint64_t hash = edge_hash(prev_rip, new_rip);
+    libfuzzer_coverage[hash % EDGE_COUNTER_SIZE]++;
+    return hash;
+}
+
+void update_virtio_req_counter(size_t queue_id, size_t desc_idx, bool is_out) {
+    uint64_t hash = queue_id;
+    hash = pivot_hash(hash);
+    hash ^= desc_idx;
+    hash = pivot_hash(hash);
+    hash ^= (is_out ? 0x13ULL : 0x9eULL);
+    hash = pivot_hash(hash);
+    size_t idx = EDGE_COUNTER_SIZE + (hash % VIRTIO_REQ_COUNTER_SIZE);
+    libfuzzer_coverage[idx]++;
+}
 
 uint32_t status = 0;
 
@@ -52,13 +77,13 @@ bool ignore_pc(bx_address pc) {
     
     if (pc_ranges.size() == 0) // No ranges = fuzz everthing
         return false;
-        bool ignore = true;
-        for (auto &r : pc_ranges) {
-            if (pc >= r.first && pc <= r.first + r.second) {
-                ignore = false;
-                break;
-            }
+    bool ignore = true;
+    for (auto &r : pc_ranges) {
+        if (pc >= r.first && pc <= r.first + r.second) {
+            ignore = false;
+            break;
         }
+    }
     return ignore;
 }
 
@@ -145,6 +170,14 @@ uint64_t pivot_hash(uint64_t hash){
     return hash;
 }
 
+uint64_t edge_hash(uint64_t a, uint64_t b){
+    uint64_t hash = a;
+    hash = pivot_hash(hash);
+    hash ^= b;
+    hash = pivot_hash(hash);
+    return hash;
+}
+
 uint64_t stacktrace_hash_get() {
     uint64_t hash = 0;
     int cnt = 0;
@@ -196,11 +229,10 @@ void add_edge(bx_address prev_rip, bx_address new_rip) {
             fuzz_emu_stop_unhealthy();
         }
     }
-    libfuzzer_coverage[new_rip % sizeof(libfuzzer_coverage)]++;
+    uint64_t hash = update_edge_counter(prev_rip, new_rip);
 
 out:
     if (log_ops) {
-        bx_address hash = prev_rip ^ (new_rip >> 1);
         if (seen_edges.emplace(hash).second) {
             time(&t);
             auto s = addr_to_sym(new_rip);
