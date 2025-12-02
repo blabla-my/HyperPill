@@ -52,7 +52,6 @@ bool ignore_pc(bx_address pc) {
     
     if (pc_ranges.size() == 0) // No ranges = fuzz everthing
         return false;
-    if (ignore_edges.find(pc) == ignore_edges.end()) {
         bool ignore = true;
         for (auto &r : pc_ranges) {
             if (pc >= r.first && pc <= r.first + r.second) {
@@ -60,9 +59,7 @@ bool ignore_pc(bx_address pc) {
                 break;
             }
         }
-        ignore_edges[pc] = ignore;
-    }
-    return ignore_edges[pc];
+    return ignore;
 }
 
 bool task_filter(bool user_only) {
