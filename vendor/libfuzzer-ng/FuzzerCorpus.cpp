@@ -1,5 +1,7 @@
 #include "FuzzerCorpus.h"
+#include <cstdint>
 #include <random>
+#include <array>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -11,10 +13,37 @@
 
 namespace fuzzer {
 
-const static std::vector<uint32_t> intervals = {0, 0x20, 0x100, 0x120};
-const static std::vector<double> weights = {100, 20, 100, 50};
-static std::piecewise_constant_distribution<double> dmadata_integer_distribution(
-    intervals.begin(), intervals.end(), weights.begin());
+// Thread-local RNG for DMA data generation. Seed can be overridden via env `DMA_SEED` for reproducibility.
+static thread_local std::mt19937 dma_gen = []{
+    const char* s = getenv("DMA_SEED");
+    uint32_t seed = 0;
+    if (s) {
+        seed = (uint32_t)strtoul(s, NULL, 10);
+    } else {
+        std::random_device rd;
+        seed = rd();
+#if defined(__x86_64__) || defined(__i386__)
+        seed ^= (uint32_t)__rdtsc();
+#endif
+    }
+    return std::mt19937(seed);
+}();
+
+// Define small integer ranges and discrete weights for sampling.
+static const std::array<std::pair<uint32_t, uint32_t>, 4> dmadata_ranges = {{
+    std::make_pair<uint32_t,uint32_t>(0u, 0x1fu),        // [0, 31]
+    std::make_pair<uint32_t,uint32_t>(0x20u, 0xffu),     // [32, 255]
+    std::make_pair<uint32_t,uint32_t>(0x100u, 0x11fu),   // [256, 287]
+    std::make_pair<uint32_t,uint32_t>(0x120u, UINT32_MAX) // [0x120, UINT32_MAX]
+}};
+static std::discrete_distribution<int> dmadata_which({100, 20, 100, 10});
+
+// Generate a DMA integer according to the configured ranges and weights.
+static inline uint32_t generate_dmadata_integer() {
+    int idx = dmadata_which(dma_gen);
+    auto range = dmadata_ranges[idx];
+    return std::uniform_int_distribution<uint32_t>(range.first, range.second)(dma_gen);
+}
 
 size_t DMAData::deserialize(const uint8_t* data, size_t size) {
     len = *(uint32_t*)data;
@@ -38,8 +67,7 @@ size_t DMAData::serialize(void* dst, size_t max_len) const {
 }
 
 uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val, bool overwrite) {
-    static auto seed = std::random_device{}();
-    static std::mt19937 gen(seed);
+    // use the thread-local dma_gen defined above
     uint8_t* addr = this->dma_data + cursor;
     size_t remaining_len = 0; // some data may not be generated yet, remaining_len is the length of this data
     if (this->cursor + data_len <= this->len) {
@@ -47,18 +75,17 @@ uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val, bool overwrite) 
     } else if (this->cursor + data_len < DMA_DATA_MAX_LENGTH) {
         remaining_len = this->cursor + data_len - this->len;
         while (remaining_len >= sizeof(uint32_t)) {
-            uint32_t val = gen();
+            uint32_t val = dma_gen();
             auto p = addr + data_len - remaining_len;
             *(uint32_t*)p = val;
             remaining_len -= sizeof(uint32_t);
         }
         if (remaining_len > 0) {
-            uint32_t val = gen();
+            uint32_t val = dma_gen();
             auto p = addr + data_len - remaining_len;
             memcpy(p, &val, remaining_len);
         }
-        /* restore remaining_len */
-        remaining_len = this->cursor + data_len - this->len;
+        /* remaining_len already used; update len and cursor */
         this->len = this->cursor + data_len;
         this->cursor += data_len;
     } else {
@@ -68,8 +95,9 @@ uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val, bool overwrite) 
         /* if we meet possible switch field */
         auto original_value = *(uint32_t*)addr;
         if (original_value > 0xffff) {
-            uint32_t new_value = dmadata_integer_distribution(gen);
+            uint32_t new_value = generate_dmadata_integer();
             *(uint32_t*)addr = new_value;
+            Printf("Switch DMA data value from %x to %x\n", original_value, new_value);
         }
     }
     return addr;
