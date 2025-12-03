@@ -37,21 +37,15 @@ size_t DMAData::serialize(void* dst, size_t max_len) const {
     return serialized_len;
 }
 
-uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val) {
-    static auto seed = __rdtsc();
+uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val, bool overwrite) {
+    static auto seed = std::random_device{}();
     static std::mt19937 gen(seed);
     uint8_t* addr = this->dma_data + cursor;
+    size_t remaining_len = 0; // some data may not be generated yet, remaining_len is the length of this data
     if (this->cursor + data_len <= this->len) {
         this->cursor += data_len;
     } else if (this->cursor + data_len < DMA_DATA_MAX_LENGTH) {
-        auto remaining_len = this->cursor + data_len - this->len;
-        if (switch_val && remaining_len >= sizeof(uint32_t)) {
-            /* if we meet possible switch field */
-            uint32_t switch_value = dmadata_integer_distribution(gen);
-            auto p = addr + data_len - remaining_len;
-            *(uint32_t*)p = switch_value;
-            remaining_len -= sizeof(uint32_t);
-        }
+        remaining_len = this->cursor + data_len - this->len;
         while (remaining_len >= sizeof(uint32_t)) {
             uint32_t val = gen();
             auto p = addr + data_len - remaining_len;
@@ -63,10 +57,20 @@ uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val) {
             auto p = addr + data_len - remaining_len;
             memcpy(p, &val, remaining_len);
         }
+        /* restore remaining_len */
+        remaining_len = this->cursor + data_len - this->len;
         this->len = this->cursor + data_len;
         this->cursor += data_len;
     } else {
         return nullptr;
+    }
+    if (overwrite && switch_val && data_len >= sizeof(uint32_t)) {
+        /* if we meet possible switch field */
+        auto original_value = *(uint32_t*)addr;
+        if (original_value > 0xffff) {
+            uint32_t new_value = dmadata_integer_distribution(gen);
+            *(uint32_t*)addr = new_value;
+        }
     }
     return addr;
 }

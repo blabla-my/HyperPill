@@ -76,6 +76,7 @@ static void *pattern_alloc(pattern p, size_t len) {
 	1: not a vring element, should be considered as normal memory read
 */
 static int ingest_vring(bx_address addr, size_t len, void* data) {
+	static void* replay = getenv("REPLAY");
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
@@ -139,6 +140,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		/* get the corresponding desc */
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
+			static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
 			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
 			assert(overlapped_size <= len);
 			
@@ -150,11 +152,12 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				return 0;
 
 			/* ingest random data */
-			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch);
+			bool overwrite = (replay == NULL);
+			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
-			if (overlapped_size)
+			if (no_double_fetch && overlapped_size)
 				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
 			
 			/* adjust addr = addr + len - remaining_len to avoid duplicated region */

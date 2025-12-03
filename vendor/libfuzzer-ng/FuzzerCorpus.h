@@ -70,7 +70,7 @@ struct DMAData {
     const size_t get_size() const {return sizeof(len) + len; }
     size_t deserialize(const uint8_t* data, size_t size);
     size_t serialize(void* dst, size_t max_len) const;
-    uint8_t* ingest_data(size_t data_len, bool integer = false);
+    uint8_t* ingest_data(size_t data_len, bool integer = false, bool overwrite = true);
 
     DMAData();
 } __attribute__((packed));
