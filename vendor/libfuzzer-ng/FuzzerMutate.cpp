@@ -472,7 +472,7 @@ size_t MutationDispatcher::Mutate_InsertRepeatedBytesWithType(uint8_t *Data,
   if (type == fuzzer::HotPos::OPS)                                                      
     return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
   else
-    return 0;
+    return Mutate_InsertRepeatedBytes(Data, Size, MaxSize);
 }
 
 size_t MutationDispatcher::Mutate_ChangeByte(uint8_t *Data, size_t Size,
@@ -540,7 +540,12 @@ size_t MutationDispatcher::Mutate_ReplaceHotspotHintWithType(uint8_t *Data, size
     if(h.pos + h.size > Size || h.hint == 0)
         return 0;
     //if(h.size > 4)
-    // Printf("Replacing %lx at %lx\n", h.size, h.pos);
+    if (type == fuzzer::HotPos::DMA){
+      Printf("Replacing %lx at %lx: ", h.size, h.pos);
+      for (size_t j = 0; j < h.size; j++) {
+          Printf("%02x\n", ((uint8_t*)&h.hint)[j]);
+      }
+    }
     // Printf("Replace Hotspot with type %d\n", type);
     memcpy(Data + h.pos, &h.hint, h.size);
     return Size;
