@@ -1029,18 +1029,30 @@ LLVMFuzzerMutateParadox(uint8_t *Data, size_t Size, size_t MaxSize, int type) {
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL                   
 void __fuzzer_set_output(uint8_t *data, size_t size) {      
+    if (!fuzzer::F) {
+        printf("ERROR: __fuzzer_set_output called before Fuzzer is initialized\n");
+        assert(false);
+    }
     fuzzer::F->OverwriteUnitData(data, size);
 }
 
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL                   
 void __fuzzer_set_syscall_log(void *log) {      
+    if (!fuzzer::F) {
+        printf("ERROR: __fuzzer_set_output called before Fuzzer is initialized\n");
+        assert(false);
+    }
     fuzzer::F->SetSyscallLog((struct fuzzer::syscall_log*)log);
 }
 
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL                   
 void __fuzzer_set_op_log(void *log) {      
+    if (!fuzzer::F) {
+        printf("ERROR: __fuzzer_set_output called before Fuzzer is initialized\n");
+        assert(false);
+    }
     fuzzer::F->SetOpLog((struct fuzzer::op_log*)log);
 }
 
