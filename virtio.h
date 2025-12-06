@@ -169,6 +169,7 @@ struct VRing {
         VRING_USED_ALIGN = 4,
         VRING_DESC_ALIGN = 16
     } align;
+    mutable uint16_t last_generated_idx = UINT16_MAX;
     VRing() {}
     VRing(size_t size, bx_address addr_gpa, VQueue* vqueue);
     bx_address start() const {return addr_gpa;}
@@ -212,6 +213,7 @@ struct AvailRing: VRing {
     AvailRing(size_t size, bx_address addr_gpa, VQueue* queue): VRing(size, addr_gpa, queue) {
         type = VRING_AVAIL;
         align = VRING_AVAIL_ALIGN;
+        last_generated_idx = UINT16_MAX;
     }
     bx_address end() const override {
         return addr_gpa + 3*sizeof(uint16_t) + size*sizeof(vring_avail_elem);

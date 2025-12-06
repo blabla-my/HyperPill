@@ -39,7 +39,12 @@ int AvailRing::ingest_idx(uint16_t *idx) const {
 	if (!addr_hpa) return -2;
 	uint16_t last_idx;
 	BX_CPU(x)->access_read_physical(addr_hpa + sizeof(uint16_t), sizeof(last_idx), &last_idx);
-	*idx = last_idx + 1;
+	if (last_generated_idx == UINT16_MAX) {
+		*idx = last_idx + 3;
+		last_generated_idx = *idx;
+	} else {
+		*idx = last_idx;
+	} 	
 	DBG_PRINT {
 		printf("!virtio: inject vring %s index %.2x, last %.2x\n", type_str(), *idx, last_idx);
 	}
@@ -208,6 +213,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 /* VQueue */
 void VQueue::reset(){
 	desc_chain_fsm.reset();	
+	avail_ring->last_generated_idx = UINT16_MAX;
 	polling_count = 0;
 }
 
@@ -803,10 +809,12 @@ void DescChainFSM::init(unsigned max_len) {
 	/* ingest random number as the length of chaining desc */	
 	max_len = max_len < DESC_CHAIN_MAX_LEN? max_len : DESC_CHAIN_MAX_LEN;
 	if (state == DescChainFSM::State::WAIT){
-		if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, max_len) < 0){
+		auto out_max_len = max_len < 1 ? 1 : max_len;
+		if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, out_max_len) < 0){
 			sg_num_out = 1;
 		}
-		if (ic_ingest_uint(&sg_num_in, sizeof(sg_num_in), 1, max_len) < 0){
+		auto in_max_len = max_len - sg_num_out < 1 ? 1 : max_len - sg_num_out;
+		if (ic_ingest_uint(&sg_num_in, sizeof(sg_num_in), 1, in_max_len) < 0){
 			sg_num_in = 1;
 		}
 		sg_num_out_remain = sg_num_out;
