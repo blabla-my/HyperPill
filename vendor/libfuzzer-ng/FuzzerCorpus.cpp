@@ -97,7 +97,6 @@ uint8_t* DMAData::ingest_data(size_t data_len, bool switch_val, bool overwrite) 
         if (original_value > 0xffff) {
             uint32_t new_value = generate_dmadata_integer();
             *(uint32_t*)addr = new_value;
-            Printf("Switch DMA data value from %x to %x\n", original_value, new_value);
         }
     }
     return addr;
