@@ -193,6 +193,7 @@ struct VRing {
     virtual int ingest_elem(void*, int index=-1) const {return 0;};
     virtual const char* type_str() const {return "base";};
     virtual void write_elem(int index, void* elem) const;
+    virtual void read_elem(int index, void* elem) const;
 
     enum FILED_TYPE {
         FLAGS, 
@@ -257,13 +258,25 @@ struct DescRing: VRing {
     const char* type_str() const override {return "desc";}
 };
 
+struct RequestStatus {
+    enum Status {
+        SUBMITTED,
+        COMPLETED
+    } status;
+    uint16_t head; // request head desc index
+    RequestStatus(): status(SUBMITTED), head(0) {}
+};
 struct VQueue {
     VQueue(): desc_ring(NULL), avail_ring(NULL), used_ring(NULL), idx(0),
-        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs(), vdev(nullptr), queue_sel(0), polling_count(0) {}
+        num(0), last_avail_idx(0), last_used_idx(0), desc_chain_fsm(), generated_descs(), 
+        vdev(nullptr), queue_sel(0), polling_count(0), request_cnt(0) {}
     void reset();
     void add_desc(vring_desc *desc);
     const vring_desc* get_belonging_desc(unsigned long addr, size_t size);
     bool inited();
+    void submit_request(uint16_t head);
+    void complete_request(uint16_t head);
+    bool all_request_completed();
     DescRing* desc_ring;  // Descriptor ring
     AvailRing* avail_ring; // Available ring
     UsedRing* used_ring;  // Used ring
@@ -276,6 +289,9 @@ struct VQueue {
     struct VirtioDev* vdev;
     uint16_t queue_sel;
     uint16_t polling_count;
+#define MAX_REQUEST_NUMBER 3
+    mutable RequestStatus request_status[MAX_REQUEST_NUMBER];
+    mutable size_t request_cnt = 0;
 };
 
 struct ConfigSpace {

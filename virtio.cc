@@ -33,6 +33,12 @@ void VRing::write_elem(int index, void* elem) const {
 	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
 }
 
+void VRing::read_elem(int index, void* elem) const {
+	if (!addr_hpa) return;
+	if (index >= size) return;
+	BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
+}
+
 /* AvailRing */
 int AvailRing::ingest_idx(uint16_t *idx) const {
 	// read last index
@@ -40,11 +46,14 @@ int AvailRing::ingest_idx(uint16_t *idx) const {
 	uint16_t last_idx;
 	BX_CPU(x)->access_read_physical(addr_hpa + sizeof(uint16_t), sizeof(last_idx), &last_idx);
 	if (last_generated_idx == UINT16_MAX) {
-		*idx = last_idx + 3;
+		*idx = last_idx + MAX_REQUEST_NUMBER;
 		last_generated_idx = *idx;
 	} else {
 		*idx = last_idx;
 	} 	
+	if (queue->all_request_completed()) {
+		return -2;
+	}
 	DBG_PRINT {
 		printf("!virtio: inject vring %s index %.2x, last %.2x\n", type_str(), *idx, last_idx);
 	}
@@ -59,6 +68,8 @@ int AvailRing::ingest_elem(void* opaque, int index) const {
 	/* every time the avail ring is touched, reset desc chain fsm */
 	queue->desc_chain_fsm.reset();
 	queue->desc_chain_fsm.init(size);
+	queue->submit_request(*avail_elem_ptr);
+	
 	DBG_PRINT {
 		printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
 		for (int i = 0; i < element_size(); i++){
@@ -215,6 +226,8 @@ void VQueue::reset(){
 	desc_chain_fsm.reset();	
 	avail_ring->last_generated_idx = UINT16_MAX;
 	polling_count = 0;
+	request_cnt = 0;
+	memset(request_status, 0, sizeof(request_status));
 }
 
 void VQueue::add_desc(vring_desc *desc) {
@@ -224,6 +237,44 @@ void VQueue::add_desc(vring_desc *desc) {
 
 bool VQueue::inited() {
 	return desc_ring->start() != 0;
+}
+
+void VQueue::submit_request(uint16_t head) {
+	if (request_cnt < MAX_REQUEST_NUMBER) {
+		auto req_status = &request_status[request_cnt];
+		request_cnt++;
+		req_status->status = RequestStatus::SUBMITTED;
+		req_status->head = head;
+		DBG_PRINT {
+			printf("added request head %x\n", head);
+		}
+	}
+}
+
+void VQueue::complete_request(uint16_t head) {
+	for (size_t i = 0; i < request_cnt; i++) {
+		auto req_status = &request_status[i];
+		if (req_status->head == head && req_status->status == RequestStatus::SUBMITTED) {
+			req_status->status = RequestStatus::COMPLETED;
+			DBG_PRINT {
+				printf("finshed request head %x\n", head);
+			}
+			return;
+		}
+	}
+}
+
+bool VQueue::all_request_completed() {
+	if (request_cnt < MAX_REQUEST_NUMBER) {
+		return false;
+	}
+	for (size_t i = 0; i < request_cnt; i++) {
+		auto req_status = &request_status[i];
+		if (req_status->status == RequestStatus::SUBMITTED) {
+			return false;
+		}
+	}
+	return true;
 }
 
 const vring_desc* VQueue::get_belonging_desc(unsigned long addr, size_t size) {
