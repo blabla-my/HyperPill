@@ -205,7 +205,7 @@ void reset_bx_vm() {
 
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
 	if (vector == 3) {
-        fuzz_emu_stop_crash("debug interrupt");
+        fuzz_emu_stop_crash("debug-interrupt");
 	}
 }
 
