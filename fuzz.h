@@ -232,10 +232,14 @@ void set_pci_device(uint8_t dev, uint8_t function);
 void add_pio_region(uint16_t addr, uint16_t size);
 void add_mmio_region(uint64_t addr, uint64_t size);
 void add_mmio_range_alt(uint64_t addr, uint64_t end);
+void add_ram_region(uint64_t addr, uint64_t size);
 void add_ept_misconfig_range(bx_address start, bx_address end);
 void add_ept_violation_range(bx_address start, bx_address end);
 
+uint64_t get_guest_ram_start();
+uint64_t get_guest_ram_size();
 
+void load_ram_regions_from_iomem(const char* path);
 
 void open_db(const char* path);
 void insert_mmio(uint64_t addr, uint64_t len);

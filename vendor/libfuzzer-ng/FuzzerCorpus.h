@@ -82,8 +82,8 @@ struct DescPool {
     const size_t get_size() const;
     const vring_desc_with_info* get_item(size_t idx) const;
     bool add(const vring_desc_with_info* desc_with_info);
-    vring_desc_with_info* new_desc();
-    const vring_desc_with_info* ingest_desc(const DescInfo* desc_info);
+    vring_desc_with_info* new_desc(uint64_t guest_ram_start, uint64_t guest_ram_size);
+    const vring_desc_with_info* ingest_desc(const DescInfo* desc_info, uint64_t guest_ram_start, uint64_t guest_ram_size);
     size_t deserialize(const uint8_t* data, size_t size);
     size_t serialize(void* dst, size_t max_len) const;
 

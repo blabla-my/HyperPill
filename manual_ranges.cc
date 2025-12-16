@@ -71,3 +71,23 @@ void load_manual_ranges(char* range_file, char* range_regex, std::map<uint16_t, 
     }
     get_vqueue_manager().group_vrings_by_page();
 }
+
+void load_ram_regions_from_iomem(const char* iomem_path) {
+	if (iomem_path) {
+		std::ifstream iomem_file(iomem_path);
+        std::string line;
+        while (std::getline(iomem_file, line))
+        {
+            if (line.find("RAM") == std::string::npos) {
+                continue;
+            }
+            std::istringstream iss(line);
+            uint64_t start, end;
+            char c;
+            if (!(iss >> std::hex  >> start >> c >>  std::hex >> end)) { continue; } 
+            if (c != '-') continue;;
+            add_ram_region(start, end-start);
+            printf("Found RAM region from iomem: %lx - %lx\n", start, end);
+        }
+    }
+}

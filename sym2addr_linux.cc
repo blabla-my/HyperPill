@@ -24,7 +24,8 @@ static std::map<sym_info_t, unsigned long> sym2addr;
 unsigned long sym_to_addr(std::string bin, std::string name, int pid) {
     sym_info_t key {0, pid, bin, name};
     for (const auto & b : bins) {
-        if (b.find(bin) != std::string::npos) {
+        std::string filename = std::filesystem::path(b).filename().string();
+        if (filename.find(bin) != std::string::npos) {
             key.bin = b;
             break;
         }
@@ -37,7 +38,8 @@ unsigned long sym_to_addr(std::string bin, std::string name, int pid) {
 
 const char* get_bin_full_path(std::string bin) {
     for (const auto & b : bins) {
-        if (b.find(bin) != std::string::npos) {
+        std::string filename = std::filesystem::path(b).filename().string();
+        if (filename.find(bin) != std::string::npos) {
             return b.c_str();
         }
     }

@@ -33,6 +33,7 @@ bool log_ops;
 
 std::map<bx_address, uint32_t> mmio_regions;
 std::map<uint16_t, uint16_t> pio_regions;
+std::vector<std::pair<uint64_t, uint64_t>> ram_regions;
 
 static tsl::robin_map<bx_address, size_t> seen_dma;
 uint16_t dma_start = 0;
@@ -1054,6 +1055,9 @@ void add_mmio_region(uint64_t addr, uint64_t size) {
 void add_mmio_range_alt(uint64_t addr, uint64_t end) {
 	add_mmio_region(addr, end - addr);
 }
+void add_ram_region(uint64_t addr, uint64_t size) {
+	ram_regions.push_back({addr, size});
+}
 void init_regions(const char *path) {
 	open_db(path);
 	if (getenv("FUZZ_ENUM")) {
@@ -1065,7 +1069,18 @@ void init_regions(const char *path) {
 		load_manual_ranges(getenv("MANUAL_RANGES"),
 				   getenv("RANGE_REGEX"), pio_regions,
 				   mmio_regions);
+		load_ram_regions_from_iomem(getenv("IOMEM"));
 	} else {
 		load_regions(pio_regions, mmio_regions);
 	}
+}
+
+uint64_t get_guest_ram_start() {
+	auto last_region = ram_regions.rbegin();
+	return last_region->first;
+}
+
+uint64_t get_guest_ram_size() {
+	auto last_region = ram_regions.rbegin();
+	return last_region->second;
 }

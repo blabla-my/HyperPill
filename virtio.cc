@@ -195,8 +195,7 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 			.desc_idx = desc_seq,
 			.is_out = is_out
 		};
-		
-		const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
+		const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
 		if (!desc_with_info) { 
 			return -2;
 		}
