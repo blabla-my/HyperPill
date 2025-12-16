@@ -550,6 +550,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	/* iterate task list to find hypervisor-related tasks */
 	bx_address init_task = sym_to_addr("vmlinux", "init_task");
 	iterate_tasks(init_task);
+	iterate_gcov_info_chain(sym_to_addr("vmlinux", "gcov_info_head"));
 
 
 	/* Init a signal handler for SIGUSR1 */

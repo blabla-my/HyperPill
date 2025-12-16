@@ -3,6 +3,7 @@
 #include "sourcecov.h"
 
 #include "task.h"
+#include "gcov.h"
 #include <stdio.h>
 #include <sys/uio.h>
 #include <fcntl.h>
@@ -364,5 +365,30 @@ void setup_periodic_coverage(){
             icount_limit = icount_limit_floor + ((icount_limit-icount_limit_floor)/(max))*(val-1);
             printf("SET ICOUNT LIMIT: %lu\n", icount_limit);
         }
+    }
+}
+
+KernelSourceCov::KernelSourceCov(const std::string& source_file, const uint64_t gcov_info_head_addr, bool reserve_init_cov)
+    : SourceCov("vmlinux", reserve_init_cov) { 
+    this->source_file = source_file;
+    this->gcov_info_head_addr = gcov_info_head_addr;
+    // iterate the gcov_info_head to get the gcov_info_addr
+}
+
+void KernelSourceCov::write_source_cov() const {
+    return;
+}
+
+void iterate_gcov_info_chain(uint64_t gcov_info_head_addr) {
+    bx_address cur_info_ptr;
+    bx_kernel_deref_ptr(gcov_info_head_addr, cur_info_ptr);
+    struct gcov_info cur_info;
+    char filename[0x40];
+    while (cur_info_ptr) {
+        bx_kernel_deref_ptr(cur_info_ptr, cur_info);
+        bx_kernel_copy_buffer((bx_address)cur_info.filename, filename, sizeof(filename));
+        printf("gcov_info: version: %u, next: %p\n, filename: %s\n",
+               cur_info.version, cur_info.next, filename);
+        cur_info_ptr = (bx_address)cur_info.next;
     }
 }

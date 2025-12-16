@@ -61,6 +61,8 @@ OBJS       = main.o \
              task.o \
              virtio.o \
 			 mutate.o \
+             gcov.o \
+             gcov_base.o \
              bochsapi/logfunctions.o \
              devices.o \
              bochsapi/system.o \

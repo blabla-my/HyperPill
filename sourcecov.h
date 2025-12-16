@@ -5,12 +5,13 @@
 #include <stdint.h>
 #include <string>
 #include <set>
+
 class SourceCov {
 public:
     SourceCov(const std::string& binary, bool reserve_init_cov = false);
-    void write_source_cov() const;
-    bool inited() const {return __inited;}
-    const std::string get_bin() const {return bin;}
+    virtual void write_source_cov() const;
+    virtual bool inited() const {return __inited;}
+    virtual const std::string get_bin() const {return bin;}
     
 private:
     bool __inited;
@@ -26,6 +27,18 @@ private:
     /* as a result, we need to switch to the process of target binary, then read/write */
     /* this is done by switching CR3 value */
     int access_read_linear(bx_address laddr, unsigned len, unsigned curr_pl, unsigned xlate_rw, Bit32u ac_mask, void *data) const;
+};
+
+void iterate_gcov_info_chain(uint64_t gcov_info_head_addr);
+
+class KernelSourceCov : public SourceCov {
+public:
+    KernelSourceCov(const std::string& source_file, const uint64_t gcov_info_head_addr, bool reserve_init_cov = false);
+    virtual void write_source_cov() const override;
+private:
+    std::string source_file;
+    uint64_t gcov_info_head_addr;
+    uint64_t gcov_info_addr;
 };
 
 void add_to_source_cov_set(const SourceCov*);
