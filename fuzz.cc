@@ -1076,11 +1076,15 @@ void init_regions(const char *path) {
 }
 
 uint64_t get_guest_ram_start() {
+	if (ram_regions.size() == 0)
+		return GUEST_MEM_START;
 	auto last_region = ram_regions.rbegin();
 	return last_region->first;
 }
 
 uint64_t get_guest_ram_size() {
+	if (ram_regions.size() == 0)
+		return GUEST_MEM_SIZE;
 	auto last_region = ram_regions.rbegin();
 	return last_region->second;
 }

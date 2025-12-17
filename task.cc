@@ -159,7 +159,6 @@ Task* TaskManager::get_current_task(){
     if (BX_CPU(id)->get_cpl() == 0){
         bx_address current_task_bx_addr = get_current_task_bx_addr();
         if (!current_task_bx_addr) return NULL;
-        printf("current_task address: %lx\n", current_task_bx_addr);
         Task* current_task_fuzz = get_task(current_task_bx_addr);
         if (!current_task_fuzz) {
             return add_task(current_task_bx_addr);
@@ -194,8 +193,10 @@ Task* TaskManager::add_task(bx_address task_addr){
                 user_task_map[index] = new_task;
                 printf("add_task: index task %s by %lx, flags %x\n", new_task->comm, index, new_task->flags);
             }
-        } else if (strstr(new_task->comm, "CPU 0/KVM") != NULL) {
+        } 
+        if (strstr(new_task->comm, "/KVM") != NULL) {
             new_task->CPU_KVM = true;
+            new_task->kernel_task = 1;
         }
         for (auto sig : hypervisor_task_signatures) {
             if (strstr(new_task->comm, sig.c_str()) != NULL) {

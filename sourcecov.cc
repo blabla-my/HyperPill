@@ -378,6 +378,12 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
     this->ginfo.filename = NULL;
     this->ginfo_filename[sizeof(this->ginfo_filename)-1] = 0;
 
+    if (!gcov_info_head_addr) {
+        printf("gcov_info_head_addr is 0\n");
+        this->__inited = false;
+        return;
+    }
+
     // iterate the gcov_info_head to get the gcov_info_addr
     bx_address cur_info_ptr;
     bx_kernel_deref_ptr(gcov_info_head_addr, cur_info_ptr);
