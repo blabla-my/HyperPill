@@ -7,6 +7,7 @@
 #include "fuzz.h"
 #include "task.h"
 #include <bits/types/struct_iovec.h>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include "conveyor.h"
@@ -527,10 +528,18 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 		return;
 	}
 	queue_num = common_cfg.get_queue_num();
-	size_t old_queue_sel = common_cfg.get_queue_sel();
 	if (queue_num > VIRTIO_QUEUE_MAX) {
-		printf("Warning: Queue number %lx exceeds maximum %u, clamping to max.\n", queue_num, VIRTIO_QUEUE_MAX);
-		queue_num = 1;
+		// a workaround, if we write to config space than read, it will be normal
+		common_cfg.set_queue_sel(0);
+		// queue_num = 1;
+		queue_num = common_cfg.get_queue_num();
+		assert (queue_num <= VIRTIO_QUEUE_MAX);
+	}
+	size_t old_queue_sel = common_cfg.get_queue_sel();
+	if (old_queue_sel > VIRTIO_QUEUE_MAX) {
+		common_cfg.set_queue_sel(0);
+		old_queue_sel = common_cfg.get_queue_sel();
+		assert(old_queue_sel <= VIRTIO_QUEUE_MAX);
 	}
 	printf("VirtioDev %s: Found %lx queues in common config space, currently at %lx.\n", name, queue_num, old_queue_sel);
 
