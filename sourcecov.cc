@@ -1,9 +1,12 @@
 #include "bochs.h"
+#include "config.h"
 #include "fuzz.h"
 #include "sourcecov.h"
 
 #include "task.h"
 #include "gcov.h"
+#include <cassert>
+#include <cstddef>
 #include <stdio.h>
 #include <sys/uio.h>
 #include <fcntl.h>
@@ -68,7 +71,7 @@ static uint64_t get_addr_of_symbol(const char* symbolname)
     return 0;
 }
 
-int SourceCov::access_read_linear(bx_address laddr, unsigned len, unsigned curr_pl, unsigned xlate_rw, Bit32u ac_mask, void *data) const {
+int UserSourceCov::access_read_linear(bx_address laddr, unsigned len, unsigned curr_pl, unsigned xlate_rw, Bit32u ac_mask, void *data) const {
     auto old_cr3 = BX_CPU(0)->cr3;
     BX_CPU(0)->cr3 = cr3;
     int rc = BX_CPU(0)->access_read_linear(laddr, len, curr_pl, xlate_rw, ac_mask, data);
@@ -76,7 +79,7 @@ int SourceCov::access_read_linear(bx_address laddr, unsigned len, unsigned curr_
     return rc;
 }
 
-void SourceCov::write_source_cov() const {
+void UserSourceCov::write_source_cov() const {
     // Write Header
 	size_t len;
 	size_t offset = 0;
@@ -243,8 +246,7 @@ static void sig_handler(int signum) {
     }
 }
 
-SourceCov::SourceCov(const std::string& binary, bool reserve_init_cov) {
-    __inited = false;
+UserSourceCov::UserSourceCov(const std::string& binary, bool reserve_init_cov): SourceCov(reserve_init_cov) {
     bin = std::string("");
     pdstart = pdstop = pdsize = 0;
     pcstart = pcstop = pcsize = 0;
@@ -329,7 +331,7 @@ void add_to_source_cov_set(const SourceCov* source_cov) {
     if (source_cov->inited()) {
         source_cov_set.insert(source_cov);
     } else {
-        printf("failed to add %s to source_cov_set, inited = %d\n", source_cov->get_bin().c_str(), source_cov->inited());
+        printf("failed to add %s to source_cov_set, inited = %d\n", source_cov->get_name().c_str(), source_cov->inited());
     }
 }
 
@@ -368,15 +370,131 @@ void setup_periodic_coverage(){
     }
 }
 
-KernelSourceCov::KernelSourceCov(const std::string& source_file, const uint64_t gcov_info_head_addr, bool reserve_init_cov)
-    : SourceCov("vmlinux", reserve_init_cov) { 
+KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::string& source_file, const uint64_t gcov_info_head_addr, bool reserve_init_cov)
+    : SourceCov(reserve_init_cov) { 
+    this->module_name = module_name;
     this->source_file = source_file;
     this->gcov_info_head_addr = gcov_info_head_addr;
+    this->ginfo.filename = NULL;
+    this->ginfo_filename[sizeof(this->ginfo_filename)-1] = 0;
+
     // iterate the gcov_info_head to get the gcov_info_addr
+    bx_address cur_info_ptr;
+    bx_kernel_deref_ptr(gcov_info_head_addr, cur_info_ptr);
+    struct gcov_info cur_info;
+    char filename[0x40];
+    while (cur_info_ptr) {
+        bx_kernel_deref_ptr(cur_info_ptr, cur_info);
+        bx_kernel_read((bx_address)cur_info.filename, filename, sizeof(filename));
+        if (strstr(filename, source_file.c_str())) {
+            ginfo = cur_info;
+            assert(strlen(filename) < sizeof(ginfo_filename));
+            strncpy(ginfo_filename, filename, sizeof(ginfo_filename) - 1);
+            ginfo.filename = ginfo_filename;
+            break;
+        } else {
+            cur_info_ptr = (bx_address)cur_info.next;
+        }
+    }
+    if (!ginfo.filename) {
+        printf("failed to find gcov_info for %s\n", source_file.c_str());
+        this->__inited = false;
+        return;
+    }
+    active_ctrs = 0;
+    for (int i = 0; i < GCOV_COUNTERS; i++) {
+        if (ginfo.merge[i]) {
+            active_ctrs ++;
+        }
+    }
+    bx_address functions = (bx_address)ginfo.functions;
+    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    printf("init kernel gcov info for %s, active_ctrs: %lx, fn_info_size: %lx\n", source_file.c_str(), active_ctrs, fn_info_size);
+    ginfo.functions = (struct gcov_fn_info**)malloc(ginfo.n_functions * fn_info_size);
+    if (!ginfo.functions) {
+        perror("malloc gcov_info functions failed");
+        exit(1);
+    }
+    add_addr_map(ginfo.functions, functions);
+    for (int i = 0; i < ginfo.n_functions; i++) {
+        bx_address bx_fn_info_p;
+        bx_kernel_deref_ptr(functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
+        struct gcov_fn_info* fn_info_p = (struct gcov_fn_info*)malloc(fn_info_size);
+        if (!fn_info_p) {
+            perror("malloc gcov_fn_info failed");
+            exit(1);
+        }
+        add_addr_map(fn_info_p, bx_fn_info_p);
+        bx_kernel_read(bx_fn_info_p, fn_info_p, fn_info_size);
+        ginfo.functions[i] = fn_info_p;
+        for (int j = 0; j < active_ctrs; j++) {
+            bx_address values = (bx_address)fn_info_p->ctrs[j].values;
+            fn_info_p->ctrs[j].values = (gcov_type*)malloc(sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+            if (!fn_info_p->ctrs[j].values) {
+                perror("malloc gcov_type ctr values failed");
+                exit(1);
+            }
+            add_addr_map(fn_info_p->ctrs[j].values, values);
+            bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+        }
+    }
+    gcda_size = convert_to_gcda(NULL, &ginfo);
+    printf("gcda_size: %lx\n", gcda_size);
+    gcda_data = (uint8_t*)malloc(gcda_size);
+    if (!gcda_data) {
+        perror("malloc gcda_data failed");
+        exit(1);
+    }
+    /* reset cov to zero */
+    gcov_info_reset(&ginfo);
+    write_back_gcov_info();
+    __inited = true;
+}
+
+void KernelSourceCov::fetch_latest_gcov_info() const {
+    bx_address functions = get_bx_addr(ginfo.functions);
+    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    for (int i = 0; i < ginfo.n_functions; i++) {
+        bx_address bx_fn_info_p;
+        struct gcov_fn_info* fn_info_p = ginfo.functions[i];
+        bx_kernel_deref_ptr(functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
+        // only copy header first
+        bx_kernel_read(bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
+        // copy ctr values
+        for (int j = 0; j < active_ctrs; j++) {
+            bx_address values = get_bx_addr(fn_info_p->ctrs[j].values);
+            bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+        }
+    }
+}
+
+void KernelSourceCov::write_back_gcov_info() const {
+    bx_address functions = get_bx_addr(ginfo.functions);
+    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    for (int i = 0; i < ginfo.n_functions; i++) {
+        bx_address bx_fn_info_p;
+        struct gcov_fn_info* fn_info_p = ginfo.functions[i];
+        bx_kernel_deref_ptr(functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
+        // only copy header first
+        bx_kernel_write(bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
+        // copy ctr values
+        for (int j = 0; j < active_ctrs; j++) {
+            bx_address values = get_bx_addr(fn_info_p->ctrs[j].values);
+            bx_kernel_write(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+        }
+    }
 }
 
 void KernelSourceCov::write_source_cov() const {
-    return;
+    static unsigned dump_count = 0;
+    char filename[100];
+    sprintf(filename, "%s-%d-%ld.gcda", module_name.c_str(), getpid(), time(NULL));
+    int fd = open(filename, O_CREAT|O_RDWR, 0666);
+    fetch_latest_gcov_info();
+    convert_to_gcda((char*)gcda_data, (struct gcov_info*)&ginfo);
+    write(fd, gcda_data, gcda_size);
+    close(fd);
+    dump_count ++;
 }
 
 void iterate_gcov_info_chain(uint64_t gcov_info_head_addr) {
@@ -386,9 +504,9 @@ void iterate_gcov_info_chain(uint64_t gcov_info_head_addr) {
     char filename[0x40];
     while (cur_info_ptr) {
         bx_kernel_deref_ptr(cur_info_ptr, cur_info);
-        bx_kernel_copy_buffer((bx_address)cur_info.filename, filename, sizeof(filename));
-        printf("gcov_info: version: %u, next: %p\n, filename: %s\n",
-               cur_info.version, cur_info.next, filename);
+        bx_kernel_read((bx_address)cur_info.filename, filename, sizeof(filename));
+        printf("gcov_info: version: %u, next: %p\n, filename: %s, n_functions: %x\n",
+               cur_info.version, cur_info.next, filename, cur_info.n_functions);
         cur_info_ptr = (bx_address)cur_info.next;
     }
 }

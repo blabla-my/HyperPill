@@ -308,6 +308,8 @@ int hp_gdbstub_mem_check(unsigned cpu, uint64_t lin, unsigned len, unsigned rw);
 
 #define bx_kernel_deref_ptr(kaddr,obj) \
     BX_CPU(id)->access_read_linear(kaddr, sizeof(obj), 0, BX_READ, 0x0, &obj);  
-#define bx_kernel_copy_buffer(kaddr, buf, sz) \
+#define bx_kernel_read(kaddr, buf, sz) \
     BX_CPU(id)->access_read_linear(kaddr, sz, 0, BX_READ, 0x0, buf);
+#define bx_kernel_write(kaddr, buf, sz) \
+    BX_CPU(id)->access_write_linear(kaddr, sz, 0, BX_WRITE, 0x0, buf);
 #endif
