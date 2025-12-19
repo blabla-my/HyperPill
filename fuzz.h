@@ -123,6 +123,7 @@ void mark_l2_guest_page(uint64_t paddr, uint64_t len, uint64_t addr);
 void mark_l2_guest_pagetable(uint64_t paddr, uint64_t len, uint8_t level);
 const char *get_memtype_name(BxMemtype memtype);
 void add_persistent_memory_range(bx_phy_address start, bx_phy_address len);
+void add_persistent_kernel_memory_range(bx_address start, size_t len);
 
 void icp_init_params();
 void icp_init_mem(const char* filename);

@@ -397,6 +397,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
             assert(strlen(filename) < sizeof(ginfo_filename));
             strncpy(ginfo_filename, filename, sizeof(ginfo_filename) - 1);
             ginfo.filename = ginfo_filename;
+            add_persistent_kernel_memory_range(cur_info_ptr, sizeof(struct gcov_info));
             break;
         } else {
             cur_info_ptr = (bx_address)cur_info.next;
@@ -415,6 +416,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
     }
     bx_address functions = (bx_address)ginfo.functions;
     size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    add_persistent_kernel_memory_range(functions, ginfo.n_functions * sizeof(struct gcov_fn_info*));
     printf("init kernel gcov info for %s, active_ctrs: %lx, fn_info_size: %lx\n", source_file.c_str(), active_ctrs, fn_info_size);
     ginfo.functions = (struct gcov_fn_info**)malloc(ginfo.n_functions * fn_info_size);
     if (!ginfo.functions) {
@@ -432,6 +434,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
         }
         add_addr_map(fn_info_p, bx_fn_info_p);
         bx_kernel_read(bx_fn_info_p, fn_info_p, fn_info_size);
+        add_persistent_kernel_memory_range(bx_fn_info_p, fn_info_size);
         ginfo.functions[i] = fn_info_p;
         for (int j = 0; j < active_ctrs; j++) {
             bx_address values = (bx_address)fn_info_p->ctrs[j].values;
@@ -442,6 +445,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
             }
             add_addr_map(fn_info_p->ctrs[j].values, values);
             bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+            add_persistent_kernel_memory_range(values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
     }
     gcda_size = convert_to_gcda(NULL, &ginfo);

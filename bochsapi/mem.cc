@@ -40,7 +40,8 @@ uint8_t *overlay_map; // 0: from shadowmem 1: from workershadowmem
 tsl::robin_set<bx_phy_address> dirtyset;
 tsl::robin_set<bx_phy_address> guest_code_pages;
 
-tsl::robin_map<bx_phy_address, bx_phy_address> persist_ranges;
+typedef std::vector<uint64_t> persist_range_vec;
+tsl::robin_map<bx_phy_address, persist_range_vec> persist_ranges;
 tsl::robin_map<bx_phy_address, bx_phy_address> hpa_to_gpa;
 
 std::vector<std::tuple<bx_address, uint8_t, uint8_t>> fuzzed_guest_pages; // < HPA, pagetable_level, original_val >
@@ -202,8 +203,67 @@ void add_persistent_memory_range(bx_phy_address start, bx_phy_address len) {
 
     startend = start-page;
     startend |= (start+len - page) << 12;
-    persist_ranges[page] = startend;
-    
+    if (persist_ranges.find(page) == persist_ranges.end()){
+        persist_ranges[page] = persist_range_vec();
+    }
+    // merge if possible
+    for (auto se : persist_ranges[page]){
+        bx_phy_address s = se & 0xFFF;
+        bx_phy_address e = se >> 12;
+        if (!((startend & 0xFFF) >= e || (startend >> 12) <= s)){
+            // merge
+            bx_phy_address new_start = std::min(startend & 0xFFF, s);
+            bx_phy_address new_end = std::max(startend >> 12, e);
+            startend = new_start | (new_end << 12);
+            persist_ranges[page].erase(std::remove(persist_ranges[page].begin(), persist_ranges[page].end(), se), persist_ranges[page].end());
+        } 
+    }
+    // insert sort 
+    for (auto it = persist_ranges[page].begin(); it != persist_ranges[page].end(); ++it){
+        bx_phy_address s = (*it) & 0xFFF;
+        if ((startend & 0xFFF) < s){
+            persist_ranges[page].insert(it, startend);
+            return;
+        }
+    }
+    persist_ranges[page].push_back(startend);
+}
+
+void add_persistent_kernel_memory_range(bx_address start, size_t len) {
+    /* start, len is continuous in kernel space but not in physical address space */
+    Bit32u lpf_mask = 0xfff; // 4K pages
+    Bit32u pkey = 0;
+    bx_phy_address region_start, region_end;
+
+    bx_address page_start = (start >> 12) << 12;
+    bx_address page_end = ((start + len - 1) >> 12) << 12;
+    if (page_start == page_end) {
+        region_start = BX_CPU(id)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
+        region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
+        region_end = region_start + len;
+        add_persistent_memory_range(region_start, len);
+        return;
+    }
+    for (bx_address page = page_start; page <= page_end; page += 0x1000) {
+        if (start > page) {
+            region_start = BX_CPU(id)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
+            region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
+            region_end = (page + 0x1000);
+            add_persistent_memory_range(region_start, region_end - start);
+            continue;
+        }
+        if (page + 0x1000 > start + len) {
+            region_start = BX_CPU(id)->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
+            region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
+            region_end = region_start + (start + len - page);
+            add_persistent_memory_range(region_start, region_end - region_start);
+            continue;
+        }
+        region_start = BX_CPU(id)->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
+        region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
+        region_end = region_start + 0x1000;
+        add_persistent_memory_range(region_start, region_end - region_start);
+    }
 }
 
 static void notify_write(uint64_t addr){
@@ -231,15 +291,21 @@ void fuzz_reset_memory() {
     if(watch_level<=1)
         return;
     prioraccess=0;
-    for(const auto& key : dirtyset) {
-        size_t page = key >> 12;
-        if (persist_ranges.find(key) != persist_ranges.end()){
-            bx_phy_address start = persist_ranges[key] & 0xFFF;
-            bx_phy_address end = persist_ranges[key] >> 12;
-            memcpy(addr_conv(key), backing_addr(key), start);
-            memcpy(addr_conv(key+end), backing_addr(key+end), 0x1000-end);
+    for(const auto& page : dirtyset) {
+        size_t page_number = page >> 12;
+        if (persist_ranges.find(page) != persist_ranges.end()){
+            bx_phy_address left = 0;
+            bx_phy_address start;
+            bx_phy_address end;
+            for (auto startend : persist_ranges[page]){
+                start = startend & 0xFFF;
+                end = startend >> 12;
+                memcpy(addr_conv(page + left), backing_addr(page + left), start - left);
+                left = end;
+            }
+            memcpy(addr_conv(page + left), backing_addr(page + left), 0x1000 - left);
         } else {
-            memcpy(addr_conv(key), backing_addr(key), 0x1000);
+            memcpy(addr_conv(page), backing_addr(page), 0x1000);
         }
     }
     fuzz_clear_dirty();
