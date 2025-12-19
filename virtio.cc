@@ -72,11 +72,7 @@ int AvailRing::ingest_elem(void* opaque, int index) const {
 	queue->submit_request(*avail_elem_ptr);
 	
 	DBG_PRINT {
-		printf("!virtio: inject vring %s elem, size: %lx: ", type_str(), element_size());
-		for (int i = 0; i < element_size(); i++){
-			printf("%.2x", *((uint8_t*)opaque + i));
-		}
-		printf("\n");
+		printf("!virtio: inject vring %s elem, size: %lx, index: %x, max: %lx\n", type_str(), element_size(), *avail_elem_ptr, size);
 	}
 	return 0;
 }

@@ -249,19 +249,25 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
             region_start = BX_CPU(id)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
             region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
             region_end = (page + 0x1000);
+            assert((region_start & lpf_mask) != 0);
+            assert((region_end & lpf_mask) == 0);
             add_persistent_memory_range(region_start, region_end - start);
             continue;
         }
         if (page + 0x1000 > start + len) {
             region_start = BX_CPU(id)->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
-            region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
+            region_start = (region_start & ~((Bit64u) lpf_mask));
             region_end = region_start + (start + len - page);
+            assert((region_start & lpf_mask) == 0);
+            assert((region_end & lpf_mask) != 0);
             add_persistent_memory_range(region_start, region_end - region_start);
             continue;
         }
         region_start = BX_CPU(id)->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
-        region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
+        region_start = (region_start & ~((Bit64u) lpf_mask));
         region_end = region_start + 0x1000;
+        assert((region_start & lpf_mask) == 0);
+        assert((region_end & lpf_mask) == 0);
         add_persistent_memory_range(region_start, region_end - region_start);
     }
 }
