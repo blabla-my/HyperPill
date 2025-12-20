@@ -68,7 +68,7 @@ int AvailRing::ingest_elem(void* opaque, int index) const {
 	}
 	/* every time the avail ring is touched, reset desc chain fsm */
 	queue->desc_chain_fsm.reset();
-	queue->desc_chain_fsm.init(size);
+	queue->desc_chain_fsm.init(size, queue->type);
 	queue->submit_request(*avail_elem_ptr);
 	
 	DBG_PRINT {
@@ -554,6 +554,16 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 			queues[i]->used_ring = new UsedRing{queue_size, used_ring_addr, queues[i]};
 			queues[i]->vdev = this;
 			queues[i]->queue_sel = i;
+			queues[i]->type = VQueue::QUEUE_DATA;
+			if (is_net) {
+				if (i == queue_num - 1 && queue_num % 2 == 1) {
+					queues[i]->type = VQueue::QUEUE_CTRL;
+				} else if (i % 2 == 0) {
+					queues[i]->type = VQueue::QUEUE_RX;
+				} else {
+					queues[i]->type = VQueue::QUEUE_TX;
+				}
+			}
 			printf("#QUEUE_ENUM dev: %s, queue sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx\n", 
 				   name, i, queues[i]->desc_ring->size, desc_ring_addr, avail_ring_addr, used_ring_addr);
 		} else {
@@ -601,6 +611,9 @@ bool VQueueManager::create_virtio_device(const std::string& name, bool to_fuzz) 
 	strcpy(virtio_devs[name]->name, name.c_str());
 	if (to_fuzz)
 		virtio_dev_list.push_back(virtio_devs[name]);
+	if (name == "virtio-net") {
+		dev_ptr->is_net = true;		
+	}
 	return true;
 }
 
@@ -860,17 +873,37 @@ size_t VirtQueueElement::out_sgl_size() {
 }
 
 /* DescChainFSM */
-void DescChainFSM::init(unsigned max_len) {
+void DescChainFSM::init(unsigned max_len, int queue_type) {
 	/* ingest random number as the length of chaining desc */	
 	max_len = max_len < DESC_CHAIN_MAX_LEN? max_len : DESC_CHAIN_MAX_LEN;
 	if (state == DescChainFSM::State::WAIT){
-		auto out_max_len = max_len < 1 ? 1 : max_len;
-		if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, out_max_len) < 0){
-			sg_num_out = 1;
-		}
-		auto in_max_len = max_len - sg_num_out < 1 ? 1 : max_len - sg_num_out;
-		if (ic_ingest_uint(&sg_num_in, sizeof(sg_num_in), 1, in_max_len) < 0){
-			sg_num_in = 1;
+		unsigned out_max_len, in_max_len;	
+		switch (queue_type) {
+			case VQueue::QUEUE_RX:
+				in_max_len = max_len < 1 ? 1 : max_len;
+				if (ic_ingest_uint(&sg_num_in, sizeof(sg_num_in), 1, in_max_len) < 0){
+					sg_num_in = 1;
+				}
+				sg_num_out = 0;
+				break;
+			case VQueue::QUEUE_TX:
+				out_max_len = max_len < 1 ? 1 : max_len;
+				if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, out_max_len)) {
+					sg_num_out = 1;
+				}
+				sg_num_in = 0;
+				break;
+			case VQueue::QUEUE_CTRL:
+			case VQueue::QUEUE_DATA:
+				out_max_len = max_len < 1 ? 1 : max_len;
+				if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, out_max_len) < 0){
+					sg_num_out = 1;
+				}
+				in_max_len = max_len - sg_num_out < 1 ? 1 : max_len - sg_num_out;
+				if (ic_ingest_uint(&sg_num_in, sizeof(sg_num_in), 1, in_max_len) < 0){
+					sg_num_in = 1;
+				}
+				break;
 		}
 		sg_num_out_remain = sg_num_out;
 		sg_num_in_remain = sg_num_in;
@@ -880,7 +913,7 @@ void DescChainFSM::init(unsigned max_len) {
 		}
 		generated_descs_size = 0;
 		DBG_PRINT {
-			printf("init desc chaining: out %u, in %u\n", sg_num_out, sg_num_in);
+			printf("init desc chaining: out %u, in %u, queue_type: %u\n", sg_num_out, sg_num_in, queue_type);
 		}
 	}	
 }

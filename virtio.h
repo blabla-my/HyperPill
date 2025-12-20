@@ -100,7 +100,7 @@ public:
     };
 
     DescChainFSM() : state(WAIT), sg_num_in(0), sg_num_out(0), used_index() {}
-    void init(unsigned max_len);
+    void init(unsigned max_len, int queue_type);
     SGType consume();
     State get_state() {return state;}
     uint8_t get_inited_count() const {return inited_count;}
@@ -292,6 +292,12 @@ struct VQueue {
 #define MAX_REQUEST_NUMBER 3
     mutable RequestStatus request_status[MAX_REQUEST_NUMBER];
     mutable size_t request_cnt = 0;
+    enum {
+        QUEUE_RX,
+        QUEUE_TX,
+        QUEUE_DATA,
+        QUEUE_CTRL,
+    } type;
 };
 
 struct ConfigSpace {
@@ -337,6 +343,7 @@ struct VirtioDev {
     ConfigSpace device_cfg; // Device-specific configuration space
     ConfigSpace notify_cfg; // Notification configuration space
     bool to_fuzz;
+    bool is_net;
     void enumerate_queues_from_common_cfg();
     bool inited();
     void set_status(uint8_t status);
