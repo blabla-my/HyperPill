@@ -74,7 +74,7 @@ void gcov_info_unlink(struct gcov_info *prev, struct gcov_info *info)
 /*
  * Determine whether a counter is active. Doesn't change at run-time.
  */
-static int counter_active(struct gcov_info *info, unsigned int type)
+int counter_active(const struct gcov_info *info, unsigned int type)
 {
 	return info->merge[type] ? 1 : 0;
 }

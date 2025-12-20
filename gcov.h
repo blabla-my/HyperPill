@@ -160,6 +160,8 @@ void gcov_info_add(struct gcov_info *dest, struct gcov_info *source);
 struct gcov_info *gcov_info_dup(struct gcov_info *info);
 void gcov_info_free(struct gcov_info *info);
 
+int counter_active(const struct gcov_info *info, unsigned int type);
+
 struct gcov_link {
 	enum {
 		OBJ_TREE,

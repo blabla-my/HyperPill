@@ -56,7 +56,6 @@ private:
     std::map<void*, uint64_t> addr_map;
     struct gcov_info ginfo;
     char ginfo_filename[0x40];
-    size_t active_ctrs;
     size_t gcda_size;
     uint8_t *gcda_data;
     void fetch_latest_gcov_info() const;

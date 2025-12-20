@@ -227,6 +227,15 @@ void add_persistent_memory_range(bx_phy_address start, bx_phy_address len) {
         }
     }
     persist_ranges[page].push_back(startend);
+
+    // sanity-check for persistent_ranges[page], no overlap and keep in order
+    bx_phy_address last_end = 0;
+    for (auto se : persist_ranges[page]){
+        bx_phy_address s = se & 0xFFF;
+        bx_phy_address e = se >> 12;
+        assert(s >= last_end && e > s);
+        last_end = e;
+    }
 }
 
 void add_persistent_kernel_memory_range(bx_address start, size_t len) {
@@ -300,16 +309,14 @@ void fuzz_reset_memory() {
     for(const auto& page : dirtyset) {
         size_t page_number = page >> 12;
         if (persist_ranges.find(page) != persist_ranges.end()){
-            bx_phy_address left = 0;
-            bx_phy_address start;
-            bx_phy_address end;
+            bx_phy_address last_end = 0;
             for (auto startend : persist_ranges[page]){
-                start = startend & 0xFFF;
-                end = startend >> 12;
-                memcpy(addr_conv(page + left), backing_addr(page + left), start - left);
-                left = end;
+                bx_phy_address s = startend & 0xFFF;
+                bx_phy_address e = startend >> 12;
+                memcpy(addr_conv(page + last_end), backing_addr(page + last_end), s - last_end);
+                last_end = e;
             }
-            memcpy(addr_conv(page + left), backing_addr(page + left), 0x1000 - left);
+            memcpy(addr_conv(page + last_end), backing_addr(page + last_end), 0x1000 - last_end);
         } else {
             memcpy(addr_conv(page), backing_addr(page), 0x1000);
         }

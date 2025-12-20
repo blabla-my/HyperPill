@@ -408,16 +408,10 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
         this->__inited = false;
         return;
     }
-    active_ctrs = 0;
-    for (int i = 0; i < GCOV_COUNTERS; i++) {
-        if (ginfo.merge[i]) {
-            active_ctrs ++;
-        }
-    }
     bx_address functions = (bx_address)ginfo.functions;
-    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * GCOV_COUNTERS);
     add_persistent_kernel_memory_range(functions, ginfo.n_functions * sizeof(struct gcov_fn_info*));
-    printf("init kernel gcov info for %s, active_ctrs: %lx, fn_info_size: %lx\n", source_file.c_str(), active_ctrs, fn_info_size);
+    printf("init kernel gcov info for %s\n", source_file.c_str());
     ginfo.functions = (struct gcov_fn_info**)malloc(ginfo.n_functions * fn_info_size);
     if (!ginfo.functions) {
         perror("malloc gcov_info functions failed");
@@ -436,7 +430,10 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
         bx_kernel_read(bx_fn_info_p, fn_info_p, fn_info_size);
         add_persistent_kernel_memory_range(bx_fn_info_p, fn_info_size);
         ginfo.functions[i] = fn_info_p;
-        for (int j = 0; j < active_ctrs; j++) {
+        for (int j = 0; j < GCOV_COUNTERS; j++) {
+            if (counter_active(&ginfo, j) == 0) {
+                continue;
+            }
             bx_address values = (bx_address)fn_info_p->ctrs[j].values;
             fn_info_p->ctrs[j].values = (gcov_type*)malloc(sizeof(gcov_type) * fn_info_p->ctrs[j].num);
             if (!fn_info_p->ctrs[j].values) {
@@ -444,6 +441,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
                 exit(1);
             }
             add_addr_map(fn_info_p->ctrs[j].values, values);
+            assert(values != 0);
             bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
             add_persistent_kernel_memory_range(values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
@@ -463,7 +461,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
 
 void KernelSourceCov::fetch_latest_gcov_info() const {
     bx_address functions = get_bx_addr(ginfo.functions);
-    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * GCOV_COUNTERS);
     for (int i = 0; i < ginfo.n_functions; i++) {
         bx_address bx_fn_info_p;
         struct gcov_fn_info* fn_info_p = ginfo.functions[i];
@@ -471,8 +469,12 @@ void KernelSourceCov::fetch_latest_gcov_info() const {
         // only copy header first
         bx_kernel_read(bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
         // copy ctr values
-        for (int j = 0; j < active_ctrs; j++) {
+        for (int j = 0; j < GCOV_COUNTERS; j++) {
+            if (counter_active(&ginfo, j) == 0) {
+                continue;
+            }
             bx_address values = get_bx_addr(fn_info_p->ctrs[j].values);
+            assert(values != 0);
             bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
     }
@@ -480,7 +482,7 @@ void KernelSourceCov::fetch_latest_gcov_info() const {
 
 void KernelSourceCov::write_back_gcov_info() const {
     bx_address functions = get_bx_addr(ginfo.functions);
-    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * active_ctrs);
+    size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * GCOV_COUNTERS);
     for (int i = 0; i < ginfo.n_functions; i++) {
         bx_address bx_fn_info_p;
         struct gcov_fn_info* fn_info_p = ginfo.functions[i];
@@ -488,8 +490,12 @@ void KernelSourceCov::write_back_gcov_info() const {
         // only copy header first
         bx_kernel_write(bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
         // copy ctr values
-        for (int j = 0; j < active_ctrs; j++) {
+        for (int j = 0; j < GCOV_COUNTERS; j++) {
+            if (counter_active(&ginfo, j) == 0) {
+                continue;
+            }
             bx_address values = get_bx_addr(fn_info_p->ctrs[j].values);
+            assert(values != 0);
             bx_kernel_write(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
     }
