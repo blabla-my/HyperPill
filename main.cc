@@ -281,10 +281,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 			auto qemu_source_cov = new UserSourceCov("qemu-system-x86_64");
 			auto spdk_source_cov = new UserSourceCov("vhost");
 			auto vhost_net_source_cov = new KernelSourceCov("vhost-net", "vhost/net.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
+			auto vhost_scsi_source_cov = new KernelSourceCov("vhost-scsi", "vhost/scsi.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
+			auto vhost_vsock_source_cov = new KernelSourceCov("vhost-vsock", "vhost/vsock.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
 			auto vhost_source_cov = new KernelSourceCov("vhost", "vhost/vhost.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
 			add_to_source_cov_set((SourceCov*)qemu_source_cov);
 			add_to_source_cov_set((SourceCov*)spdk_source_cov);
 			add_to_source_cov_set((SourceCov*)vhost_net_source_cov);
+			add_to_source_cov_set((SourceCov*)vhost_scsi_source_cov);
+			add_to_source_cov_set((SourceCov*)vhost_vsock_source_cov);
 			add_to_source_cov_set((SourceCov*)vhost_source_cov);
 		}
 		setup_periodic_coverage();
