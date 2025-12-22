@@ -548,20 +548,30 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 		bx_address desc_ring_addr = common_cfg.get_desc_ring_addr();
 		if (i < VIRTIO_QUEUE_MAX) {
 			queues[i] = new VQueue{};
-			queues[i]->idx = get_vqueue_manager().allocate_new_queue_idx();
+			queues[i]->idx = get_vqueue_manager().get_queue_list_size();
+			get_vqueue_manager().add_to_queue_list(queues[i]);
 			queues[i]->desc_ring = new DescRing{queue_size, desc_ring_addr, queues[i]};
 			queues[i]->avail_ring = new AvailRing{queue_size, avail_ring_addr, queues[i]};
 			queues[i]->used_ring = new UsedRing{queue_size, used_ring_addr, queues[i]};
 			queues[i]->vdev = this;
 			queues[i]->queue_sel = i;
-			queues[i]->type = VQueue::QUEUE_DATA;
+			queues[i]->type = VQueue::QUEUE_NORMAL;
 			if (is_net) {
 				if (i == queue_num - 1 && queue_num % 2 == 1) {
-					queues[i]->type = VQueue::QUEUE_CTRL;
+					queues[i]->type = VQueue::QUEUE_NORMAL;
 				} else if (i % 2 == 0) {
 					queues[i]->type = VQueue::QUEUE_RX;
 				} else {
 					queues[i]->type = VQueue::QUEUE_TX;
+				}
+			}
+			if (is_scsi) {
+				if (i == 0) {
+					queues[i]->type = VQueue::QUEUE_CTRL;
+				} else if (i == 1) {
+					queues[i]->type = VQueue::QUEUE_EVENT;
+				} else {
+					queues[i]->type = VQueue::QUEUE_NORMAL;
 				}
 			}
 			printf("#QUEUE_ENUM dev: %s, queue sel: %lx, size: %lx, desc: %lx, avail: %lx, used: %lx\n", 
@@ -613,6 +623,9 @@ bool VQueueManager::create_virtio_device(const std::string& name, bool to_fuzz) 
 		virtio_dev_list.push_back(virtio_devs[name]);
 	if (name == "virtio-net") {
 		dev_ptr->is_net = true;		
+	}
+	if (name == "virtio-scsi") {
+		dev_ptr->is_scsi = true;		
 	}
 	return true;
 }
@@ -894,7 +907,7 @@ void DescChainFSM::init(unsigned max_len, int queue_type) {
 				sg_num_in = 0;
 				break;
 			case VQueue::QUEUE_CTRL:
-			case VQueue::QUEUE_DATA:
+			case VQueue::QUEUE_NORMAL:
 				out_max_len = max_len < 1 ? 1 : max_len;
 				if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, out_max_len) < 0){
 					sg_num_out = 1;

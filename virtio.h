@@ -295,8 +295,9 @@ struct VQueue {
     enum {
         QUEUE_RX,
         QUEUE_TX,
-        QUEUE_DATA,
+        QUEUE_NORMAL,
         QUEUE_CTRL,
+        QUEUE_EVENT
     } type;
 };
 
@@ -344,6 +345,7 @@ struct VirtioDev {
     ConfigSpace notify_cfg; // Notification configuration space
     bool to_fuzz;
     bool is_net;
+    bool is_scsi;
     void enumerate_queues_from_common_cfg();
     bool inited();
     void set_status(uint8_t status);
@@ -357,7 +359,7 @@ struct VirtioDev {
 
 class VQueueManager {
 public:
-    VQueueManager(): virtio_devs(), virtio_dev_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs() {}
+    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs() {}
     typedef tsl::robin_set<const VRing*> VRingSet;
     bool create_virtio_device(const std::string& name, bool to_fuzz=false);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
@@ -380,10 +382,19 @@ public:
     void add_seen_buffer(uint64_t start, uint64_t size);
     void reset_seen_buffer() {seen_buffers.clear();}
     uint64_t overlapped_size(uint64_t start, uint64_t size); /* if non-overlap, return 0 */
+
+    size_t get_queue_list_size() const {return queue_list.size();}
+    void add_to_queue_list(VQueue* queue) {queue_list.push_back(queue);}
+    VQueue* get_queue_by_id(size_t index) {
+        if (index >= queue_list.size()) return NULL;
+        else return queue_list[index];
+    }
+
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
     std::vector<VirtioDev*> virtio_dev_list;                                                           
+    std::vector<VQueue*> queue_list;
     tsl::robin_map<bx_address, VRingSet> rings_grouped_by_page;
     size_t all_queue_count;
     std::vector<const fuzzer::vring_desc_with_info*> generated_descs;

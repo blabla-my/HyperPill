@@ -161,6 +161,19 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			if (no_double_fetch && overlapped_size)
 				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
 			
+			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
+			if (queue->vdev->is_scsi) {
+				if (queue->type == VQueue::QUEUE_NORMAL && offset == 0 && len && is_out) {
+					buf[0] = 0x1; // lun[0] == 1
+				} else if (queue->type == VQueue::QUEUE_CTRL) {
+					if (offset == 8 && len) {
+						buf[0] = 0x1;
+					} else if (offset == 4 && len != 4) {
+						buf[0] = 0x1;
+					}
+				}
+			}
+			
 			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
 			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
 			memcpy(data, buf, len);
