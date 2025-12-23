@@ -111,7 +111,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 				// just mark the region, do nothing
 				return 0;
 			}
-			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx, false);
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
 			memcpy(data, &vring_idx, len);
 			return 0;
 		case VRing::FILED_TYPE::VRING_ELEM:
@@ -175,7 +175,7 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			}
 			
 			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
-			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf, false);
+			BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf);
 			memcpy(data, buf, len);
 			get_vqueue_manager().add_seen_buffer(gpa, len);
 			update_virtio_req_counter(desc_with_info->desc_info.queue_id,
