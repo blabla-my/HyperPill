@@ -8,6 +8,7 @@
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <tsl/robin_map.h>
 
@@ -143,9 +144,10 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		if (desc_with_info) {
 			static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
 			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
+			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
 			assert(overlapped_size <= len);
 			
-			uint64_t offset = gpa - desc_with_info->desc.addr;
+			size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
 			bool is_out = desc_with_info->desc_info.is_out;
 			bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0);
 			
@@ -158,19 +160,26 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
-			if (no_double_fetch && overlapped_size)
+			if (no_double_fetch && overlapped_size) 
 				BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
 			
-			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
-			if (queue->vdev->is_scsi) {
-				if (queue->type == VQueue::QUEUE_NORMAL && offset == 0 && len && is_out) {
-					buf[0] = 0x1; // lun[0] == 1
-				} else if (queue->type == VQueue::QUEUE_CTRL) {
-					if (offset == 8 && len) {
-						buf[0] = 0x1;
-					} else if (offset == 4 && len != 4) {
-						buf[0] = 0x1;
+			if (queue->vdev->is_scsi && is_out) {
+				const uint8_t valid_lun[8] = {1, 1, 0, 0, 0, 0, 0, 0};
+				if (queue->type == VQueue::QUEUE_NORMAL) {
+					// lun should be [0, 8), if [offset, offset+8) covers lun, fix it
+					if (offset < 8 && offset + len <= 8) {
+						memcpy(buf, valid_lun + offset, len);
+					} else if (offset < 8 && offset + len > 8) {
+						memcpy(buf, valid_lun + offset, 8 - offset);
+					} 
+					printf("SCSI read at offset %lx len %lx overlapped: %lx: ", offset, len, overlapped_size);
+					for (int i = 0; i < len; i++) {
+						printf("%.2x ", buf[i]);
 					}
+					printf("\n");
+					fflush(stdout);
+				} else if (queue->type == VQueue::QUEUE_CTRL) {
+					// lun should be [8, 16) or [4, 12)
 				}
 			}
 			

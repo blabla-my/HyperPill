@@ -110,6 +110,7 @@ public:
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
     void add_desc(const fuzzer::vring_desc_with_info* desc_with_info);
     const vring_desc_with_info* get_desc_by_gpa(uint64_t gpa);
+    size_t get_request_offset(bx_address gpa) const;
     void increment_inited_count() {inited_count++;}
     bool has_used_index(uint16_t idx) {return used_index.contains(idx);}
     bool is_wait() const {return state == WAIT;}

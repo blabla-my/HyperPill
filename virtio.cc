@@ -558,7 +558,7 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 			queues[i]->type = VQueue::QUEUE_NORMAL;
 			if (is_net) {
 				if (i == queue_num - 1 && queue_num % 2 == 1) {
-					queues[i]->type = VQueue::QUEUE_NORMAL;
+					queues[i]->type = VQueue::QUEUE_CTRL;
 				} else if (i % 2 == 0) {
 					queues[i]->type = VQueue::QUEUE_RX;
 				} else {
@@ -995,6 +995,20 @@ uint16_t DescChainFSM::desc_seq() {
 		return sg_num_in - sg_num_in_remain - 1;
 
 	return 0xffff;
+}
+
+size_t DescChainFSM::get_request_offset(bx_address gpa) const {
+	size_t offset = 0;
+	for (size_t i = 0; i < generated_descs_size; i++) {
+		const auto* d = generated_descs[i];
+		if (gpa >= d->desc.addr && gpa < d->desc.addr + d->desc.len) {
+			offset += (gpa - d->desc.addr);
+			break;
+		} else {
+			offset += d->desc.len;
+		}
+	}
+	return offset;
 }
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {
