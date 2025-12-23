@@ -172,7 +172,6 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 					} else if (offset < 8 && offset + len > 8) {
 						memcpy(buf, valid_lun + offset, 8 - offset);
 					} 
-					printf("SCSI read at offset %lx len %lx overlapped: %lx: ", offset, len, overlapped_size);
 					for (int i = 0; i < len; i++) {
 						printf("%.2x ", buf[i]);
 					}
