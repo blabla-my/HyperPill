@@ -907,6 +907,7 @@ void DescChainFSM::init(unsigned max_len, int queue_type) {
 				sg_num_in = 0;
 				break;
 			case VQueue::QUEUE_CTRL:
+			case VQueue::QUEUE_EVENT:
 			case VQueue::QUEUE_NORMAL:
 				out_max_len = max_len < 1 ? 1 : max_len;
 				if (ic_ingest_uint(&sg_num_out, sizeof(sg_num_out), 1, out_max_len) < 0){
