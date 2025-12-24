@@ -147,10 +147,7 @@ bx_address TaskManager::get_current_task_bx_addr(){
     if (taskpp == current_task) return 0;
 
     bx_address taskp;
-    if (BX_CPU(id)->access_read_linear(taskpp, sizeof(bx_address), 0, BX_READ, 0, &taskp) < 0){
-        printf("Error: failed to read task pointer at current_task %lx\n", taskpp);
-        return 0;
-    }
+    bx_kernel_deref_ptr(taskpp, taskp);
     return taskp;
 }
 

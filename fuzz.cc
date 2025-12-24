@@ -172,11 +172,6 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 					} else if (offset < 8 && offset + len > 8) {
 						memcpy(buf, valid_lun + offset, 8 - offset);
 					} 
-					for (int i = 0; i < len; i++) {
-						printf("%.2x ", buf[i]);
-					}
-					printf("\n");
-					fflush(stdout);
 				} else if (queue->type == VQueue::QUEUE_CTRL) {
 					// lun should be [8, 16) or [4, 12)
 				}
@@ -1108,4 +1103,41 @@ uint64_t get_guest_ram_size() {
 		return GUEST_MEM_SIZE;
 	auto last_region = ram_regions.rbegin();
 	return last_region->second;
+}
+
+bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw) { 
+	auto tlb_entry = BX_DTLB_ENTRY_OF(laddr, 0);
+    Bit32u lpf_mask = 0xfff; 
+    Bit32u pkey = 0; 
+    bx_phy_address phy; 
+    phy = BX_CPU(id)->translate_linear(tlb_entry, laddr, 0, rw); 
+    return phy;
+}
+
+void bx_kernel_read(bx_address laddr, void *buf, size_t len) {
+	// we should consider paging 
+	bx_address kpage = laddr & ~0xfff;
+	bx_address offset = laddr & 0xfff;
+	for (; kpage < laddr + len; kpage += 0x1000) {
+		bx_phy_address paddr = bx_kernel_translate_linear(kpage, BX_READ);
+		size_t to_read = std::min((size_t)(0x1000 - offset), len);
+		cpu_physical_memory_read(paddr + offset, (char *)buf, to_read);
+		buf = (char *)buf + to_read;
+		len -= to_read;
+		offset = 0;
+	}
+}
+
+void bx_kernel_write(bx_address laddr, void *buf, size_t len) {
+	// we should consider paging 
+	bx_address kpage = laddr & ~0xfff;
+	bx_address offset = laddr & 0xfff;
+	for (; kpage < laddr + len; kpage += 0x1000) {
+		bx_phy_address paddr = bx_kernel_translate_linear(kpage, BX_WRITE);
+		size_t to_write = std::min((size_t)(0x1000 - offset), len);
+		cpu_physical_memory_write(paddr + offset, (const char *)buf, to_write);
+		buf = (uint8_t *)buf + to_write;
+		len -= to_write;
+		offset = 0;
+	}
 }

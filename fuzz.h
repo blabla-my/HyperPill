@@ -307,10 +307,13 @@ void dump_instr();
 void hp_gdbstub_debug_loop();
 int hp_gdbstub_mem_check(unsigned cpu, uint64_t lin, unsigned len, unsigned rw);
 
+bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw);
+void bx_kernel_read(bx_address kaddr, void* buf, size_t sz);
+void bx_kernel_write(bx_address kaddr, void* buf, size_t sz);
+
 #define bx_kernel_deref_ptr(kaddr,obj) \
-    BX_CPU(id)->access_read_linear(kaddr, sizeof(obj), 0, BX_READ, 0x0, &obj);  
-#define bx_kernel_read(kaddr, buf, sz) \
-    BX_CPU(id)->access_read_linear(kaddr, sz, 0, BX_READ, 0x0, buf);
-#define bx_kernel_write(kaddr, buf, sz) \
-    BX_CPU(id)->access_write_linear(kaddr, sz, 0, BX_WRITE, 0x0, buf);
+    do { \
+        bx_kernel_read(kaddr, &obj, sizeof(obj)); \
+    } while(0)
+
 #endif
