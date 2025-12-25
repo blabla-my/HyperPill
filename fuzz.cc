@@ -166,12 +166,9 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 			if (queue->vdev->is_scsi && is_out) {
 				const uint8_t valid_lun[8] = {1, 1, 0, 0, 0, 0, 0, 0};
 				if (queue->type == VQueue::QUEUE_NORMAL) {
-					// lun should be [0, 8), if [offset, offset+8) covers lun, fix it
-					if (offset < 8 && offset + len <= 8) {
-						memcpy(buf, valid_lun + offset, len);
-					} else if (offset < 8 && offset + len > 8) {
-						memcpy(buf, valid_lun + offset, 8 - offset);
-					} 
+					if (offset == 0) {
+						buf[0] = 1; // just fix lun[0] to 1
+					}
 				} else if (queue->type == VQueue::QUEUE_CTRL) {
 					// lun should be [8, 16) or [4, 12)
 				}
