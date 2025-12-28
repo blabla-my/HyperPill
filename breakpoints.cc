@@ -81,7 +81,7 @@ bx_address add_breakpoint(bx_address addr, const breakpoint_handler_t h, bool af
 static char* copy_string_from_vm(bx_address addr, size_t len) {
     len = len&0xFFF;
     char *buf = (char*)malloc(len);
-    BX_CPU(0)->access_read_linear(addr, len, 0, BX_READ, 0x0, buf);
+    bx_kernel_read(addr, buf, len);
     buf[len-1] = 0;
     return buf;
 }
@@ -220,22 +220,6 @@ void apply_breakpoints_linux() {
     //         fuzz_emu_stop_crash("abort");
     //     });
     // }
-
-    /* breakpoints after the function finish */
-    if (log_ops) {
-        add_breakpoint(sym_to_addr("qemu-system", "virtqueue_pop"), [](bxInstruction_c *i) {
-            bx_address elem_ptr = BX_CPU(x)->gen_reg[BX_64BIT_REG_RAX].rrx;
-            printf("#virtqueue_pop: RIP: %lx, RAX: %lx\n", 
-                BX_CPU(x)->get_rip(), elem_ptr);
-            VirtQueueElement elem;
-            if (read_virtqueue_element(elem_ptr, &elem) == 0) {
-                printf("#virtqueue_pop: index: %u, len: %u, ndescs: %u, out_num: %u, in_num: %u\n",
-                    elem.index, elem.len, elem.ndescs, elem.out_num, elem.in_num);
-                printf("#virtqueue_pop: in_sgl_size: %zu, out_sgl_size: %zu\n",
-                    elem.in_sgl_size(), elem.out_sgl_size());
-            }
-        }, true);
-    }
 }
 
 

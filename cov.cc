@@ -280,7 +280,7 @@ void print_page_fault_pt_regs(){
     bx_address pt_regs_addr = BX_CPU(0)->gen_reg[BX_64BIT_REG_RDI].rrx;
     printf("pt_regs_addr: %lx\n", pt_regs_addr);
     struct pt_regs regs;
-    BX_CPU(0)->access_read_linear(pt_regs_addr, sizeof(regs), 0, BX_READ, 0x0, &regs);
+    bx_kernel_read(pt_regs_addr, &regs, sizeof(struct pt_regs));
     // dump pt_regs with name
     printf("pt_regs:\n");
     printf("r15: %lx\n", regs.r15);

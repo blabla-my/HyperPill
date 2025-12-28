@@ -33,7 +33,7 @@ int read_task_struct(bx_address task_struct, void* buf, size_t len) {
     if (len < TASK_SIZE) {
         return -1; // Buffer too small
     }
-    BX_CPU(x)->access_read_linear(task_struct, TASK_SIZE, 0, BX_READ, 0, buf);
+    bx_kernel_read(task_struct, buf, TASK_SIZE);
     return 0; // Success
 }
 
@@ -44,7 +44,7 @@ int read_mm_struct(bx_address mm_struct, void* buf, size_t len){
     if (len < MM_SIZE) {
         return -1; // Buffer too small
     }
-    BX_CPU(x)->access_read_linear(mm_struct, MM_SIZE, 0, BX_READ, 0, buf);
+    bx_kernel_read(mm_struct, buf, MM_SIZE);
     return 0; // Success
 }
 
@@ -52,7 +52,7 @@ int read_pt_regs(bx_address pt_regs_addr, struct pt_regs *regs){
     if (pt_regs_addr == 0) {
         return -1; // Invalid pt_regs address
     }
-    BX_CPU(x)->access_read_linear(pt_regs_addr, sizeof(struct pt_regs), 0, BX_READ, 0, regs);
+    bx_kernel_read(pt_regs_addr, regs, sizeof(struct pt_regs));
     return 0; // Success
 }
 
