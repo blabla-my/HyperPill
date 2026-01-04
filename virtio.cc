@@ -226,6 +226,11 @@ void VQueue::reset(){
 	memset(request_status, 0, sizeof(request_status));
 }
 
+void VQueue::update_polling_count() {
+	polling_count++;
+	printf("Polling count : %zu\n", polling_count);
+}
+
 void VQueue::add_desc(vring_desc *desc) {
 	if (desc)
 		generated_descs.push_back(*desc);
@@ -331,6 +336,22 @@ bx_address ConfigSpace::get_desc_ring_addr() const {
 	unsigned desc_lo = read(VIRTIO_PCI_COMMON_Q_DESCLO, sizeof(unsigned));
 	unsigned desc_hi = read(VIRTIO_PCI_COMMON_Q_DESCHI, sizeof(unsigned));
 	return (bx_address)(((bx_address)desc_hi << 32) | desc_lo);	
+}
+
+uint64_t ConfigSpace::get_features() const {
+	if (type != ConfigSpace::COMMON) {
+		printf("ConfigSpace::get_features called on non-common config space %d\n", type);
+		return 0;
+	}
+	if (!write(VIRTIO_PCI_COMMON_DFSELECT, sizeof(uint32_t), 0)) {
+		return 0;
+	}
+	uint64_t features_lo = read(VIRTIO_PCI_COMMON_DF, sizeof(uint32_t));
+	if (!write(VIRTIO_PCI_COMMON_DFSELECT, sizeof(uint32_t), 1)) {
+		return 0;
+	}
+	uint64_t features_hi = read(VIRTIO_PCI_COMMON_DF, sizeof(uint32_t));
+	return (features_hi << 32) | features_lo;
 }
 
 bool ConfigSpace::set_avail_ring_addr(unsigned long addr) const {
@@ -518,11 +539,102 @@ uint64_t VirtioDev::get_guest_features() {
 	return (features_hi << 32) | features_lo; 
 }
 
+bool VirtioDev::renegotiate_features(uint64_t new_guest_features) {
+	if (common_cfg.type != ConfigSpace::COMMON) {
+		printf("VirtioDev %s: Common config not set, cannot re-negotiate features.\n", name);
+		return false;
+	}
+
+	get_vqueue_manager().disable_hook();
+
+	bx_address desc_before[VIRTIO_QUEUE_MAX] = {0};
+	bx_address avail_before[VIRTIO_QUEUE_MAX] = {0};
+	bx_address used_before[VIRTIO_QUEUE_MAX] = {0};
+	size_t old_sel = common_cfg.get_queue_sel();
+
+	// for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
+	// 	if (!queues[i]) continue;
+	// 	common_cfg.set_queue_sel(i);
+	// 	/* Disable queue before reset per renegotiation */
+	// 	common_cfg.write(VIRTIO_PCI_COMMON_Q_ENABLE, sizeof(uint16_t), 0);
+	// }
+	// common_cfg.set_queue_sel(old_sel);
+
+	for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
+		if (!queues[i]) continue;
+		desc_before[i] = queues[i]->desc_ring ? queues[i]->desc_ring->addr_gpa : 0;
+		avail_before[i] = queues[i]->avail_ring ? queues[i]->avail_ring->addr_gpa : 0;
+		used_before[i] = queues[i]->used_ring ? queues[i]->used_ring->addr_gpa : 0;
+	}
+
+	uint8_t prev_status = get_status();
+
+	/* Reset and re-do feature negotiation */
+	set_status(0);
+	set_status(VIRTIO_CONFIG_S_ACKNOWLEDGE);
+	set_status(VIRTIO_CONFIG_S_DRIVER | get_status());
+
+	uint64_t device_features = get_device_features();
+	uint64_t negotiated = new_guest_features & device_features;
+	set_guest_features(negotiated);
+	set_status(VIRTIO_CONFIG_S_FEATURES_OK | get_status());
+
+	if (prev_status & VIRTIO_CONFIG_S_DRIVER_OK) {
+		set_status(VIRTIO_CONFIG_S_DRIVER_OK | get_status());
+	}
+
+	for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
+		if (!queues[i]) continue;
+		common_cfg.set_queue_sel(i);
+		if (desc_before[i]) common_cfg.set_desc_ring_addr(desc_before[i]);
+		if (avail_before[i]) common_cfg.set_avail_ring_addr(avail_before[i]);
+		if (used_before[i]) common_cfg.set_used_ring_addr(used_before[i]);
+
+		bx_address desc_after = common_cfg.get_desc_ring_addr();
+		bx_address avail_after = common_cfg.get_avail_ring_addr();
+		bx_address used_after = common_cfg.get_used_ring_addr();
+		printf("VirtioDev %s: queue %zu desc %lx -> %lx, avail %lx -> %lx, used %lx -> %lx\n",
+		       name, i, desc_before[i], desc_after, avail_before[i], avail_after, used_before[i], used_after);
+	}
+
+	common_cfg.set_queue_sel(old_sel);
+
+	printf("VirtioDev %s: re-negotiated features to %lx.\n", name, negotiated);
+	get_vqueue_manager().enable_hook();
+	return true;
+}
+
+bool VirtioDev::disable_packed_queue() {
+	uint64_t device_features = get_device_features();
+	uint64_t guest_features = get_guest_features();
+	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+	bool packed_enabled = (device_features & packed_bit) && (guest_features & packed_bit);
+	if (!packed_enabled) {
+		return false;
+	}
+
+	uint64_t new_guest_features = guest_features & ~packed_bit;
+	bool ok = renegotiate_features(new_guest_features);
+	printf("VirtioDev %s: Packed ring disabled, guest features %lx -> %lx (renegotiate %s)\n",
+	       name, guest_features, new_guest_features, ok ? "ok" : "failed");
+	return ok;
+}
+
 void VirtioDev::enumerate_queues_from_common_cfg() {
 	if (common_cfg.type != ConfigSpace::COMMON) {
 		printf("Common config space not set for device %s, cannot enumerate queues.\n", name);
 		return;
 	}
+	uint64_t device_features = get_device_features();
+	uint64_t guest_features = get_guest_features();
+	printf("VirtioDev %s: Device features: %lx\n", name, device_features);
+	// packed bit
+	printf("VirtioDev %s: Packed ring feature %s\n", name, 
+		   (device_features & (1ul<<VIRTIO_F_RING_PACKED)) ? "supported" : "not supported");
+	printf("VirtioDev %s: Guest features: %lx\n", name, guest_features);
+	// packed bit
+	printf("VirtioDev %s: Packed ring feature %s\n", name, 
+		   (guest_features & (1ul<<VIRTIO_F_RING_PACKED)) ? "enabled" : "disabled");
 	queue_num = common_cfg.get_queue_num();
 	if (queue_num > VIRTIO_QUEUE_MAX) {
 		// a workaround, if we write to config space than read, it will be normal
@@ -609,15 +721,38 @@ VirtioDev* VQueueManager::get_vdev_by_name(const std::string& name) {
     return it->second;
 }
 
+VirtioDev* VQueueManager::get_fuzzed_dev() {
+	if (fuzzed_dev_cache && fuzzed_dev_cache->to_fuzz) {
+		return fuzzed_dev_cache;
+	}
+
+	fuzzed_dev_cache = nullptr;
+	for (auto* dev : virtio_dev_list) {
+		if (dev && dev->to_fuzz) {
+			fuzzed_dev_cache = dev;
+			break;
+		}
+	}
+	return fuzzed_dev_cache;
+}
+
 bool VQueueManager::create_virtio_device(const std::string& name, bool to_fuzz) {
 	if (virtio_devs.find(name) != virtio_devs.end()) {
 		printf("Virtio device %s already exists.\n", name.c_str());
 		virtio_devs[name]->to_fuzz = to_fuzz;
+		if (to_fuzz) {
+			fuzzed_dev_cache = virtio_devs[name];
+		} else if (fuzzed_dev_cache == virtio_devs[name]) {
+			fuzzed_dev_cache = nullptr;
+		}
 		return true;
 	}
 	virtio_devs[name] = new VirtioDev();
 	VirtioDev* dev_ptr = virtio_devs[name];
 	dev_ptr->to_fuzz = to_fuzz;
+	if (to_fuzz) {
+		fuzzed_dev_cache = dev_ptr;
+	}
 	strcpy(virtio_devs[name]->name, name.c_str());
 	if (to_fuzz)
 		virtio_dev_list.push_back(virtio_devs[name]);

@@ -79,6 +79,9 @@ static void *pattern_alloc(pattern p, size_t len) {
 */
 static int ingest_vring(bx_address addr, size_t len, void* data) {
 	static void* replay = getenv("REPLAY");
+	if (get_vqueue_manager().hooks_disabled()) {
+		return 0;
+	}
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
@@ -95,6 +98,9 @@ static int ingest_vring(bx_address addr, size_t len, void* data) {
 		case VRing::FILED_TYPE::FLAGS:
 			return 0;
 		case VRing::FILED_TYPE::INDEX:
+			if (vring->type == VRing::VRING_AVAIL && vring->queue) {
+				vring->queue->update_polling_count();
+			}
 			rc = vring->ingest_idx(&vring_idx);
 			if (rc == -1) {  
 				// -1, ingest error

@@ -9,6 +9,7 @@
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include <map>
+#include <vector>
 #include "tsl/robin_map.h"
 #include "tsl/robin_set.h"
 
@@ -278,6 +279,7 @@ struct VQueue {
     void submit_request(uint16_t head);
     void complete_request(uint16_t head);
     bool all_request_completed();
+    void update_polling_count();
     DescRing* desc_ring;  // Descriptor ring
     AvailRing* avail_ring; // Available ring
     UsedRing* used_ring;  // Used ring
@@ -289,7 +291,7 @@ struct VQueue {
     std::vector<vring_desc> generated_descs;
     struct VirtioDev* vdev;
     uint16_t queue_sel;
-    uint16_t polling_count;
+    size_t polling_count;
 #define MAX_REQUEST_NUMBER 3
     mutable RequestStatus request_status[MAX_REQUEST_NUMBER];
     mutable size_t request_cnt = 0;
@@ -326,6 +328,7 @@ struct ConfigSpace {
     void set_queue_num(size_t num) const;
     bool set_queue_sel(size_t sel) const;
     bool set_queue_enable(size_t sel) const;
+    uint64_t get_features() const;
     bool write(size_t offset, size_t sz, unsigned long value) const;
     bool contains(unsigned long addr) const;
 };
@@ -355,12 +358,14 @@ struct VirtioDev {
     uint8_t get_status();
     uint64_t get_device_features();
     uint64_t get_guest_features();
+    bool disable_packed_queue();
+    bool renegotiate_features(uint64_t new_guest_features);
     
 };
 
 class VQueueManager {
 public:
-    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs() {}
+    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs(), fuzzed_dev_cache(nullptr), hook_disabled(false) {}
     typedef tsl::robin_set<const VRing*> VRingSet;
     bool create_virtio_device(const std::string& name, bool to_fuzz=false);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
@@ -376,6 +381,7 @@ public:
     bool init_queues_for_dev(VirtioDev* vdev);
     bool init_queues();
     VirtioDev* get_vdev_by_name(const std::string& name);
+    VirtioDev* get_fuzzed_dev();
     void add_desc(const fuzzer::vring_desc_with_info* desc) {generated_descs.push_back(desc);}
     void reset_generated_desc() {generated_descs.clear();}
     const fuzzer::vring_desc_with_info* get_desc_by_gpa(uint64_t gpa);
@@ -390,6 +396,9 @@ public:
         if (index >= queue_list.size()) return NULL;
         else return queue_list[index];
     }
+    void disable_hook() {hook_disabled = true;}
+    void enable_hook() {hook_disabled = false;}
+    bool hooks_disabled() const {return hook_disabled;}
 
 private:
     void group_vring_by_page(const VRing* vring);
@@ -400,6 +409,8 @@ private:
     size_t all_queue_count;
     std::vector<const fuzzer::vring_desc_with_info*> generated_descs;
     tsl::robin_map<uint64_t, size_t> seen_buffers;
+    VirtioDev* fuzzed_dev_cache;
+    bool hook_disabled = false;
 };
 
 VQueueManager& get_vqueue_manager();
