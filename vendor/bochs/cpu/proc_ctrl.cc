@@ -614,10 +614,13 @@ Bit64u BX_CPU_C::get_TSC(void)
 {
   int tsc_factor = 1;
   if (getenv("TSC_FACTOR")) {
-	tsc_factor = strtol(getenv("TSC_FACTOR"), NULL, 10);
+    tsc_factor = strtol(getenv("TSC_FACTOR"), NULL, 10);
+  }
+  if (tsc_factor <= 0) {
+    tsc_factor = 1;
   }
   Bit64u tsc = bx_pc_system.time_ticks() + BX_CPU_THIS_PTR tsc_adjust;
-  return 0x441168e0000 + tsc * tsc_factor;
+  return tsc * (Bit64u) tsc_factor;
 }
 
 #if BX_SUPPORT_VMX || BX_SUPPORT_SVM
@@ -639,9 +642,18 @@ Bit64u BX_CPU_C::get_TSC_VMXAdjust(Bit64u tsc)
 
 void BX_CPU_C::set_TSC(Bit64u newval)
 {
+  int tsc_factor = 1;
+  if (getenv("TSC_FACTOR")) {
+    tsc_factor = strtol(getenv("TSC_FACTOR"), NULL, 10);
+  }
+  if (tsc_factor <= 0) {
+    tsc_factor = 1;
+  }
+
   // compute the correct setting of tsc_adjust so that a get_TSC()
   // will return newval
-  BX_CPU_THIS_PTR tsc_adjust = newval - bx_pc_system.time_ticks();
+  BX_CPU_THIS_PTR tsc_adjust =
+    (Bit64s) (newval / (Bit64u) tsc_factor) - (Bit64s) bx_pc_system.time_ticks();
 
   // verify
   BX_ASSERT(get_TSC() == newval);

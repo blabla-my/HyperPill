@@ -97,6 +97,7 @@ public:
   void   activate_timer(unsigned timer_index, Bit32u useconds, bool continuous);
   void   activate_timer_nsec(unsigned timer_index, Bit64u nseconds, bool continuous);
   void   deactivate_timer(unsigned timer_index);
+  void   set_time_ticks(Bit64u ticks);
   unsigned triggeredTimerID(void) {
     return triggeredTimer;
   }

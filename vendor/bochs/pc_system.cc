@@ -470,6 +470,23 @@ Bit64u bx_pc_system_c::time_nsec()
 
 void bx_pc_system_c::start_timers(void) { }
 
+void bx_pc_system_c::set_time_ticks(Bit64u ticks)
+{
+  Bit64s current = (Bit64s) time_ticks();
+  Bit64s delta = (Bit64s) ticks - current;
+
+  if (delta <= 0) {
+    return;
+  }
+
+  ticksTotal += (Bit64u) delta;
+  for (unsigned i = 1; i < numTimers; i++) {
+    if (timer[i].inUse) {
+      timer[i].timeToFire += (Bit64u) delta;
+    }
+  }
+}
+
 void bx_pc_system_c::activate_timer_ticks(unsigned i, Bit64u ticks, bool continuous)
 {
 #if BX_TIMER_DEBUG

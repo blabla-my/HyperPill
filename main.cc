@@ -31,6 +31,8 @@ bool fuzz_should_abort = false;    /* We got a crash. */
 bool fuzzing;
 static bool executing_input;
 
+// Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
+BOCHSAPI bx_pc_system_c bx_pc_system;
 BOCHSAPI BX_CPU_C bx_cpu = BX_CPU_C(0);
 BOCHSAPI BX_CPU_C shadow_bx_cpu;
 BOCHSAPI bx_pc_system_c shadow_bx_pc_system;
@@ -43,8 +45,9 @@ static void *log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-uint64_t icount_limit = 50000000;
-uint64_t pio_icount_limit = 300000;
+// uint64_t icount_limit = 50000000;
+uint64_t icount_limit = UINT64_MAX;
+uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;
 
@@ -253,7 +256,7 @@ void fuzz_instr_before_execution(bxInstruction_c *i) {
 	}
 	if (pio_icount > pio_icount_limit && fuzzenum){
 		printf("pio_icount abort %ld\n", pio_icount);
-		fuzz_emu_stop_unhealthy();
+		// fuzz_emu_stop_unhealthy();
 	}
     icount++;
     pio_icount++;

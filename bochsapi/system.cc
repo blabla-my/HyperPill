@@ -9,8 +9,6 @@ bool bx_user_quit;
 void print_statistics_tree(bx_param_c *node, int level) {}
 #endif
 
-bx_pc_system_c bx_pc_system;
-
 void bx_init_pc_system() {
     bx_pc_system.initialize(95000000);
     bx_pc_system.register_state();
