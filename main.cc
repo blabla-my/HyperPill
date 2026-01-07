@@ -45,8 +45,7 @@ static void *log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-// uint64_t icount_limit = 50000000;
-uint64_t icount_limit = UINT64_MAX;
+uint64_t icount_limit = 50000000;
 uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;

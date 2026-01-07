@@ -95,9 +95,6 @@ static int ingest_vring_split(bx_address addr, size_t len, void* data) {
 		case VRing::FILED_TYPE::FLAGS:
 			return 0;
 		case VRing::FILED_TYPE::INDEX:
-			if (vring->type == VRing::VRING_AVAIL && vring->queue) {
-				vring->queue->update_polling_count();
-			}
 			if (get_vqueue_manager().hooks_disabled()) {
 				return 0;
 			}

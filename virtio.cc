@@ -1,11 +1,14 @@
 #include "virtio.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include "bochs.h"
+#include "iodev/iodev.h"
 #include "config.h"
 #include "cpu/cpu.h"
+#include "cpu/apic.h"
 #include "cpu/vmx.h"
 #include "fuzz.h"
 #include "task.h"
+#include "pc_system.h"
 #include <bits/types/struct_iovec.h>
 #include <cassert>
 #include <cstddef>
@@ -228,7 +231,6 @@ void VQueue::reset(){
 
 void VQueue::update_polling_count() {
 	polling_count++;
-	printf("Polling count : %zu\n", polling_count);
 }
 
 void VQueue::add_desc(vring_desc *desc) {
