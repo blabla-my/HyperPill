@@ -125,6 +125,10 @@ size_t ic_get_last_token(void){
     return last_token-output;
 }
 
+void ic_mark_token(void) {
+    last_token = output_cursor;
+}
+
 size_t ic_lookahead(const char* token, size_t token_len) { 
     size_t ret = 0;
     uint8_t *next_token = (uint8_t*) memmem(input_cursor,
@@ -581,7 +585,5 @@ void ic_subtract(size_t l){
 void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len) {
     __trace_pc_add_desc_region(queue_idx, desc_idx, is_out, pos, len);
 }
-
-
 
 

@@ -369,6 +369,7 @@ struct VirtioDev {
     uint8_t get_status();
     uint64_t get_device_features();
     uint64_t get_guest_features();
+    bool set_packed_queue(bool enable);
     bool disable_packed_queue();
     bool renegotiate_features(uint64_t new_guest_features);
     

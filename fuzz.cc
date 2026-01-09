@@ -863,6 +863,35 @@ bool op_trigger_aio() {
 }
 
 extern bool fuzz_unhealthy_input, fuzz_do_not_continue, fuzz_should_abort;
+
+static void virtio_select_ring_format_for_input() {
+	static bool log_enabled_inited;
+	static bool log_enabled;
+	if (!log_enabled_inited) {
+		log_enabled_inited = true;
+		log_enabled = getenv("VIRTIO_RING_FORMAT_LOG") != nullptr;
+	}
+
+	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	if (!vdev) {
+		return;
+	}
+	if (vdev->common_cfg.type != ConfigSpace::COMMON) {
+		return;
+	}
+
+	uint8_t selector = 0;
+	if (ic_ingest8(&selector, 0, 1, true) < 0) {
+		selector = 0;
+	}
+	bool want_packed = selector != 0;
+	if (log_enabled || log_ops || BX_CPU(id)->fuzztrace) {
+		printf("virtio ring format select: dev=%s selector=%u -> %s\n",
+		       vdev->name, selector, want_packed ? "packed" : "split");
+	}
+	vdev->set_packed_queue(want_packed);
+}
+
 void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	bool (*ops[])() = {
 		[OP_READ] = op_read,
@@ -891,6 +920,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	if (virtio_core) {
 		reset_input_output();
 		input_deserialize(Data, Size, input_get(), input_len_get(), dma_data_get(), desc_pool_get());
+		virtio_select_ring_format_for_input();
 	} else {
 		ic_new_input(Data, Size);
 	}

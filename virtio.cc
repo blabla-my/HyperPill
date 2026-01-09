@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include "conveyor.h"
@@ -596,77 +597,71 @@ bool VirtioDev::renegotiate_features(uint64_t new_guest_features) {
 
 	get_vqueue_manager().disable_hook();
 
-	bx_address desc_before[VIRTIO_QUEUE_MAX] = {0};
-	bx_address avail_before[VIRTIO_QUEUE_MAX] = {0};
-	bx_address used_before[VIRTIO_QUEUE_MAX] = {0};
-	size_t old_sel = common_cfg.get_queue_sel();
-
-	// for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
-	// 	if (!queues[i]) continue;
-	// 	common_cfg.set_queue_sel(i);
-	// 	/* Disable queue before reset per renegotiation */
-	// 	common_cfg.write(VIRTIO_PCI_COMMON_Q_ENABLE, sizeof(uint16_t), 0);
-	// }
-	// common_cfg.set_queue_sel(old_sel);
-
-	for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
-		if (!queues[i]) continue;
-		desc_before[i] = queues[i]->desc_ring ? queues[i]->desc_ring->addr_gpa : 0;
-		avail_before[i] = queues[i]->avail_ring ? queues[i]->avail_ring->addr_gpa : 0;
-		used_before[i] = queues[i]->used_ring ? queues[i]->used_ring->addr_gpa : 0;
-	}
-
-	uint8_t prev_status = get_status();
-
-	/* Reset and re-do feature negotiation */
-	set_status(0);
-	set_status(VIRTIO_CONFIG_S_ACKNOWLEDGE);
-	set_status(VIRTIO_CONFIG_S_DRIVER | get_status());
-
 	uint64_t device_features = get_device_features();
 	uint64_t negotiated = new_guest_features & device_features;
+	uint8_t prev_status = get_status();
+	uint8_t cleared_features_ok = prev_status & ~VIRTIO_CONFIG_S_FEATURES_OK;
+
+	/*
+	 * Avoid `status = 0` resets because they tear down ioeventfd/irqfd/MSI-X
+	 * notifiers (e.g. `msix_unset_vector_notifiers`) and can hang snapshot
+	 * replay. To allow updating guest features via common cfg, temporarily
+	 * clear FEATURES_OK (while keeping DRIVER_OK unchanged).
+	 */
+	if (prev_status & VIRTIO_CONFIG_S_FEATURES_OK) {
+		set_status(cleared_features_ok);
+	}
 	set_guest_features(negotiated);
-	set_status(VIRTIO_CONFIG_S_FEATURES_OK | get_status());
-
-	if (prev_status & VIRTIO_CONFIG_S_DRIVER_OK) {
-		set_status(VIRTIO_CONFIG_S_DRIVER_OK | get_status());
+	if (prev_status & VIRTIO_CONFIG_S_FEATURES_OK) {
+		set_status(prev_status);
 	}
 
-	for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
-		if (!queues[i]) continue;
-		common_cfg.set_queue_sel(i);
-		if (desc_before[i]) common_cfg.set_desc_ring_addr(desc_before[i]);
-		if (avail_before[i]) common_cfg.set_avail_ring_addr(avail_before[i]);
-		if (used_before[i]) common_cfg.set_used_ring_addr(used_before[i]);
+	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+	packed = (negotiated & packed_bit) != 0;
+	uint64_t guest_features = get_guest_features();
 
-		bx_address desc_after = common_cfg.get_desc_ring_addr();
-		bx_address avail_after = common_cfg.get_avail_ring_addr();
-		bx_address used_after = common_cfg.get_used_ring_addr();
-		printf("VirtioDev %s: queue %zu desc %lx -> %lx, avail %lx -> %lx, used %lx -> %lx\n",
-		       name, i, desc_before[i], desc_after, avail_before[i], avail_after, used_before[i], used_after);
+	if (guest_features != negotiated) {
+		printf("VirtioDev %s: Guest features readback %lx does not match negotiated %lx.\n", name, guest_features, negotiated);
 	}
 
-	common_cfg.set_queue_sel(old_sel);
-
-	printf("VirtioDev %s: re-negotiated features to %lx.\n", name, negotiated);
+	DBG_PRINT {
+		printf("VirtioDev %s: updated guest features to %lx (packed=%d).\n", name, negotiated, packed ? 1 : 0);
+	}
 	get_vqueue_manager().enable_hook();
 	return true;
 }
 
-bool VirtioDev::disable_packed_queue() {
-	uint64_t device_features = get_device_features();
-	uint64_t guest_features = get_guest_features();
-	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
-	bool packed_enabled = (device_features & packed_bit) && (guest_features & packed_bit);
-	if (!packed_enabled) {
+bool VirtioDev::set_packed_queue(bool enable) {
+	if (common_cfg.type != ConfigSpace::COMMON) {
+		printf("VirtioDev %s: Common config not set, cannot set packed ring.\n", name);
 		return false;
 	}
 
-	uint64_t new_guest_features = guest_features & ~packed_bit;
-	bool ok = renegotiate_features(new_guest_features);
-	printf("VirtioDev %s: Packed ring disabled, guest features %lx -> %lx (renegotiate %s)\n",
-	       name, guest_features, new_guest_features, ok ? "ok" : "failed");
-	return ok;
+	uint64_t device_features = get_device_features();
+	uint64_t guest_features = get_guest_features();
+	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+
+	bool device_supports_packed = (device_features & packed_bit) != 0;
+	bool current_packed = device_supports_packed && ((guest_features & packed_bit) != 0);
+	bool desired_packed = enable && device_supports_packed;
+
+	if (current_packed == desired_packed) {
+		packed = current_packed;
+		return true;
+	}
+
+	uint64_t new_guest_features = guest_features;
+	if (desired_packed) {
+		new_guest_features |= packed_bit;
+	} else {
+		new_guest_features &= ~packed_bit;
+	}
+
+	return renegotiate_features(new_guest_features);
+}
+
+bool VirtioDev::disable_packed_queue() {
+	return set_packed_queue(false);
 }
 
 void VirtioDev::enumerate_queues_from_common_cfg() {
