@@ -63,6 +63,9 @@ struct vring_desc_with_info;
 /* This means the buffer contains a list of buffer descriptors. */
 #define VRING_DESC_F_INDIRECT	4
 
+#define VIRTQ_DESC_F_AVAIL	(1u << 7)
+#define VIRTQ_DESC_F_USED	(1u << 15)
+
 #define VIRTIO_RING_F_INDIRECT_DESC	28
 
 /* The Guest publishes the used index for which it expects an interrupt
@@ -135,6 +138,13 @@ struct vring_desc {
 	uint32_t len;
 	uint16_t flags;
 	uint16_t next;
+};
+
+struct vring_packed_desc {
+	uint64_t addr;
+	uint32_t len;
+	uint16_t id;
+	uint16_t flags;
 };
 
 struct vring_desc_with_info {
@@ -350,6 +360,7 @@ struct VirtioDev {
     bool to_fuzz;
     bool is_net;
     bool is_scsi;
+    bool packed;
     void enumerate_queues_from_common_cfg();
     bool inited();
     void set_status(uint8_t status);
@@ -434,6 +445,8 @@ typedef struct VirtQueueElement
 } VirtQueueElement;
 
 int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem);
+
+int ingest_vring(bx_address addr, size_t len, void* data);
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
 const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);
