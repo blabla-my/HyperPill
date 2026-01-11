@@ -12,6 +12,7 @@
 #include "cov.h"
 #include <bits/types/struct_iovec.h>
 #include <cassert>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -146,6 +147,56 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 }
 
 /* DescRing */
+static bx_address alloc_indirect_table_gpa(const VQueue* queue, size_t table_bytes_len) {
+	bx_address guest_start = get_guest_ram_start();
+	bx_address guest_end = guest_start + get_guest_ram_size();
+
+	if (!queue || table_bytes_len == 0 || guest_end <= guest_start) {
+		return 0;
+	}
+	if (guest_end - guest_start < PAGE_SIZE) {
+		return (guest_start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+	}
+
+	/*
+	 * Deterministic placement: base it on (queue idx, per-input request id) so
+	 * the same fuzz input remains reproducible across runs.
+	 */
+	size_t request_id = queue->request_cnt ? (queue->request_cnt - 1) : 0;
+	const bx_address base = guest_start + 0x0c000000UL;
+	bx_address gpa = base + (bx_address)queue->idx * 0x10000UL + (bx_address)request_id * PAGE_SIZE;
+	gpa = (gpa + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+	const bx_address aligned_guest_start = (guest_start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+	const bx_address max_start = guest_end - std::min<bx_address>((bx_address)table_bytes_len, PAGE_SIZE);
+	if (gpa < aligned_guest_start || gpa > max_start) {
+		bx_address span = max_start > aligned_guest_start ? (max_start - aligned_guest_start) : 0;
+		if (span == 0) {
+			gpa = aligned_guest_start;
+		} else {
+			bx_address offset = (gpa - aligned_guest_start) % span;
+			gpa = aligned_guest_start + offset;
+			gpa = (gpa + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+		}
+	}
+
+	for (size_t tries = 0; tries < 0x10000; tries++) {
+		if (gpa > max_start) {
+			gpa = aligned_guest_start;
+		}
+		if (vmcs_translate_guest_physical_ept(gpa, nullptr, nullptr) == 0 &&
+			vmcs_translate_guest_physical_ept(gpa + table_bytes_len - 1, nullptr, nullptr) == 0 &&
+			get_vqueue_manager().get_belonging_vring(gpa) == nullptr &&
+			get_vqueue_manager().get_belonging_vring(gpa + table_bytes_len - 1) == nullptr &&
+			get_vqueue_manager().find_indirect_table(gpa, nullptr) == nullptr &&
+			get_vqueue_manager().find_indirect_table(gpa + table_bytes_len - 1, nullptr) == nullptr) {
+			return gpa;
+		}
+		gpa += PAGE_SIZE;
+	}
+	return aligned_guest_start;
+}
+
 int DescRing::ingest_elem(void* opaque, int index) const {
 	/* firstly, we query desc chain fsm for genereted desc index */
 	/* we assume here the desc chain fsm has been initialized */
@@ -184,67 +235,196 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 	}
 	else if (queue->desc_chain_fsm.is_inited()){
 		DescChainFSM::SGType sg_type = queue->desc_chain_fsm.consume();
+		bool indirect_enabled = queue && queue->vdev && queue->vdev->indirect_desc;
+		bool is_head = sg_type == DescChainFSM::SGType::OUT_HEAD ||
+		               sg_type == DescChainFSM::SGType::IN_HEAD ||
+		               sg_type == DescChainFSM::SGType::IN_HEAD_TAIL;
 
-		if (is_packed) {
-			packed_desc->id = index;
-			*flags_ptr = 0;
-			bool wrap_phase = ((size_t)index / size) % 2 == 0;
-			if (wrap_phase) {
-				*flags_ptr |= VIRTQ_DESC_F_AVAIL;
+		if (indirect_enabled && is_head) {
+			if (is_packed) {
+				packed_desc->id = index;
+				*flags_ptr = 0;
+				bool wrap_phase = ((size_t)index / size) % 2 == 0;
+				if (wrap_phase) {
+					*flags_ptr |= VIRTQ_DESC_F_AVAIL;
+				} else {
+					*flags_ptr |= VIRTQ_DESC_F_USED;
+				}
 			} else {
-				*flags_ptr |= VIRTQ_DESC_F_USED;
+				*flags_ptr = 0;
+				split_desc->next = 0;
 			}
-		} else {
-			*flags_ptr = 0;
-			split_desc->next = (index+1) % size;
-		}
-		// desc_ptr->flags = 0;
 
-		switch (sg_type) {
-			case DescChainFSM::SGType::OUT_HEAD:
-				*flags_ptr |= VRING_DESC_F_NEXT;
-				*flags_ptr &= ~VRING_DESC_F_WRITE;
-				break;
-			case DescChainFSM::SGType::OUT:
-				*flags_ptr |= VRING_DESC_F_NEXT;
-				*flags_ptr &= ~VRING_DESC_F_WRITE;
-				break;
-			case DescChainFSM::SGType::IN_HEAD:
-				*flags_ptr |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
-				break;
-			case DescChainFSM::SGType::IN:
-				*flags_ptr |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
-				break;
-			case DescChainFSM::SGType::IN_HEAD_TAIL:
-				*flags_ptr |= VRING_DESC_F_WRITE;
-				*flags_ptr &= ~VRING_DESC_F_NEXT;
-				break;
-			case DescChainFSM::SGType::IN_TAIL:
-				*flags_ptr |= VRING_DESC_F_WRITE;
-				*flags_ptr &= ~VRING_DESC_F_NEXT;
-				break;
-			case DescChainFSM::SGType::NONE:
-				break;
-		}
-		uint16_t queue_idx = queue->idx;
-		bool is_out = !(*flags_ptr & VRING_DESC_F_WRITE);
-		auto desc_seq = queue->desc_chain_fsm.desc_seq();
-		fuzzer::DescInfo desc_info = {
-			.queue_id = queue_idx,
-			.desc_idx = desc_seq,
-			.is_out = is_out
-		};
-		const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
-		if (!desc_with_info) { 
-			return -2;
-		}
-		*addr_ptr = desc_with_info->desc.addr;
-		*len_ptr = desc_with_info->desc.len;
-		queue->desc_chain_fsm.add_used_index(index);
-		queue->desc_chain_fsm.add_desc(desc_with_info);
-		get_vqueue_manager().add_desc(desc_with_info);
-		if (*len_ptr > 0x1000) { // record large desc size, having more chance to be identified by cmplog
-			AddDescSize(queue_idx, desc_seq, is_out, *len_ptr);
+			struct TablePlan {
+				DescChainFSM::SGType sg_type;
+				uint16_t desc_seq;
+				bool is_out;
+			};
+			std::vector<TablePlan> plans;
+			plans.reserve(DESC_CHAIN_MAX_LEN * 2);
+			auto push_plan = [&](DescChainFSM::SGType t) {
+				bool out = (t == DescChainFSM::SGType::OUT_HEAD || t == DescChainFSM::SGType::OUT);
+				plans.push_back({t, queue->desc_chain_fsm.desc_seq(), out});
+			};
+			push_plan(sg_type);
+			while (!queue->desc_chain_fsm.is_done() && plans.size() < DESC_CHAIN_MAX_LEN * 2) {
+				DescChainFSM::SGType t = queue->desc_chain_fsm.consume();
+				if (t == DescChainFSM::SGType::NONE) {
+					break;
+				}
+				push_plan(t);
+			}
+
+			size_t elem_sz = is_packed ? sizeof(vring_packed_desc) : sizeof(vring_desc);
+			size_t table_elems = plans.size();
+			size_t table_bytes_len = table_elems * elem_sz;
+			if (table_elems == 0 || table_bytes_len == 0 || table_bytes_len > PAGE_SIZE) {
+				return -2;
+			}
+
+			bx_address table_gpa = alloc_indirect_table_gpa(queue, table_bytes_len);
+			if (table_gpa == 0) {
+				return -2;
+			}
+			*addr_ptr = table_gpa;
+			*len_ptr = (uint32_t)table_bytes_len;
+
+			/*
+			 * Optional deterministic noise for error-handling coverage:
+			 * - 0: set VRING_DESC_F_INDIRECT inside the table
+			 * - 1: break chaining (split: out-of-range next, packed: NEXT on last)
+			 */
+			uint8_t noise = 0xff;
+			if (ic_ingest8(&noise, 0, 0xff, true) < 0) {
+				noise = 0xff;
+			}
+
+			std::vector<uint8_t> table_bytes;
+			table_bytes.resize(table_bytes_len);
+			uint16_t queue_idx = queue->idx;
+			for (size_t i = 0; i < table_elems; i++) {
+				bool has_next = (i + 1) < table_elems;
+				uint16_t entry_flags = 0;
+				if (has_next) {
+					entry_flags |= VRING_DESC_F_NEXT;
+				}
+				if (!plans[i].is_out) {
+					entry_flags |= VRING_DESC_F_WRITE;
+				}
+
+				if (noise == 0 && i == 0) {
+					entry_flags |= VRING_DESC_F_INDIRECT;
+				}
+				if (noise == 1 && is_packed && i + 1 == table_elems) {
+					entry_flags |= VRING_DESC_F_NEXT;
+				}
+
+				fuzzer::DescInfo desc_info = {
+					.queue_id = queue_idx,
+					.desc_idx = plans[i].desc_seq,
+					.is_out = plans[i].is_out,
+				};
+				const fuzzer::vring_desc_with_info* desc_with_info =
+					desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
+				if (!desc_with_info) {
+					return -2;
+				}
+				queue->desc_chain_fsm.add_desc(desc_with_info);
+				get_vqueue_manager().add_desc(desc_with_info);
+				if (desc_with_info->desc.len > 0x1000) {
+					AddDescSize(queue_idx, plans[i].desc_seq, plans[i].is_out, desc_with_info->desc.len);
+				}
+
+				if (is_packed) {
+					vring_packed_desc entry = {0};
+					entry.addr = desc_with_info->desc.addr;
+					entry.len = desc_with_info->desc.len;
+					entry.id = (uint16_t)i;
+					entry.flags = entry_flags;
+					memcpy(table_bytes.data() + i * elem_sz, &entry, elem_sz);
+				} else {
+					vring_desc entry = {0};
+					entry.addr = desc_with_info->desc.addr;
+					entry.len = desc_with_info->desc.len;
+					entry.flags = entry_flags;
+					entry.next = (uint16_t)(i + 1);
+					if (!has_next) {
+						entry.next = 0;
+					}
+					if (noise == 1 && i == 0 && has_next) {
+						entry.next = (uint16_t)table_elems;
+					}
+					memcpy(table_bytes.data() + i * elem_sz, &entry, elem_sz);
+				}
+			}
+
+			get_vqueue_manager().add_indirect_table(table_gpa, std::move(table_bytes));
+
+			*flags_ptr |= VRING_DESC_F_INDIRECT;
+			*flags_ptr &= ~(VRING_DESC_F_NEXT | VRING_DESC_F_WRITE);
+			queue->desc_chain_fsm.add_used_index(index);
+		} else {
+			if (is_packed) {
+				packed_desc->id = index;
+				*flags_ptr = 0;
+				bool wrap_phase = ((size_t)index / size) % 2 == 0;
+				if (wrap_phase) {
+					*flags_ptr |= VIRTQ_DESC_F_AVAIL;
+				} else {
+					*flags_ptr |= VIRTQ_DESC_F_USED;
+				}
+			} else {
+				*flags_ptr = 0;
+				split_desc->next = (index+1) % size;
+			}
+			// desc_ptr->flags = 0;
+
+			switch (sg_type) {
+				case DescChainFSM::SGType::OUT_HEAD:
+					*flags_ptr |= VRING_DESC_F_NEXT;
+					*flags_ptr &= ~VRING_DESC_F_WRITE;
+					break;
+				case DescChainFSM::SGType::OUT:
+					*flags_ptr |= VRING_DESC_F_NEXT;
+					*flags_ptr &= ~VRING_DESC_F_WRITE;
+					break;
+				case DescChainFSM::SGType::IN_HEAD:
+					*flags_ptr |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
+					break;
+				case DescChainFSM::SGType::IN:
+					*flags_ptr |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
+					break;
+				case DescChainFSM::SGType::IN_HEAD_TAIL:
+					*flags_ptr |= VRING_DESC_F_WRITE;
+					*flags_ptr &= ~VRING_DESC_F_NEXT;
+					break;
+				case DescChainFSM::SGType::IN_TAIL:
+					*flags_ptr |= VRING_DESC_F_WRITE;
+					*flags_ptr &= ~VRING_DESC_F_NEXT;
+					break;
+				case DescChainFSM::SGType::NONE:
+					break;
+			}
+			uint16_t queue_idx = queue->idx;
+			bool is_out = !(*flags_ptr & VRING_DESC_F_WRITE);
+			auto desc_seq = queue->desc_chain_fsm.desc_seq();
+			fuzzer::DescInfo desc_info = {
+				.queue_id = queue_idx,
+				.desc_idx = desc_seq,
+				.is_out = is_out
+			};
+			const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
+			if (!desc_with_info) { 
+				return -2;
+			}
+			*addr_ptr = desc_with_info->desc.addr;
+			*len_ptr = desc_with_info->desc.len;
+			queue->desc_chain_fsm.add_used_index(index);
+			queue->desc_chain_fsm.add_desc(desc_with_info);
+			get_vqueue_manager().add_desc(desc_with_info);
+			if (*len_ptr > 0x1000) { // record large desc size, having more chance to be identified by cmplog
+				AddDescSize(queue_idx, desc_seq, is_out, *len_ptr);
+			}
 		}
 	}
 	DBG_PRINT {
@@ -543,6 +723,7 @@ VirtioDev::VirtioDev() {
 	this->multiplier = 4;
 	this->to_fuzz = false;
 	this->packed = false;
+	this->indirect_desc = false;
 }
 
 void VirtioDev::set_status(uint8_t status) {
@@ -618,6 +799,8 @@ bool VirtioDev::renegotiate_features(uint64_t new_guest_features) {
 
 	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
 	packed = (negotiated & packed_bit) != 0;
+	uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+	indirect_desc = (negotiated & indirect_bit) != 0;
 	uint64_t guest_features = get_guest_features();
 
 	if (guest_features != negotiated) {
@@ -625,7 +808,8 @@ bool VirtioDev::renegotiate_features(uint64_t new_guest_features) {
 	}
 
 	DBG_PRINT {
-		printf("VirtioDev %s: updated guest features to %lx (packed=%d).\n", name, negotiated, packed ? 1 : 0);
+		printf("VirtioDev %s: updated guest features to %lx (packed=%d indirect=%d).\n",
+		       name, negotiated, packed ? 1 : 0, indirect_desc ? 1 : 0);
 	}
 	get_vqueue_manager().enable_hook();
 	return true;
@@ -828,6 +1012,8 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 				uint64_t guest_features = dev->get_guest_features();
 				uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
 				dev->packed = (dev_features & packed_bit) && (guest_features & packed_bit);
+				uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+				dev->indirect_desc = (dev_features & indirect_bit) && (guest_features & indirect_bit);
 			}
 			dev->enumerate_queues_from_common_cfg();
 			break;
@@ -900,6 +1086,24 @@ void VQueueManager::reset_all_queue(){
 	}
 }
 
+void VQueueManager::add_indirect_table(bx_address base_gpa, std::vector<uint8_t>&& bytes) {
+	indirect_tables[base_gpa] = std::move(bytes);
+}
+
+const std::vector<uint8_t>* VQueueManager::find_indirect_table(bx_address gpa, bx_address* base_gpa_out) const {
+	for (const auto& it : indirect_tables) {
+		bx_address base = it.first;
+		const auto& bytes = it.second;
+		if (gpa >= base && gpa < base + bytes.size()) {
+			if (base_gpa_out) {
+				*base_gpa_out = base;
+			}
+			return &bytes;
+		}
+	}
+	return nullptr;
+}
+
 bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
 	if (vdev->inited())
 		return true;
@@ -910,9 +1114,10 @@ bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
 	/* set features */
 	uint64_t features = vdev->get_device_features();
 	assert(features & (1ULL << VIRTIO_F_VERSION_1));
-	features &= ~((1ULL << VIRTIO_RING_F_EVENT_IDX) | (1ULL << VIRTIO_RING_F_INDIRECT_DESC));
+	features &= ~(1ULL << VIRTIO_RING_F_EVENT_IDX);
 	vdev->set_guest_features(features);
 	vdev->get_guest_features();
+	vdev->indirect_desc = (features & (1ULL << VIRTIO_RING_F_INDIRECT_DESC)) != 0;
 
 	vdev->set_status(VIRTIO_CONFIG_S_FEATURES_OK | vdev->get_status());
 
@@ -1236,7 +1441,7 @@ static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void
 			
 	size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
 	bool is_out = desc_with_info->desc_info.is_out;
-	bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && !queue->vdev->is_scsi);
+	bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0);
 			
 	if (offset > 0x100) 
 		return 0;
@@ -1469,6 +1674,23 @@ int ingest_vring(bx_address addr, size_t len, void* data) {
 			return ingest_vring_packed(addr, len, data);
 		}
 		return ingest_vring_split(addr, len, data);
+	}
+	{
+		bx_address base_gpa = 0;
+		const auto* bytes = get_vqueue_manager().find_indirect_table(gpa, &base_gpa);
+		if (bytes) {
+			size_t off = (size_t)(gpa - base_gpa);
+			size_t remaining = bytes->size() > off ? bytes->size() - off : 0;
+			size_t to_copy = std::min(len, remaining);
+			if (to_copy) {
+				BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, to_copy, (void*)(bytes->data() + off));
+				memcpy(data, bytes->data() + off, to_copy);
+			}
+			if (to_copy < len) {
+				memset((uint8_t*)data + to_copy, 0, len - to_copy);
+			}
+			return 0;
+		}
 	}
 	return ingest_vring_buffer(addr, gpa, len, data);
 }

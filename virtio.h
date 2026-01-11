@@ -361,6 +361,7 @@ struct VirtioDev {
     bool is_net;
     bool is_scsi;
     bool packed;
+    bool indirect_desc;
     void enumerate_queues_from_common_cfg();
     bool inited();
     void set_status(uint8_t status);
@@ -377,7 +378,7 @@ struct VirtioDev {
 
 class VQueueManager {
 public:
-    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs(), fuzzed_dev_cache(nullptr), hook_disabled(false) {}
+    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs(), seen_buffers(), indirect_tables(), fuzzed_dev_cache(nullptr), hook_disabled(false) {}
     typedef tsl::robin_set<const VRing*> VRingSet;
     bool create_virtio_device(const std::string& name, bool to_fuzz=false);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
@@ -412,6 +413,10 @@ public:
     void enable_hook() {hook_disabled = false;}
     bool hooks_disabled() const {return hook_disabled;}
 
+    void reset_indirect_tables() {indirect_tables.clear();}
+    void add_indirect_table(bx_address base_gpa, std::vector<uint8_t>&& bytes);
+    const std::vector<uint8_t>* find_indirect_table(bx_address gpa, bx_address* base_gpa_out) const;
+
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
@@ -421,6 +426,7 @@ private:
     size_t all_queue_count;
     std::vector<const fuzzer::vring_desc_with_info*> generated_descs;
     tsl::robin_map<uint64_t, size_t> seen_buffers;
+    tsl::robin_map<bx_address, std::vector<uint8_t>> indirect_tables;
     VirtioDev* fuzzed_dev_cache;
     bool hook_disabled = false;
 };

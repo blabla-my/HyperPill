@@ -864,12 +864,13 @@ bool op_trigger_aio() {
 
 extern bool fuzz_unhealthy_input, fuzz_do_not_continue, fuzz_should_abort;
 
-static void virtio_select_ring_format_for_input() {
+static void virtio_select_driver_features_for_input() {
 	static bool log_enabled_inited;
 	static bool log_enabled;
 	if (!log_enabled_inited) {
 		log_enabled_inited = true;
-		log_enabled = getenv("VIRTIO_RING_FORMAT_LOG") != nullptr;
+		log_enabled = getenv("VIRTIO_FEATURE_LOG") != nullptr ||
+			getenv("VIRTIO_RING_FORMAT_LOG") != nullptr;
 	}
 
 	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
@@ -880,16 +881,26 @@ static void virtio_select_ring_format_for_input() {
 		return;
 	}
 
-	uint8_t selector = 0;
-	if (ic_ingest8(&selector, 0, 1, true) < 0) {
-		selector = 0;
+	uint64_t device_features = vdev->get_device_features();
+	uint64_t mask = 0;
+	if (ic_ingest64(&mask, 0, UINT64_MAX, true) < 0) {
+		mask = 0;
 	}
-	bool want_packed = selector != 0;
+
+	uint64_t candidate = device_features & mask;
+	/* Keep modern virtio (common cfg) semantics. */
+	candidate |= (1ULL << VIRTIO_F_VERSION_1);
+
 	if (log_enabled || log_ops || BX_CPU(id)->fuzztrace) {
-		printf("virtio ring format select: dev=%s selector=%u -> %s\n",
-		       vdev->name, selector, want_packed ? "packed" : "split");
+		uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+		uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+		int want_packed = (candidate & packed_bit) != 0;
+		int want_indirect = (candidate & indirect_bit) != 0;
+		printf("virtio feature select: dev=%s mask=%lx dev=%lx -> guest=%lx (packed=%d indirect=%d)\n",
+		       vdev->name, mask, device_features, candidate, want_packed, want_indirect);
 	}
-	vdev->set_packed_queue(want_packed);
+
+	vdev->renegotiate_features(candidate);
 }
 
 void fuzz_run_input(const uint8_t *Data, size_t Size) {
@@ -920,7 +931,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	if (virtio_core) {
 		reset_input_output();
 		input_deserialize(Data, Size, input_get(), input_len_get(), dma_data_get(), desc_pool_get());
-		virtio_select_ring_format_for_input();
+		virtio_select_driver_features_for_input();
 	} else {
 		ic_new_input(Data, Size);
 	}
