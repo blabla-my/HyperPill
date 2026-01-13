@@ -127,19 +127,22 @@ bool DescPool::add(const vring_desc_with_info* desc_with_info) {
     len++;
     return true;
 }
-vring_desc_with_info* DescPool::new_desc(uint64_t guest_ram_start, uint64_t guest_ram_size) {
+vring_desc_with_info* DescPool::new_desc() {
     if(len >= DESC_ARRAY_MAX_LEN)
         return NULL;
     vring_desc_with_info* ret = &array[len];
     memset(ret, 0, sizeof(vring_desc_with_info));
     len++;
     srand(__rdtsc());
-    ret->desc.addr = guest_ram_start + (rand() % guest_ram_size);
-    ret->desc.len = rand() % 0x10000;
-    // ret->desc.flags = rand() & 0xffff;
+    vring_desc desc = {};
+    desc.addr = GUEST_MEM_START + (rand() % GUEST_MEM_SIZE);
+    desc.len = rand() % 0x10000;
+    desc.flags = 0;
+    desc.next = 0;
+    memcpy(ret->desc, &desc, sizeof(desc));
     return ret;
 }
-const vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info, uint64_t guest_ram_start, uint64_t guest_ram_size) {
+vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info) {
     for (size_t i = 0; i < len; i++) {
         vring_desc_with_info* desc_with_info = &array[i];
         if (desc_with_info->desc_info.queue_id == desc_info->queue_id &&
@@ -151,7 +154,7 @@ const vring_desc_with_info* DescPool::ingest_desc(const DescInfo* desc_info, uin
             }
         }
     }
-    auto new_desc = this->new_desc(guest_ram_start, guest_ram_size);
+    auto new_desc = this->new_desc();
     if (new_desc) {
         new_desc->desc_info = *desc_info;
         new_desc->used_cnt = MAX_USED_CNT;

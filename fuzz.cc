@@ -2,6 +2,7 @@
 #include "bochs.h"
 #include "config.h"
 #include "conveyor.h"
+#include "syntax.h"
 #include "virtio.h"
 #include "cov.h"
 #include "vendor/libfuzzer-ng/FuzzerInternal.h"
@@ -819,40 +820,21 @@ bool op_vmcall() {
 }
 
 bool op_notify() {
-	/* inject an mmio write to notify cfg */
-	/*
-	  1. select a random virtio device
-	  2. select a random queue 
-	  3. set queue_sel to that queue
-	  4. set queue_enable to that queue
-	  5. inject write to notify start + multiplier * index
-	*/
-	uint16_t vdev_idx;
-	uint16_t vqueue_idx;
-	if (get_vqueue_manager().get_num_virtio_dev() < 1) {
+	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	if (!vdev || vdev->queue_num < 1) {
 		return false;
 	}
-	if (ic_ingest16(&vdev_idx, 0, get_vqueue_manager().get_num_virtio_dev()-1) < 0) {
+
+	uint16_t queue_sel = 0;
+	if (ic_ingest16(&queue_sel, 0, (uint16_t)(vdev->queue_num - 1)) < 0) {
 		return false;
 	}
-	auto* vdev = get_vqueue_manager().get_virtio_dev(vdev_idx);
-	if (vdev->queue_num < 1) {
+
+	auto model = SyntaxModel::Create(*vdev);
+	if (!model) {
 		return false;
 	}
-	if (ic_ingest16(&vqueue_idx, 0, vdev->queue_num-1) < 0) {
-		return false;
-	}
-	if (!vdev->common_cfg.set_queue_enable(vqueue_idx)) {
-		return false;
-	}
-	bx_address addr = vdev->notify_cfg.address + vdev->multiplier * vqueue_idx; // make it mis-aligned
-	assert(addr < vdev->notify_cfg.address + vdev->notify_cfg.size);
-	if (!inject_write(addr, 2, vqueue_idx)) { //should be set according multiplier
-		printf("failed to inject notify at %lx (base %lx)!\n", addr, vdev->notify_cfg.address);
-		return false;
-	}
-	start_cpu();
-	return true;
+	return model->submit_request(queue_sel) != UINT16_MAX;
 }
 
 bool op_trigger_aio() {

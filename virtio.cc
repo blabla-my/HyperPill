@@ -325,28 +325,29 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 					.desc_idx = plans[i].desc_seq,
 					.is_out = plans[i].is_out,
 				};
-				const fuzzer::vring_desc_with_info* desc_with_info =
-					desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
+				auto* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 				if (!desc_with_info) {
 					return -2;
 				}
+				vring_desc canonical = {};
+				memcpy(&canonical, desc_with_info->desc, sizeof(canonical));
 				queue->desc_chain_fsm.add_desc(desc_with_info);
 				get_vqueue_manager().add_desc(desc_with_info);
-				if (desc_with_info->desc.len > 0x1000) {
-					AddDescSize(queue_idx, plans[i].desc_seq, plans[i].is_out, desc_with_info->desc.len);
+				if (canonical.len > 0x1000) {
+					AddDescSize(queue_idx, plans[i].desc_seq, plans[i].is_out, canonical.len);
 				}
 
 				if (is_packed) {
 					vring_packed_desc entry = {0};
-					entry.addr = desc_with_info->desc.addr;
-					entry.len = desc_with_info->desc.len;
+					entry.addr = canonical.addr;
+					entry.len = canonical.len;
 					entry.id = (uint16_t)i;
 					entry.flags = entry_flags;
 					memcpy(table_bytes.data() + i * elem_sz, &entry, elem_sz);
 				} else {
 					vring_desc entry = {0};
-					entry.addr = desc_with_info->desc.addr;
-					entry.len = desc_with_info->desc.len;
+					entry.addr = canonical.addr;
+					entry.len = canonical.len;
 					entry.flags = entry_flags;
 					entry.next = (uint16_t)(i + 1);
 					if (!has_next) {
@@ -414,12 +415,14 @@ int DescRing::ingest_elem(void* opaque, int index) const {
 				.desc_idx = desc_seq,
 				.is_out = is_out
 			};
-			const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
+			auto* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 			if (!desc_with_info) { 
 				return -2;
 			}
-			*addr_ptr = desc_with_info->desc.addr;
-			*len_ptr = desc_with_info->desc.len;
+			vring_desc canonical = {};
+			memcpy(&canonical, desc_with_info->desc, sizeof(canonical));
+			*addr_ptr = canonical.addr;
+			*len_ptr = canonical.len;
 			queue->desc_chain_fsm.add_used_index(index);
 			queue->desc_chain_fsm.add_desc(desc_with_info);
 			get_vqueue_manager().add_desc(desc_with_info);
@@ -1214,11 +1217,13 @@ bool VQueueManager::init_queues() {
 
 const fuzzer::vring_desc_with_info* VQueueManager::get_desc_by_gpa(uint64_t gpa) {
 	for (const auto* desc : generated_descs) {
-		if (gpa >= desc->desc.addr && gpa < desc->desc.addr + desc->desc.len) {
+		vring_desc canonical = {};
+		memcpy(&canonical, desc->desc, sizeof(canonical));
+		if (gpa >= canonical.addr && gpa < canonical.addr + canonical.len) {
 			return desc;
 		}
 	}
-    return nullptr;
+	return nullptr;
 }
 
 void VQueueManager::add_seen_buffer(uint64_t start, size_t size) {
@@ -1393,11 +1398,13 @@ size_t DescChainFSM::get_request_offset(bx_address gpa) const {
 	size_t offset = 0;
 	for (size_t i = 0; i < generated_descs_size; i++) {
 		const auto* d = generated_descs[i];
-		if (gpa >= d->desc.addr && gpa < d->desc.addr + d->desc.len) {
-			offset += (gpa - d->desc.addr);
+		vring_desc canonical = {};
+		memcpy(&canonical, d->desc, sizeof(canonical));
+		if (gpa >= canonical.addr && gpa < canonical.addr + canonical.len) {
+			offset += (gpa - canonical.addr);
 			break;
 		} else {
-			offset += d->desc.len;
+			offset += canonical.len;
 		}
 	}
 	return offset;

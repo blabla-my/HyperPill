@@ -103,13 +103,24 @@ public:
         NONE
     };
 
-    DescChainFSM() : state(WAIT), sg_num_in(0), sg_num_out(0), used_index() {}
+    DescChainFSM()
+        : state(WAIT), used_index(), sg_num_in(0), sg_num_in_remain(0), sg_num_out(0),
+          sg_num_out_remain(0), inited_count(0), generated_descs{}, generated_descs_size(0) {}
     void init(unsigned max_len, int queue_type);
     SGType consume();
     State get_state() {return state;}
     uint8_t get_inited_count() const {return inited_count;}
     uint16_t desc_seq(); // return the number of last consumed desc; out, in, counts independently
-    void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
+    void reset() {
+        state = WAIT;
+        used_index.clear();
+        sg_num_in = 0;
+        sg_num_in_remain = 0;
+        sg_num_out = 0;
+        sg_num_out_remain = 0;
+        inited_count = 0;
+        generated_descs_size = 0;
+    }
     void add_used_index(uint16_t idx) {used_index.insert(idx);}
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
     void add_desc(const fuzzer::vring_desc_with_info* desc_with_info);
@@ -121,7 +132,7 @@ public:
     bool is_done() const {return state == DONE;}
     bool is_running() const {return state == RUNNING;}
     bool is_inited() const {return state == INITED or state == RUNNING;}
-private:
+
     State state;
     tsl::robin_set<uint16_t> used_index;
     uint8_t sg_num_in;
