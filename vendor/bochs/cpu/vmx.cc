@@ -2698,7 +2698,7 @@ void BX_CPU_C::VMexitLoadHostState(void)
 
 void BX_CPU_C::VMexit(Bit32u reason, Bit64u qualification)
 {
-  BX_CPU(id)->vmcs_map->set_access_rights_format(VMCS_AR_PACK);
+  BX_CPU_THIS_PTR vmcs_map->set_access_rights_format(VMCS_AR_PACK);
   VMCS_CACHE *vm = &BX_CPU_THIS_PTR vmcs;
 
   if (!BX_CPU_THIS_PTR in_vmx || !BX_CPU_THIS_PTR in_vmx_guest) {

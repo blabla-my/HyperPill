@@ -93,7 +93,7 @@ void symbolize(size_t pc) {
 
     bool valid = BX_CPU(0)->dbg_xlate_linear2phy(pc&(~0xFFFLL), &phy_addr);
     if (valid)
-        BX_MEM(0)->dbg_fetch_mem(BX_CPU_THIS, phy_addr, 4096, instr_buf);
+        BX_MEM(0)->dbg_fetch_mem(BX_CPU(0), phy_addr, 4096, instr_buf);
     else
         abort();
 

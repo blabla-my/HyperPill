@@ -4,13 +4,17 @@
 #include "pc_system.h"
 #include "sourcecov.h"
 #include "task.h"
+#include "gui/siminterface.h"
+#include "param_names.h"
 #include "vendor/libfuzzer-ng/FuzzerInternal.h"
 #include "virtio.h"
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <sys/types.h>
 #include <filesystem>
+#include <vector>
 
 namespace fuzzer {
 	extern TracePC TPC;
@@ -33,8 +37,15 @@ static bool executing_input;
 
 // Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
 BOCHSAPI bx_pc_system_c bx_pc_system;
+#if BX_SUPPORT_SMP
+BOCHSAPI BX_CPU_C **bx_cpu_array = nullptr;
+BOCHSAPI Bit8u bx_cpu_count = 0;
+static std::vector<std::unique_ptr<BX_CPU_C>> hp_cpu_storage;
+static std::vector<BX_CPU_C> shadow_bx_cpus;
+#else
 BOCHSAPI BX_CPU_C bx_cpu = BX_CPU_C(0);
 BOCHSAPI BX_CPU_C shadow_bx_cpu;
+#endif
 BOCHSAPI bx_pc_system_c shadow_bx_pc_system;
 BOCHSAPI Bit64s shadow_tsc;
 
@@ -63,23 +74,49 @@ void dump_regs() {
 	};
 	for (int i = 0; i <= BX_GENERAL_REGISTERS; i++) {
 		printf("REG%d (%s) = %016lx\n", i, general_64bit_regname[i],
-		       BX_CPU(id)->gen_reg[i].rrx);
+		       hp::cur_cpu()->gen_reg[i].rrx);
 	}
-	printf("FLAGS: %x\n", BX_CPU(id)->eflags);
+	printf("FLAGS: %x\n", hp::cur_cpu()->eflags);
 	fflush(stdout);
 	fflush(stderr);
 }
 
 void dump_instr() {
-	auto s = addr_to_sym(BX_CPU(x)->get_rip());
-	printf("0x%lx<< %s %s\n", BX_CPU(x)->get_rip(), s.bin.c_str(), s.symbol.c_str());
-	BX_CPU(id)->debug_disasm_instruction(BX_CPU(x)->get_rip());
+	auto cpu = hp::cur_cpu();
+	auto s = addr_to_sym(cpu->get_rip());
+	printf("0x%lx<< %s %s\n", cpu->get_rip(), s.bin.c_str(),
+	       s.symbol.c_str());
+	cpu->debug_disasm_instruction(cpu->get_rip());
+}
+
+static void hp_init_cpus(unsigned int cpu_count) {
+#if BX_SUPPORT_SMP
+	if (bx_cpu_array)
+		return;
+	if (cpu_count == 0)
+		cpu_count = 1;
+
+	bx_cpu_count = static_cast<Bit8u>(cpu_count);
+	hp_cpu_storage.reserve(cpu_count);
+	bx_cpu_array = new BX_CPU_C *[cpu_count];
+	for (unsigned int cpu = 0; cpu < cpu_count; cpu++) {
+		hp_cpu_storage.emplace_back(std::make_unique<BX_CPU_C>(cpu));
+		bx_cpu_array[cpu] = hp_cpu_storage[cpu].get();
+	}
+	shadow_bx_cpus.resize(cpu_count);
+#else
+	(void)cpu_count;
+#endif
 }
 
 static void init_cpu(void) {
-	BX_CPU(id)->initialize();
-	BX_CPU(id)->reset(BX_RESET_HARDWARE);
-	BX_CPU(id)->sanity_checks();
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		hp::set_current_cpu(cpu);
+		hp::cpu(cpu)->initialize();
+		hp::cpu(cpu)->reset(BX_RESET_HARDWARE);
+		hp::cpu(cpu)->sanity_checks();
+	}
+	hp::set_current_cpu(0);
 }
 
 void start_cpu(bool enumerating) {
@@ -87,27 +124,79 @@ void start_cpu(bool enumerating) {
 		return;
 
 	srand(1); /* rdrand */
-	BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
+	hp::set_current_cpu(0);
+	hp::vcpu()->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
 	icount = 0;
 	pio_icount = 0;
 	clear_seen_dma();
-	if (BX_CPU(id)->fuzztrace) {
+	if (hp::vcpu()->fuzztrace) {
 		dump_regs();
 	}
 	reset_op_cov();
 
-	BX_CPU(id)->fuzz_executing_input = true;
-	if (bx_dbg.gdbstub_enabled && !enumerating)
-		hp_gdbstub_debug_loop();
-	while (BX_CPU(id)->fuzz_executing_input) {
-		BX_CPU(id)->cpu_loop();
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		hp::cpu(cpu)->fuzz_executing_input = true;
 	}
-	if (fuzz_unhealthy_input || fuzz_do_not_continue)
-		return;
-	BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
+	if (hp::vcpu()->fuzzdebug_gdb && !enumerating)
+		hp_gdbstub_debug_loop();
+	if (hp::num_cpus() == 1) {
+		while (hp::vcpu()->fuzz_executing_input) {
+			hp::set_current_cpu(0);
+			hp::vcpu()->cpu_loop();
+		}
+	} else {
+	#if BX_SUPPORT_SMP
+		Bit32u executed = 0;
+		Bit32u processor = 0;
+		bool run = true;
+		const Bit32u quantum = SIM->get_param_num(BXPN_SMP_QUANTUM)->get();
+
+		for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+			hp::cpu(cpu)->icount_last_sync = hp::cpu(cpu)->get_icount();
+		}
+
+		if (setjmp(BX_CPU_C::jmp_buf_env)) {
+			hp::cpu(processor)->icount++;
+			run = false;
+		}
+
+		while (hp::vcpu()->fuzz_executing_input) {
+			hp::set_current_cpu(processor);
+			if (run)
+				hp::cpu(processor)->cpu_run_trace();
+			else
+				run = true;
+
+			Bit32u n = (Bit32u)(hp::cpu(processor)->get_icount() -
+			                    hp::cpu(processor)->icount_last_sync);
+			if (n == 0)
+				n = quantum;
+			executed += n;
+
+			if (++processor == hp::num_cpus()) {
+				processor = 0;
+				BX_TICKN(executed / hp::num_cpus());
+				executed %= hp::num_cpus();
+			}
+
+			hp::cpu(processor)->icount_last_sync =
+				hp::cpu(processor)->get_icount();
+		}
+		hp::set_current_cpu(0);
+#else
+		while (hp::vcpu()->fuzz_executing_input) {
+			hp::set_current_cpu(0);
+			hp::vcpu()->cpu_loop();
+		}
+	#endif
+		}
+		pause_cpu();
+		if (fuzz_unhealthy_input || fuzz_do_not_continue)
+			return;
+		hp::vcpu()->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
 
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	// assert(res == 1); // Guest page table should be guarded
 	if (res != 1){
 		fuzz_emu_stop_unhealthy();
@@ -130,27 +219,33 @@ void start_cpu(bool enumerating) {
  */
 
 static void fuzz_emu_stop() {
-	BX_CPU(id)->fuzz_executing_input = false;
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		hp::cpu(cpu)->fuzz_executing_input = false;
+	}
+}
+
+void pause_cpu() {
+	fuzz_emu_stop();
 }
 
 void fuzz_emu_stop_normal(){
-    fuzz_emu_stop();
+	pause_cpu();
 }
 
 void fuzz_emu_stop_unhealthy(){
-	fuzz_emu_stop();
+	pause_cpu();
     fuzz_do_not_continue = 1;
     fuzz_unhealthy_input = 1;
 }
 
 void fuzz_emu_stop_polling() {
-	fuzz_emu_stop();
+	pause_cpu();
 	fuzz_do_not_continue = 1;
 }
 
 void fuzz_emu_stop_crash(const char *type){
 	// judege whether the crash is from a hypervisor thread
-	unsigned long cr3 = BX_CPU(id)->cr3;
+	unsigned long cr3 = hp::cur_cpu()->cr3;
 	Task* task = task_manager.get_current_task();
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
@@ -179,8 +274,9 @@ void fuzz_emu_stop_crash(const char *type){
 }
 
 void fuzz_hook_exception(unsigned vector, unsigned error_code) {
-	if (verbose)
+	// if (verbose)
 		printf("Exception: 0x%x 0x%x\n", vector, error_code);
+	exit(1);
 }
 
 void fuzz_hook_hlt() {
@@ -198,11 +294,18 @@ unsigned long int get_pio_icount() {
 }
 
 void reset_bx_vm() {
+#if BX_SUPPORT_SMP
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		*hp::cpu(cpu) = shadow_bx_cpus[cpu];
+	}
+#else
 	bx_cpu = shadow_bx_cpu;
+#endif
 	bx_pc_system = shadow_bx_pc_system;
-	if (BX_CPU(id)->vmcs_map)
-		BX_CPU(id)->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
+	if (hp::vcpu()->vmcs_map)
+		hp::vcpu()->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
 	fuzz_reset_memory();
+	hp::set_current_cpu(0);
 }
 
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
@@ -274,7 +377,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	static void *ic_test = getenv("FUZZ_IC_TEST");
 	static void *virtio_core = getenv("VIRTIO_CORE");
 	static int done;
-	if (BX_CPU(id)->fuzztrace)
+	if (hp::vcpu()->fuzztrace)
 		printf("NEW INPUT\n");
 	if (!done) {
 		if (!log_writes)
@@ -408,16 +511,39 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	vmcs_addr = strtoll(vmcs_addr_str, NULL, 16);
 
+	auto guess_cpu_count = [&](const char *base) -> unsigned int {
+		const char *env = getenv("ICP_NCPUS");
+		if (env) {
+			long n = strtol(env, nullptr, 10);
+			if (n > 0)
+				return static_cast<unsigned int>(n);
+		}
+		std::error_code ec;
+		if (std::filesystem::exists(base, ec))
+			return 1;
+		for (unsigned int cpu = 0;; cpu++) {
+			std::string path = std::string(base) + std::to_string(cpu);
+			if (!std::filesystem::exists(path, ec))
+				return cpu ? cpu : 1;
+		}
+	};
+	unsigned int cpu_count = guess_cpu_count(regs_path);
+
 	/* Bochs-specific initialization. (e.g. CPU version/features). */
-	if (getenv("GDB")) {
-		bx_dbg.gdbstub_enabled = 1;
-	}
 	icp_init_params();
+	hp_init_cpus(cpu_count);
+#if BX_SUPPORT_SMP
+	SIM->get_param_num(BXPN_CPU_NPROCESSORS)->set(1);
+	SIM->get_param_num(BXPN_CPU_NCORES)->set(cpu_count);
+	SIM->get_param_num(BXPN_CPU_NTHREADS)->set(1);
+#endif
 	init_cpu();
 	bx_init_pc_system();
 
-	BX_CPU(id)->fuzzdebug_gdb = getenv("GDB");
-	BX_CPU(id)->fuzztrace = (getenv("FUZZ_DEBUG_DISASM") != 0);
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		hp::cpu(cpu)->fuzzdebug_gdb = getenv("GDB");
+		hp::cpu(cpu)->fuzztrace = (getenv("FUZZ_DEBUG_DISASM") != 0);
+	}
 
 	/* Load the snapshot */
 	printf(".loading memory snapshot from %s\n", mem_path);
@@ -426,11 +552,25 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	icp_init_shadow_vmcs_layout(vmcs_shadow_layout_path);
 	printf(".loading register snapshot from %s\n", regs_path);
-	icp_init_regs(regs_path);
+		{
+			std::error_code ec;
+			for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+				std::string path;
+			if (std::filesystem::exists(regs_path, ec)) {
+				if (cpu != 0)
+					break;
+				path = regs_path;
+			} else {
+				path = std::string(regs_path) + std::to_string(cpu);
+			}
+				icp_init_regs_cpu(path.c_str(), cpu);
+			}
+			hp::set_current_cpu(0);
+		}
 
-	/* The current VMCS address is part of the CPU-state, but it is not part
-	 * of the memory or register snapshot. As such, we load it (and adjacent
-	 * internal Bochs pointers) separately.
+		/* The current VMCS address is part of the CPU-state, but it is not part
+		 * of the memory or register snapshot. As such, we load it (and adjacent
+		 * internal Bochs pointers) separately.
 	 */
 	printf(".vmcs addr set  to %lx\n", vmcs_addr);
 	icp_set_vmcs(vmcs_addr);
@@ -473,7 +613,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	ept_locate_pc();
 
 	/* Save guest RIP so that we can restore it after each fuzzer input */
-	guest_rip = BX_CPU(id)->get_rip();
+	guest_rip = hp::vcpu()->get_rip();
 	
 	/* Load symbols from files */
 	if (getenv("KALLSYMS") and getenv("MAPS")) {
@@ -509,11 +649,12 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		}
 	}
 
-	BX_CPU(id)->TLB_flush();
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++)
+		hp::cpu(cpu)->TLB_flush();
 	fuzz_walk_ept();
 	vmcs_fixup();
 	ept_mark_page_table();
-	init_register_feedback();
+	// init_register_feedback();
 
 	if (getenv("LINK_MAP") && getenv("LINK_OBJ_REGEX"))
 		load_link_map(getenv("LINK_MAP"), getenv("LINK_OBJ_REGEX"),
@@ -544,7 +685,13 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	 * make a copy of the bochs CPU state, which we use to reset the CPU
 	 * state after each fuzzer input
 	 */
+#if BX_SUPPORT_SMP
+	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		shadow_bx_cpus[cpu] = *hp::cpu(cpu);
+	}
+#else
 	shadow_bx_cpu = bx_cpu;
+#endif
 	shadow_bx_pc_system = bx_pc_system;
 
 	/* Start tracking accesses to the memory so we can roll-back changes

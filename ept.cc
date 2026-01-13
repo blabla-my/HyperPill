@@ -77,7 +77,8 @@ void fuzz_walk_ept() {
 
 int vmcs_translate_guest_physical_ept(bx_phy_address guest_paddr, bx_phy_address *phy, int *translation_level)
 {
-  VMCS_CACHE *vm = &BX_CPU(id)->vmcs;
+  BX_CPU_C *cpu = hp::cur_cpu();
+  VMCS_CACHE *vm = &cpu->vmcs;
   bx_phy_address pt_address = LPFOf(vm->eptptr) ;//BX_CPU(id)->VMread64(VMCS_64BIT_CONTROL_EPTPTR) & (~0xFFF);
 
   Bit64u offset_mask = BX_CONST64(0x0000ffffffffffff);
@@ -88,7 +89,7 @@ int vmcs_translate_guest_physical_ept(bx_phy_address guest_paddr, bx_phy_address
     pt_address += ((guest_paddr >> (9 + 9*level)) & 0xff8);
     offset_mask >>= 9;
     mark_l2_guest_pagetable(pt_address, 0x1000, level);
-    BX_MEM(0)->readPhysicalPage(BX_CPU_THIS, pt_address, 8, &pte);
+    BX_MEM(0)->readPhysicalPage(cpu, pt_address, 8, &pte);
     /* printf("guest_paddr: %lx pte[%lx]: %lx\n", guest_paddr, pt_address, pte); */
     switch(pte & 7) {
     case BX_EPT_ENTRY_NOT_PRESENT:
@@ -111,7 +112,7 @@ int vmcs_translate_guest_physical_ept(bx_phy_address guest_paddr, bx_phy_address
     if (level == BX_LEVEL_PTE) break;
 
     if (pte & 0x80) {
-        if (level > (BX_LEVEL_PDE + !!BX_CPU(id)->is_cpu_extension_supported(BX_ISA_1G_PAGES)))
+        if (level > (BX_LEVEL_PDE + !!cpu->is_cpu_extension_supported(BX_ISA_1G_PAGES)))
             return VMX_VMEXIT_EPT_MISCONFIGURATION;
 
         pt_address &= BX_CONST64(0x000fffffffffe000);

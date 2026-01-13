@@ -184,13 +184,13 @@ struct InputInfo {
 
   Unit Ops;
   DMAData DmaData;
-  DescPool DescPool;
+  DescPool DescPoolData;
   bool parse_valid = false;
 
   void Parse() {
     Ops.resize(MAX_OPS_LEN);
     size_t ops_len = MAX_OPS_LEN;
-    parse_valid = input_deserialize(U.data(), U.size(), Ops.data(), &ops_len, &DmaData, &DescPool);
+    parse_valid = input_deserialize(U.data(), U.size(), Ops.data(), &ops_len, &DmaData, &DescPoolData);
     Ops.resize(ops_len);
   }
 

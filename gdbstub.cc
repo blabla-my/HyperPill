@@ -35,6 +35,10 @@
 
 #define NEED_CPU_REG_SHORTCUTS 1
 
+#ifndef GDBSTUB_STOP_NO_REASON
+#define GDBSTUB_STOP_NO_REASON (0xac0)
+#endif
+
 static int last_stop_reason = GDBSTUB_STOP_NO_REASON;
 
 #define GDBSTUB_EXECUTION_BREAKPOINT    (0xac1)
@@ -480,7 +484,8 @@ static int access_linear(uint64_t laddress,
   if (!valid) return(0);
 
   if (rw & 1) {
-    valid = BX_MEM(0)->dbg_set_mem(BX_CPU(0), phys, len, data);
+    BX_MEM(0)->writePhysicalPage(BX_CPU(0), phys, len, data, /*hook_access=*/false);
+    valid = true;
   } else {
     valid = BX_MEM(0)->dbg_fetch_mem(BX_CPU(0), phys, len, data);
   }
@@ -488,24 +493,7 @@ static int access_linear(uint64_t laddress,
   return(valid);
 }
 
-#define RAX (BX_CPU_THIS_PTR gen_reg[0].rrx)
-#define RCX (BX_CPU_THIS_PTR gen_reg[1].rrx)
-#define RDX (BX_CPU_THIS_PTR gen_reg[2].rrx)
-#define RBX (BX_CPU_THIS_PTR gen_reg[3].rrx)
-#define RSP (BX_CPU_THIS_PTR gen_reg[4].rrx)
-#define RBP (BX_CPU_THIS_PTR gen_reg[5].rrx)
-#define RSI (BX_CPU_THIS_PTR gen_reg[6].rrx)
-#define RDI (BX_CPU_THIS_PTR gen_reg[7].rrx)
-#define R8  (BX_CPU_THIS_PTR gen_reg[8].rrx)
-#define R9  (BX_CPU_THIS_PTR gen_reg[9].rrx)
-#define R10 (BX_CPU_THIS_PTR gen_reg[10].rrx)
-#define R11 (BX_CPU_THIS_PTR gen_reg[11].rrx)
-#define R12 (BX_CPU_THIS_PTR gen_reg[12].rrx)
-#define R13 (BX_CPU_THIS_PTR gen_reg[13].rrx)
-#define R14 (BX_CPU_THIS_PTR gen_reg[14].rrx)
-#define R15 (BX_CPU_THIS_PTR gen_reg[15].rrx)
-
-#define RIP (BX_CPU_THIS_PTR gen_reg[BX_64BIT_REG_RIP].rrx)
+static BX_CPU_C *dbg_cpu() { return hp::vcpu(); }
 
 char last_seen_binary[1024] = { '\0' };
 
@@ -564,7 +552,7 @@ static void debug_loop(void)
             last_stop_reason == GDBSTUB_TRACE)
         {
           write_signal(&buf[1], SIGTRAP);
-          auto s = addr_to_sym(RIP);
+          auto s = addr_to_sym(dbg_cpu()->gen_reg[BX_64BIT_REG_RIP].rrx);
           const char *current_binary = s.bin.c_str();
           if ((strlen(current_binary) > 1) && strncmp(last_seen_binary, current_binary, strlen(current_binary))) {
             memcpy(last_seen_binary, current_binary, strlen(current_binary));
@@ -590,7 +578,7 @@ static void debug_loop(void)
 
         verbose_printf("stepping\n");
         stub_trace_flag = 1;
-        bx_cpu.cpu_loop();
+        dbg_cpu()->cpu_loop();
         stub_trace_flag = 0;
         verbose_printf("stopped with %x\n", last_stop_reason);
         buf[0] = 'S';
@@ -603,7 +591,7 @@ static void debug_loop(void)
         {
           write_signal(&buf[1], SIGTRAP);
         }
-        auto s = addr_to_sym(RIP);
+        auto s = addr_to_sym(dbg_cpu()->gen_reg[BX_64BIT_REG_RIP].rrx);
         const char *current_binary = s.bin.c_str();
         if ((strlen(current_binary) > 1) && strncmp(last_seen_binary, current_binary, strlen(current_binary))) {
           memcpy(last_seen_binary, current_binary, strlen(current_binary));
@@ -707,12 +695,12 @@ static void debug_loop(void)
           case 13:
           case 14:
           case 15:
-            BX_CPU_THIS_PTR set_reg64(reg, value);
+            dbg_cpu()->set_reg64(reg, value);
             break;
 
           case 16:
-            RIP = value;
-            BX_CPU_THIS_PTR invalidate_prefetch_q();
+            dbg_cpu()->gen_reg[BX_64BIT_REG_RIP].rrx = value;
+            dbg_cpu()->invalidate_prefetch_q();
             break;
 
           default:
@@ -731,36 +719,36 @@ static void debug_loop(void)
          (buf) = mem2hex((const uint8_t*)&u, (buf), (len)); \
       } while (0)
         char* buf = obuf;
-        PUTREG(buf, RAX, 8);
-        PUTREG(buf, RBX, 8);
-        PUTREG(buf, RCX, 8);
-        PUTREG(buf, RDX, 8);
-        PUTREG(buf, RSI, 8);
-        PUTREG(buf, RDI, 8);
-        PUTREG(buf, RBP, 8);
-        PUTREG(buf, RSP, 8);
-        PUTREG(buf, R8,  8);
-        PUTREG(buf, R9,  8);
-        PUTREG(buf, R10, 8);
-        PUTREG(buf, R11, 8);
-        PUTREG(buf, R12, 8);
-        PUTREG(buf, R13, 8);
-        PUTREG(buf, R14, 8);
-        PUTREG(buf, R15, 8);
-        uint64_t rip;
-        rip = RIP;
+        auto cpu = dbg_cpu();
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RAX].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RBX].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RCX].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RDX].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RSI].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RDI].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RBP].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_RSP].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R8].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R9].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R10].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R11].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R12].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R13].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R14].rrx, 8);
+        PUTREG(buf, cpu->gen_reg[BX_64BIT_REG_R15].rrx, 8);
+        uint64_t rip = cpu->gen_reg[BX_64BIT_REG_RIP].rrx;
         if (last_stop_reason == GDBSTUB_EXECUTION_BREAKPOINT)
         {
           ++rip;
         }
         PUTREG(buf, rip, 8);
-        PUTREG(buf, BX_CPU_THIS_PTR read_eflags(), 4);
-        PUTREG(buf, BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].selector.value, 4);
-        PUTREG(buf, BX_CPU_THIS_PTR sregs[BX_SEG_REG_SS].selector.value, 4);
-        PUTREG(buf, BX_CPU_THIS_PTR sregs[BX_SEG_REG_DS].selector.value, 4);
-        PUTREG(buf, BX_CPU_THIS_PTR sregs[BX_SEG_REG_ES].selector.value, 4);
-        PUTREG(buf, BX_CPU_THIS_PTR sregs[BX_SEG_REG_FS].selector.value, 4);
-        PUTREG(buf, BX_CPU_THIS_PTR sregs[BX_SEG_REG_GS].selector.value, 4);
+        PUTREG(buf, cpu->read_eflags(), 4);
+        PUTREG(buf, cpu->sregs[BX_SEG_REG_CS].selector.value, 4);
+        PUTREG(buf, cpu->sregs[BX_SEG_REG_SS].selector.value, 4);
+        PUTREG(buf, cpu->sregs[BX_SEG_REG_DS].selector.value, 4);
+        PUTREG(buf, cpu->sregs[BX_SEG_REG_ES].selector.value, 4);
+        PUTREG(buf, cpu->sregs[BX_SEG_REG_FS].selector.value, 4);
+        PUTREG(buf, cpu->sregs[BX_SEG_REG_GS].selector.value, 4);
         put_reply(obuf);
         break;
       }
@@ -831,7 +819,7 @@ static void debug_loop(void)
         // qXfer:exec-file:read:annex:offset,length
         else if (strncmp(&buffer[1], "Xfer:exec-file:read::", strlen("Xfer:exec-file:read::")) == 0)
         {
-          auto s = addr_to_sym(RIP);
+          auto s = addr_to_sym(dbg_cpu()->gen_reg[BX_64BIT_REG_RIP].rrx);
           const char *current_binary = s.bin.c_str();
           sprintf(obuf, "l%s", current_binary);
           memcpy(last_seen_binary, current_binary, strlen(current_binary));

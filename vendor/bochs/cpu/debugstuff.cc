@@ -66,7 +66,7 @@ void BX_CPU_C::debug_disasm_instruction(bx_address offset)
       if(BX_CPU_THIS_PTR in_vmx_guest)
           printf("[VMCS %016lx] 0x" FMT_ADDRX ">> %s\n", BX_CPU_THIS_PTR vmcsptr, offset, char_buf);
       else
-          printf("0x" FMT_ADDRX ">> %s\n", offset, char_buf);
+          printf("0x" FMT_ADDRX ">> %s (cpu %d)\n", offset, char_buf, BX_CPU_ID);
     }
     else {
       printf("0x" FMT_ADDRX ": (instruction unavailable) page split instruction\n", offset);

@@ -29,8 +29,14 @@ CPPFLAGS   = -I vendor/bochs \
              -I vendor/include \
              -I vendor/robin-map/include
 
-# LDFLAGS: Flags for the linker (e.g., PIE for executables)
-LDFLAGS    = -fPIE
+# LDFLAGS: Flags for the linker.
+# Bochs static libraries are not built as PIE by default, so disable PIE on
+# Linux to avoid relocation errors when linking the final executable.
+ifeq ($(OS),Linux)
+LDFLAGS    = -no-pie
+else
+LDFLAGS    =
+endif
 
 # LDLIBS: The libraries to link against.
 LDLIBS     = -lrt -ldl -lpthread -lsqlite3 -lstdc++fs -lcrypto
@@ -41,6 +47,7 @@ SANITIZE_FLAGS =
 # --- Source Files and Libraries ---
 # List of object files to be created
 OBJS       = main.o \
+             hp_cpu.o \
              regs.o \
              breakpoints.o \
              db.o \
@@ -91,7 +98,7 @@ fuzz: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
 	$(CXX) $(LDFLAGS) $(SANITIZE_FLAGS) -o $@ $(OBJS) $(VENDOR_OBJS) $(VENDOR_LIBS) $(LDLIBS)
 
 # Generic rule for compiling .cc files into .o files
-%.o: %.cc
+%.o: %.cc | rebuild_bochs
 	@echo "===> Compiling $<"
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
 
@@ -102,13 +109,17 @@ vendor/libfuzzer-ng/libFuzzer.a:
 rebuild_bochs:
 	@echo "===> Building Bochs"
 	mkdir -p vendor/bochs-build vendor/lib vendor/include
-	cd vendor/bochs-build; test -f config.h || CXXFLAGS="$(BOCHS_CXXFLAGS)" ../bochs/configure \
-		--enable-vmx=2 --with-vncsrv --enable-x86-64 --enable-e1000 \
-		--without-x --without-x11 --without-win32 --without-macos \
-		--enable-cpu-level=6 --enable-pci --without-gui --enable-pnic \
-		--enable-fast-function-calls --enable-fpu --enable-cdrom \
-		--enable-avx --enable-evex --disable-docbook --enable-instrumentation --with-nogui \
-		--enable-gdb-stub
+	cd vendor/bochs-build; \
+		bochs_args="--enable-vmx=2 --with-vncsrv --enable-x86-64 --enable-e1000 \
+			--without-x --without-x11 --without-win32 --without-macos \
+			--enable-cpu-level=6 --enable-pci --without-gui --enable-pnic \
+			--enable-fast-function-calls --enable-fpu --enable-cdrom \
+			--enable-avx --enable-evex --disable-docbook --enable-instrumentation --with-nogui \
+			--enable-smp"; \
+		if [ ! -f .configure.args ] || [ "$$(cat .configure.args)" != "$$bochs_args" ]; then \
+			echo "$$bochs_args" > .configure.args; \
+			CXXFLAGS="$(BOCHS_CXXFLAGS)" ../bochs/configure $$bochs_args; \
+		fi
 	cd vendor/bochs-build; make -j $(NPROCS)
 	cp ./vendor/bochs-build/cpu/cpudb/libcpudb.a vendor/lib/
 	cp ./vendor/bochs-build/cpu/libcpu.a vendor/lib/
@@ -119,6 +130,14 @@ rebuild_bochs:
 	cp ./vendor/bochs/instrument/stubs/instrument.h vendor/include/
 	cd vendor/bochs-build; make -j bx_debug/libdebug.a
 	cp ./vendor/bochs-build/bx_debug/libdebug.a vendor/lib/
+
+# Bochs artifacts are produced as side effects of `rebuild_bochs`. Declare them
+# as buildable targets so parallel `make` doesn't fail with "No rule".
+vendor/lib/%: | rebuild_bochs
+	@true
+
+vendor/include/%: | rebuild_bochs
+	@true
 
 # This target rebuilds each test from scratch with sanitizers enabled
 tests: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a

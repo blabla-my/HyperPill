@@ -87,7 +87,7 @@ static char* copy_string_from_vm(bx_address addr, size_t len) {
 }
 
 static void bp__stdio_write(bxInstruction_c *i){
-    i->execute1 = BX_CPU_C::RETnear64_Iw;
+    i->execute1 = &BX_CPU_C::RETnear64_Iw;
     i->modRMForm.Iw[0] = 0;
     i->modRMForm.Iw[1] = 0;
     BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
@@ -113,14 +113,14 @@ void apply_breakpoints_linux() {
             fuzz_emu_stop_crash("firecracker: panic");
             });
     add_breakpoint(sym_to_addr("vmm", "pthread_rwlock_rdlock"), [](bxInstruction_c *i) {
-            i->execute1 = BX_CPU_C::RETnear64_Iw;
+            i->execute1 = &BX_CPU_C::RETnear64_Iw;
             i->modRMForm.Iw[0] = 0;
             i->modRMForm.Iw[1] = 0;
             BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
             BX_CPU(id)->async_event = 1;
             });
     add_breakpoint(sym_to_addr("vmm", "pthread_rwlock_unlock"), [](bxInstruction_c *i) {
-            i->execute1 = BX_CPU_C::RETnear64_Iw;
+            i->execute1 = &BX_CPU_C::RETnear64_Iw;
             i->modRMForm.Iw[0] = 0;
             i->modRMForm.Iw[1] = 0;
             BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
@@ -140,14 +140,14 @@ void apply_breakpoints_linux() {
     //         BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
     //         BX_CPU(id)->async_event = 1;
     //         });
-    add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](bxInstruction_c *i) {
-            printf("Skipping __asan::CheckUnwind");
-            print_stacktrace();
-            i->execute1 = BX_CPU_C::RETnear64_Iw;
-            i->modRMForm.Iw[0] = 0;
-            i->modRMForm.Iw[1] = 0;
-            BX_CPU(id)->async_event = 1;
-            });
+	    add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](bxInstruction_c *i) {
+	            printf("Skipping __asan::CheckUnwind");
+	            print_stacktrace();
+	            i->execute1 = &BX_CPU_C::RETnear64_Iw;
+	            i->modRMForm.Iw[0] = 0;
+	            i->modRMForm.Iw[1] = 0;
+	            BX_CPU(id)->async_event = 1;
+	            });
     add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](bxInstruction_c *i) {
             // every error through asan should reach this
             printf("ASAN error report\n");
@@ -186,7 +186,7 @@ void apply_breakpoints_linux() {
     //         // fuzz_emu_stop_crash("page fault");
     // });
     add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](bxInstruction_c *i) {
-        i->execute1 = BX_CPU_C::RETnear64_Iw;
+        i->execute1 = &BX_CPU_C::RETnear64_Iw;
         i->modRMForm.Iw[0] = 0;
         i->modRMForm.Iw[1] = 0;
         BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
@@ -235,14 +235,14 @@ void handle_syscall_hooks(bxInstruction_c *i)
                     return;
                 }
                 break;
-            case 1:     // write
-                if (BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx == 1 ||
-                        BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx == 2) {
-                    i->execute1 = BX_CPU_C::NOP;
-                    size_t len = BX_CPU(id)
-                        ->gen_reg[BX_64BIT_REG_RDX]
-                        .rrx &
-                        0xFFF;
+	            case 1:     // write
+	                if (BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx == 1 ||
+	                        BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx == 2) {
+	                    i->execute1 = &BX_CPU_C::NOP;
+	                    size_t len = BX_CPU(id)
+	                        ->gen_reg[BX_64BIT_REG_RDX]
+	                        .rrx &
+	                        0xFFF;
                     if (log_ops || BX_CPU(id)->fuzztrace) {
                         char *buf = (char *)malloc(len + 1);
                         BX_CPU(0)->access_read_linear(

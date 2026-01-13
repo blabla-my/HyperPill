@@ -15,6 +15,7 @@
 #include "cpu/cpu.h"
 #include "cpu/vmx.h"
 #include "pc_system.h"
+#include "hp_cpu.h"
 
 
 //std::cout << "  submatch " << i << ": " << piece << '\n';
@@ -94,11 +95,11 @@ static bool parse_fpu_header(const std::string &s, uint16_t *fcw,
     return true;
 }
 
-static void parse_fpu_state(const std::string &s)
+static void parse_fpu_state(const std::string &s, unsigned cpu)
 {
 #if BX_SUPPORT_FPU
-    BX_CPU(id)->the_i387.init();
-    BX_CPU(id)->mxcsr.mxcsr = MXCSR_RESET;
+    hp::cpu(cpu)->the_i387.init();
+    hp::cpu(cpu)->mxcsr.mxcsr = MXCSR_RESET;
 
     uint16_t fcw = 0x037f;
     uint16_t fsw = 0;
@@ -106,18 +107,18 @@ static void parse_fpu_state(const std::string &s)
     uint32_t mxcsr = MXCSR_RESET;
 
     if (parse_fpu_header(s, &fcw, &fsw, &ftw, &mxcsr)) {
-        BX_CPU(id)->the_i387.cwd = fcw;
-        BX_CPU(id)->the_i387.swd = fsw & ~0x3800;
-        BX_CPU(id)->the_i387.tos = (fsw >> 11) & 0x7;
+        hp::cpu(cpu)->the_i387.cwd = fcw;
+        hp::cpu(cpu)->the_i387.swd = fsw & ~0x3800;
+        hp::cpu(cpu)->the_i387.tos = (fsw >> 11) & 0x7;
 
         uint16_t twd = 0;
         for (int i = 0; i < 8; i++) {
             uint16_t tag = (ftw & (1u << i)) ? 0 : 3;
             twd |= (tag << (i * 2));
         }
-        BX_CPU(id)->the_i387.twd = twd;
+        hp::cpu(cpu)->the_i387.twd = twd;
 
-        BX_CPU(id)->mxcsr.mxcsr = mxcsr;
+        hp::cpu(cpu)->mxcsr.mxcsr = mxcsr;
     }
 
     std::regex fpu_ptr_re("FPUIP=([0-9A-Fa-f]+) FPUDP=([0-9A-Fa-f]+) FPUCS=([0-9A-Fa-f]+) FPUDS=([0-9A-Fa-f]+) FPUOP=([0-9A-Fa-f]+)");
@@ -125,19 +126,19 @@ static void parse_fpu_state(const std::string &s)
     if (std::regex_search(s, ptr_match, fpu_ptr_re) && ptr_match.size() >= 6) {
         uint64_t tmp = 0;
         if (parse_hex_u64(ptr_match[1].str(), &tmp)) {
-            BX_CPU(id)->the_i387.fip = (bx_address) tmp;
+            hp::cpu(cpu)->the_i387.fip = (bx_address) tmp;
         }
         if (parse_hex_u64(ptr_match[2].str(), &tmp)) {
-            BX_CPU(id)->the_i387.fdp = (bx_address) tmp;
+            hp::cpu(cpu)->the_i387.fdp = (bx_address) tmp;
         }
         if (parse_hex_u64(ptr_match[3].str(), &tmp)) {
-            BX_CPU(id)->the_i387.fcs = (uint16_t) tmp;
+            hp::cpu(cpu)->the_i387.fcs = (uint16_t) tmp;
         }
         if (parse_hex_u64(ptr_match[4].str(), &tmp)) {
-            BX_CPU(id)->the_i387.fds = (uint16_t) tmp;
+            hp::cpu(cpu)->the_i387.fds = (uint16_t) tmp;
         }
         if (parse_hex_u64(ptr_match[5].str(), &tmp)) {
-            BX_CPU(id)->the_i387.foo = (uint16_t) tmp;
+            hp::cpu(cpu)->the_i387.foo = (uint16_t) tmp;
         }
     }
 
@@ -153,13 +154,14 @@ static void parse_fpu_state(const std::string &s)
             !parse_hex_u64((*it)[3].str(), &upper)) {
             continue;
         }
-        BX_CPU(id)->the_i387.st_space[reg].fraction = lower;
-        BX_CPU(id)->the_i387.st_space[reg].exp = (uint16_t) upper;
+        hp::cpu(cpu)->the_i387.st_space[reg].fraction = lower;
+        hp::cpu(cpu)->the_i387.st_space[reg].exp = (uint16_t) upper;
     }
 #endif
 }
 
-static void set_vmm_from_qwords(unsigned reg, const uint64_t *qwords, size_t count)
+static void set_vmm_from_qwords(unsigned cpu, unsigned reg, const uint64_t *qwords,
+                                size_t count)
 {
     if (reg >= BX_XMM_REGISTERS) {
         return;
@@ -172,13 +174,13 @@ static void set_vmm_from_qwords(unsigned reg, const uint64_t *qwords, size_t cou
     }
 
 #if BX_SUPPORT_EVEX
-    uint8_t *dst = BX_CPU(id)->vmm[reg].zmm_ubyte;
+    uint8_t *dst = hp::cpu(cpu)->vmm[reg].zmm_ubyte;
     size_t dst_len = 64;
 #elif BX_SUPPORT_AVX
-    uint8_t *dst = BX_CPU(id)->vmm[reg].ymm_ubyte;
+    uint8_t *dst = hp::cpu(cpu)->vmm[reg].ymm_ubyte;
     size_t dst_len = 32;
 #else
-    uint8_t *dst = BX_CPU(id)->vmm[reg].xmm_ubyte;
+    uint8_t *dst = hp::cpu(cpu)->vmm[reg].xmm_ubyte;
     size_t dst_len = 16;
 #endif
 
@@ -186,7 +188,7 @@ static void set_vmm_from_qwords(unsigned reg, const uint64_t *qwords, size_t cou
     memcpy(dst, buf, std::min(bytes, dst_len));
 }
 
-static bool parse_zmm_regs(const std::string &s)
+static bool parse_zmm_regs(const std::string &s, unsigned cpu)
 {
     bool found = false;
     std::regex zmm_re("ZMM(\\d\\d)=([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})");
@@ -200,13 +202,13 @@ static bool parse_zmm_regs(const std::string &s)
             }
             q[7 - i] = val;
         }
-        set_vmm_from_qwords((unsigned) reg, q, 8);
+        set_vmm_from_qwords(cpu, (unsigned) reg, q, 8);
         found = true;
     }
     return found;
 }
 
-static bool parse_ymm_regs(const std::string &s)
+static bool parse_ymm_regs(const std::string &s, unsigned cpu)
 {
     bool found = false;
     std::regex ymm_re("YMM(\\d\\d)=([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})");
@@ -220,13 +222,13 @@ static bool parse_ymm_regs(const std::string &s)
             }
             q[3 - i] = val;
         }
-        set_vmm_from_qwords((unsigned) reg, q, 4);
+        set_vmm_from_qwords(cpu, (unsigned) reg, q, 4);
         found = true;
     }
     return found;
 }
 
-static void parse_xmm_regs(const std::string &s)
+static void parse_xmm_regs(const std::string &s, unsigned cpu)
 {
     std::regex xmm_re("XMM(\\d\\d)=([0-9A-Fa-f]{16})\\s+([0-9A-Fa-f]{16})");
     for (std::sregex_iterator it(s.begin(), s.end(), xmm_re), end; it != end; ++it) {
@@ -239,11 +241,11 @@ static void parse_xmm_regs(const std::string &s)
         if (parse_hex_u64((*it)[3].str(), &val)) {
             q[0] = val;
         }
-        set_vmm_from_qwords((unsigned) reg, q, 2);
+        set_vmm_from_qwords(cpu, (unsigned) reg, q, 2);
     }
 }
 
-static void parse_opmask_regs(const std::string &s)
+static void parse_opmask_regs(const std::string &s, unsigned cpu)
 {
 #if BX_SUPPORT_EVEX
     std::regex opmask_re("Opmask(\\d\\d)=([0-9A-Fa-f]{16})");
@@ -254,7 +256,7 @@ static void parse_opmask_regs(const std::string &s)
         }
         uint64_t val = 0;
         if (parse_hex_u64((*it)[2].str(), &val)) {
-            BX_CPU(id)->set_opmask((unsigned) reg, val);
+            hp::cpu(cpu)->set_opmask((unsigned) reg, val);
         }
     }
 #else
@@ -277,11 +279,11 @@ static bool parse_apic_regs(const std::string &s, std::map<uint32_t, uint32_t> *
     return !regs->empty();
 }
 
-static void apply_lapic_regs(const std::map<uint32_t, uint32_t> &regs)
+static void apply_lapic_regs(unsigned cpu, const std::map<uint32_t, uint32_t> &regs)
 {
 #if BX_SUPPORT_APIC
     auto set_reg = [&](uint32_t reg, uint32_t value) {
-        BX_CPU(id)->lapic.write_aligned(reg, value);
+        hp::cpu(cpu)->lapic.write_aligned(reg, value);
     };
 
     auto it = regs.find(BX_LAPIC_TPR);
@@ -318,7 +320,8 @@ static void apply_lapic_regs(const std::map<uint32_t, uint32_t> &regs)
 #endif
 }
 
-static void restore_lapic_pending_irqs(const std::map<uint32_t, uint32_t> &regs)
+static void restore_lapic_pending_irqs(unsigned cpu,
+                                       const std::map<uint32_t, uint32_t> &regs)
 {
 #if BX_SUPPORT_APIC
     uint32_t irr[8] = {};
@@ -340,7 +343,7 @@ static void restore_lapic_pending_irqs(const std::map<uint32_t, uint32_t> &regs)
         uint32_t mask = 1u << (vec & 0x1f);
         if (irr[idx] & mask) {
             unsigned trig = (tmr[idx] & mask) ? APIC_LEVEL_TRIGGERED : APIC_EDGE_TRIGGERED;
-            BX_CPU(id)->lapic.trigger_irq((Bit8u) vec, trig, 1);
+            hp::cpu(cpu)->lapic.trigger_irq((Bit8u) vec, trig, 1);
         }
     }
 #endif
@@ -362,7 +365,7 @@ static void restore_lapic_pending_irqs(const std::map<uint32_t, uint32_t> &regs)
     ss << std::hex << match[1].str(); \
     ss >> val;\
     printf(".info " #REG ": %s %lx\n", match[1].str().c_str(), val); \
-    BX_CPU(id)->set_reg64(NREG, val); \
+    hp::cpu(cpu)->set_reg64(NREG, val); \
 };
 
 #define LOADSEG(NREG, REG ) \
@@ -400,7 +403,7 @@ static void restore_lapic_pending_irqs(const std::map<uint32_t, uint32_t> &regs)
     ar_data = (ar_data >> 8);\
     ss.clear();\
     printf(".info " #REG ": present=%d %x %lx %x %x\n", present, raw_selector, base, limit_scaled, ar_data); \
-    BX_CPU(id)->set_segment_ar_data(NREG , \
+    hp::cpu(cpu)->set_segment_ar_data(NREG , \
             present, raw_selector, base, limit_scaled, ar_data);\
 };
     /* BX_CPU(id)->set_segment_ar_data(NREG , \ */
@@ -430,22 +433,23 @@ static void restore_lapic_pending_irqs(const std::map<uint32_t, uint32_t> &regs)
     NREG.limit = limit;\
 };
 
-void icp_init_regs(const char* filename) {
+void icp_init_regs_cpu(const char* filename, unsigned cpu) {
     std::ifstream t(filename);
     std::stringstream buffer;
     buffer << t.rdbuf();
 
-    printf(".loading registers from %s\n", filename);
+    hp::set_current_cpu(cpu);
+    printf(".loading registers from %s (cpu %u)\n", filename, cpu);
     std::string s = buffer.str();
 
     uint64_t val = GETREG64(RIP);
-    BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = val;
-    BX_CPU(id)->prev_rip = val;
+    hp::cpu(cpu)->gen_reg[BX_64BIT_REG_RIP].rrx = val;
+    hp::cpu(cpu)->prev_rip = val;
     
 
     val = GETREG64(RSP);
-    BX_CPU(id)->gen_reg[BX_64BIT_REG_RSP].rrx = val;
-    BX_CPU(id)->prev_rsp = val;
+    hp::cpu(cpu)->gen_reg[BX_64BIT_REG_RSP].rrx = val;
+    hp::cpu(cpu)->prev_rsp = val;
 
     LOADREG(0, RAX);
     LOADREG(1, RCX);
@@ -463,47 +467,47 @@ void icp_init_regs(const char* filename) {
     LOADREG(14, R14);
     LOADREG(15, R15);
 
-    BX_CPU(id)->setEFlags(GETREG64(RFL));
+    hp::cpu(cpu)->setEFlags(GETREG64(RFL));
 
-    LOADSEG(&BX_CPU(id)->sregs[0], ES );
-    LOADSEG(&BX_CPU(id)->sregs[1], CS );
-    LOADSEG(&BX_CPU(id)->sregs[2], SS );
-    LOADSEG(&BX_CPU(id)->sregs[3], DS );
-    LOADSEG(&BX_CPU(id)->sregs[4], FS );
-    LOADSEG(&BX_CPU(id)->sregs[5], GS );
+    LOADSEG(&hp::cpu(cpu)->sregs[0], ES );
+    LOADSEG(&hp::cpu(cpu)->sregs[1], CS );
+    LOADSEG(&hp::cpu(cpu)->sregs[2], SS );
+    LOADSEG(&hp::cpu(cpu)->sregs[3], DS );
+    LOADSEG(&hp::cpu(cpu)->sregs[4], FS );
+    LOADSEG(&hp::cpu(cpu)->sregs[5], GS );
 
-    LOADSEG(&BX_CPU(id)->ldtr, LDT );
-    LOADSEG(&BX_CPU(id)->tr, TR );
+    LOADSEG(&hp::cpu(cpu)->ldtr, LDT );
+    LOADSEG(&hp::cpu(cpu)->tr, TR );
     
-    LOADDT(BX_CPU(id)->gdtr, GDT );
-    LOADDT(BX_CPU(id)->idtr, IDT );
+    LOADDT(hp::cpu(cpu)->gdtr, GDT );
+    LOADDT(hp::cpu(cpu)->idtr, IDT );
 
-    BX_CPU(id)->dr[0] = GETREG64(DR0);
-    BX_CPU(id)->dr[1] = GETREG64(DR1);
-    BX_CPU(id)->dr[2] = GETREG64(DR2);
-    BX_CPU(id)->dr[3] = GETREG64(DR3);
-    BX_CPU(id)->dr6.set32(GETREG32(DR6));
-    BX_CPU(id)->dr7.set32(GETREG32(DR7));
+    hp::cpu(cpu)->dr[0] = GETREG64(DR0);
+    hp::cpu(cpu)->dr[1] = GETREG64(DR1);
+    hp::cpu(cpu)->dr[2] = GETREG64(DR2);
+    hp::cpu(cpu)->dr[3] = GETREG64(DR3);
+    hp::cpu(cpu)->dr6.set32(GETREG32(DR6));
+    hp::cpu(cpu)->dr7.set32(GETREG32(DR7));
     
-    BX_CPU(id)->cr0.set32(GETREG32(CR0));
-    BX_CPU(id)->cr2 = GETREG64(CR2);
-    BX_CPU(id)->cr3 = GETREG64(CR3);
-    BX_CPU(id)->cr4.set32(GETREG32(CR4));
+    hp::cpu(cpu)->cr0.set32(GETREG32(CR0));
+    hp::cpu(cpu)->cr2 = GETREG64(CR2);
+    hp::cpu(cpu)->cr3 = GETREG64(CR3);
+    hp::cpu(cpu)->cr4.set32(GETREG32(CR4));
     if (!getenv("NOCOV")) {
-        BX_CPU(id)->cr4.set_SMAP(false);
+        hp::cpu(cpu)->cr4.set_SMAP(false);
     }
     
-    BX_CPU(id)->xcr0.set32((Bit32u) GETREG64(xcr0));
+    hp::cpu(cpu)->xcr0.set32((Bit32u) GETREG64(xcr0));
 
-    BX_CPU(id)->msr.kernelgsbase = GETREG64(kernelgsbase);
-    BX_CPU(id)->msr.sysenter_cs_msr = GETREG64(sysenter_cs);
-    BX_CPU(id)->msr.sysenter_esp_msr = GETREG64(sysenter_esp);
-    BX_CPU(id)->msr.sysenter_eip_msr = GETREG64(sysenter_eip);
-    BX_CPU(id)->efer.set32(GETREG32(EFER));
-    BX_CPU(id)->msr.star = GETREG64(star); // Check it
-    BX_CPU(id)->msr.lstar = GETREG64(lstar);
-    BX_CPU(id)->msr.cstar = GETREG64(cstar);
-    BX_CPU(id)->msr.fmask = GETREG64(fmask);
+    hp::cpu(cpu)->msr.kernelgsbase = GETREG64(kernelgsbase);
+    hp::cpu(cpu)->msr.sysenter_cs_msr = GETREG64(sysenter_cs);
+    hp::cpu(cpu)->msr.sysenter_esp_msr = GETREG64(sysenter_esp);
+    hp::cpu(cpu)->msr.sysenter_eip_msr = GETREG64(sysenter_eip);
+    hp::cpu(cpu)->efer.set32(GETREG32(EFER));
+    hp::cpu(cpu)->msr.star = GETREG64(star); // Check it
+    hp::cpu(cpu)->msr.lstar = GETREG64(lstar);
+    hp::cpu(cpu)->msr.cstar = GETREG64(cstar);
+    hp::cpu(cpu)->msr.fmask = GETREG64(fmask);
     
     uint64_t tsc = GETREG64(tsc);
     int64_t tsc_adjust = (int64_t) GETREG64(tsc_adjust);
@@ -519,68 +523,80 @@ void icp_init_regs(const char* filename) {
     if (ticks < 0) {
         ticks = 0;
     }
-    bx_pc_system.set_time_ticks((Bit64u) ticks);
-    BX_CPU(id)->tsc_adjust = (Bit64s) tsc_adjust;
-    BX_CPU(id)->msr.tsc_aux = GETREG64(tsc_aux);
+    if (cpu == 0) {
+        bx_pc_system.set_time_ticks((Bit64u) ticks);
+    }
+    hp::cpu(cpu)->tsc_adjust = (Bit64s) tsc_adjust;
+    hp::cpu(cpu)->msr.tsc_aux = GETREG64(tsc_aux);
     
-    BX_CPU(id)->msr.pat._u64 = GETREG64(pat);
-    BX_CPU(id)->msr.apicbase = GETREG64(apicbase);
+    hp::cpu(cpu)->msr.pat._u64 = GETREG64(pat);
+    hp::cpu(cpu)->msr.apicbase = GETREG64(apicbase);
     
 
-    BX_CPU(id)->TLB_flush();
+    hp::cpu(cpu)->TLB_flush();
 #if BX_CPU_LEVEL >= 4
-    BX_CPU(id)->handleAlignmentCheck(/* CR0.AC reloaded */);
+    hp::cpu(cpu)->handleAlignmentCheck(/* CR0.AC reloaded */);
 #endif
 
-    BX_CPU(id)->handleCpuModeChange();
+    hp::cpu(cpu)->handleCpuModeChange();
 
 #if BX_SUPPORT_X86_64
-    if (BX_CPU(id)->efer.get_LMA()) {
-        Bit64u gs_base = BX_CPU(id)->sregs[BX_SEG_REG_GS].cache.u.segment.base;
-        Bit64u kgs_base = BX_CPU(id)->msr.kernelgsbase;
-        Bit8u cpl = BX_CPU(id)->sregs[BX_SEG_REG_CS].selector.rpl;
+    if (hp::cpu(cpu)->efer.get_LMA()) {
+        Bit64u gs_base = hp::cpu(cpu)->sregs[BX_SEG_REG_GS].cache.u.segment.base;
+        Bit64u kgs_base = hp::cpu(cpu)->msr.kernelgsbase;
+        Bit8u cpl = hp::cpu(cpu)->sregs[BX_SEG_REG_CS].selector.rpl;
         bool gs_kernel = (gs_base >> 47) & 1;
         bool kgs_kernel = (kgs_base >> 47) & 1;
 
         if ((cpl == 0 && !gs_kernel && kgs_kernel) ||
             (cpl == 3 && gs_kernel && !kgs_kernel)) {
-            BX_CPU(id)->sregs[BX_SEG_REG_GS].cache.u.segment.base = kgs_base;
-            BX_CPU(id)->msr.kernelgsbase = gs_base;
+            hp::cpu(cpu)->sregs[BX_SEG_REG_GS].cache.u.segment.base = kgs_base;
+            hp::cpu(cpu)->msr.kernelgsbase = gs_base;
         }
     }
 #endif
 
 #if BX_CPU_LEVEL >= 6
-    BX_CPU(id)->handleSseModeChange();
-    BX_CPU(id)->handleAvxModeChange();
+    hp::cpu(cpu)->handleSseModeChange();
+    hp::cpu(cpu)->handleAvxModeChange();
 #endif
 
-    parse_fpu_state(s);
-    bool have_zmm = parse_zmm_regs(s);
+    parse_fpu_state(s, cpu);
+    bool have_zmm = parse_zmm_regs(s, cpu);
     bool have_ymm = false;
     if (!have_zmm) {
-        have_ymm = parse_ymm_regs(s);
+        have_ymm = parse_ymm_regs(s, cpu);
     }
     if (!have_zmm && !have_ymm) {
-        parse_xmm_regs(s);
+        parse_xmm_regs(s, cpu);
     }
-    parse_opmask_regs(s);
+    parse_opmask_regs(s, cpu);
 
 #if BX_SUPPORT_APIC
-    BX_CPU(id)->lapic.set_base(BX_CPU(id)->msr.apicbase);
+    hp::cpu(cpu)->lapic.set_base(hp::cpu(cpu)->msr.apicbase);
     std::map<uint32_t, uint32_t> apic_regs;
     bool have_apic_regs = parse_apic_regs(s, &apic_regs);
     if (have_apic_regs) {
-        apply_lapic_regs(apic_regs);
-        restore_lapic_pending_irqs(apic_regs);
+        apply_lapic_regs(cpu, apic_regs);
+        restore_lapic_pending_irqs(cpu, apic_regs);
     } else {
-        Bit32u spiv = BX_CPU(id)->lapic.read_aligned(BX_LAPIC_SPURIOUS_VECTOR);
-        BX_CPU(id)->lapic.write_aligned(BX_LAPIC_SPURIOUS_VECTOR, spiv | 0x100);
-        BX_CPU(id)->lapic.set_lvt_entry(BX_LAPIC_LVT_TIMER, 0x000400ec);
+        Bit32u spiv = hp::cpu(cpu)->lapic.read_aligned(BX_LAPIC_SPURIOUS_VECTOR);
+        hp::cpu(cpu)->lapic.write_aligned(BX_LAPIC_SPURIOUS_VECTOR, spiv | 0x100);
+        hp::cpu(cpu)->lapic.set_lvt_entry(BX_LAPIC_LVT_TIMER, 0x000400ec);
     }
-    Bit32u lvt_timer = BX_CPU(id)->lapic.read_aligned(BX_LAPIC_LVT_TIMER);
+    Bit32u lvt_timer = hp::cpu(cpu)->lapic.read_aligned(BX_LAPIC_LVT_TIMER);
     if (lvt_timer & 0x40000) {
-        BX_CPU(id)->lapic.set_tsc_deadline(GETREG64(tsc_deadline));
+        hp::cpu(cpu)->lapic.set_tsc_deadline(GETREG64(tsc_deadline));
+    }
+#endif
+
+#if BX_SUPPORT_SMP
+    // Bochs resets application processors (APs) into WAIT_FOR_SIPI. When we
+    // restore a running snapshot, ensure we don't keep CPUs parked there.
+    if (hp::num_cpus() > 1 &&
+        hp::cpu(cpu)->activity_state == BX_CPU_C::BX_ACTIVITY_STATE_WAIT_FOR_SIPI) {
+        hp::cpu(cpu)->activity_state = BX_CPU_C::BX_ACTIVITY_STATE_ACTIVE;
+        hp::cpu(cpu)->unmask_event(BX_EVENT_INIT | BX_EVENT_SMI | BX_EVENT_NMI);
     }
 #endif
 
@@ -589,13 +605,13 @@ void icp_init_regs(const char* filename) {
 void icp_set_vmcs(uint64_t vmcs) {
     /* BX_CPU(id)->vmcshostptr = BX_CPU(id)->getHostMemAddr(vmcs, BX_WRITE); */
     for(int i=0; i<0x10000; i+=0x1000)
-        BX_CPU(id)->getHostMemAddr(vmcs+i, BX_WRITE);
-    BX_CPU(id)->vmcsptr = vmcs;
-    BX_CPU(id)->vmxonptr = 0xdeadbeef;
-    BX_CPU(id)->in_vmx = true;
-    BX_CPU(id)->vmcs.eptptr = (bx_phy_address) BX_CPU(id)->VMread64(VMCS_64BIT_CONTROL_EPTPTR);
-    BX_CPU(id)->VMwrite32(VMCS_LAUNCH_STATE_FIELD_ENCODING, VMCS_STATE_LAUNCHED);
-    BX_CPU(id)->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
+        hp::vcpu()->getHostMemAddr(vmcs+i, BX_WRITE);
+    hp::vcpu()->vmcsptr = vmcs;
+    hp::vcpu()->vmxonptr = 0xdeadbeef;
+    hp::vcpu()->in_vmx = true;
+    hp::vcpu()->vmcs.eptptr = (bx_phy_address) hp::vcpu()->VMread64(VMCS_64BIT_CONTROL_EPTPTR);
+    hp::vcpu()->VMwrite32(VMCS_LAUNCH_STATE_FIELD_ENCODING, VMCS_STATE_LAUNCHED);
+    hp::vcpu()->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
 }
 
 

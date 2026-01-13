@@ -1,5 +1,6 @@
 #include "bochs.h"
 #include "fuzz.h"
+#include "hp_cpu.h"
 #include <sys/types.h>
 #include <tsl/robin_set.h>
 #include <unordered_set>
@@ -27,7 +28,7 @@ tsl::robin_set<std::tuple<uint64_t, uint64_t, uint64_t>, Hasher> structset;
 bool fuzz_hook_vmlaunch() {
     /* printf("Vmlaunch:%lx\n", BX_CPU(id)->vmcsptr); */
     if(vmcs_addr == BX_CPU(id)->vmcsptr){
-        fuzz_emu_stop_normal();
+        pause_cpu();
         return true;
     } else {
         verbose_printf("Warning: vmcsptr has been changed from 0x%08lx to 0x%08lx\n",
@@ -179,17 +180,17 @@ void init_register_feedback() {
             for(int j=0; j<sizeof(value); j++)
                 ptr[j] = rand();
             memcpy(cursor, &value, sizeof(value));
-            BX_CPU(id)->set_reg64(i, value);
+            hp::vcpu()->set_reg64(i, value);
             register_contents[i] = std::make_pair(cursor, 8);
             cursor += 8;
             printf("REG%d: %lx\n", i, value);
     }
     for(int i=0; i<BX_XMM_REGISTERS+1; i++) {
-            uint8_t* ptr = (uint8_t*)&BX_CPU(id)->vmm[i];
-            for(int j=0; j<sizeof(BX_CPU(id)->vmm[i]); j++)
+            uint8_t* ptr = (uint8_t*)&hp::vcpu()->vmm[i];
+            for(int j=0; j<sizeof(hp::vcpu()->vmm[i]); j++)
                 ptr[j] = rand();
-            memcpy(cursor, &BX_CPU(id)->vmm[i], sizeof(BX_CPU(id)->vmm[i]));
-            register_contents[16+i] = std::make_pair(cursor, sizeof(BX_CPU(id)->vmm[i]));
-            cursor += sizeof(BX_CPU(id)->vmm[i]);
+            memcpy(cursor, &hp::vcpu()->vmm[i], sizeof(hp::vcpu()->vmm[i]));
+            register_contents[16+i] = std::make_pair(cursor, sizeof(hp::vcpu()->vmm[i]));
+            cursor += sizeof(hp::vcpu()->vmm[i]);
     }
 }

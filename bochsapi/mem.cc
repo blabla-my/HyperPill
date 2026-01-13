@@ -372,12 +372,14 @@ bool BX_MEM_C::dbg_fetch_mem(BX_CPU_C *cpu, bx_phy_address addr, unsigned len, B
     return true;
 }
 
+#if (BX_DEBUGGER || BX_GDBSTUB)
 bool BX_MEM_C::dbg_set_mem(BX_CPU_C *cpu, bx_phy_address addr, unsigned len, Bit8u *buf)
 {
     notify_write(addr);
     memcpy(addr_conv(addr), buf, len);
     return true;
 }
+#endif
 
 #if defined(__LP64__)
 #define ElfW(type) Elf64_ ## type

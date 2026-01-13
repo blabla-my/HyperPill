@@ -30,15 +30,12 @@ bx_param_enum_c *bx_real_sim_c::get_param_enum(const char *pname, bx_param_c *ba
 
 bx_param_num_c *bx_real_sim_c::get_param_num(const char *pname, bx_param_c *base)
 {
-    printf("get param %s\n", pname);
     return nums[pname];
 }
 
 bx_param_bool_c *bx_real_sim_c::get_param_bool(const char *pname, bx_param_c *base)
 {
-    printf("get param %s\n", pname);
     return bools[pname];
-    return NULL;
     //return rust::sim_get_param_bool(pname);
 }
 
@@ -212,7 +209,7 @@ void icp_init_params() {
     
     nums["cpu.n_threads"] = sim_new_param_num("n_threads", 1, 4, 1);
     nums["cpu.n_cores"] = sim_new_param_num("n_cores", 1, 8, 1);
-    nums["cpu.n_processors"] = sim_new_param_num("n_processors", 1, 1, 1);
+    nums["cpu.n_processors"] = sim_new_param_num("n_processors", 1, 8, 1);
     nums["cpu.quantum"] = sim_new_param_num("quantum", 1, 32, 16);
 
     nums["cpuid.level"] = sim_new_param_num("level", 5, 6, 6);
@@ -236,4 +233,3 @@ void icp_init_params() {
 logfunctions *siminterface_log = NULL;
 bx_list_c *root_param = NULL;
 bx_simulator_interface_c *SIM = new bx_real_sim_c();
-

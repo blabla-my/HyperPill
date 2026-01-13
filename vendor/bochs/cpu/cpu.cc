@@ -164,6 +164,9 @@ void BX_CPU_C::cpu_loop(void)
 
 void BX_CPU_C::cpu_run_trace(void)
 {
+  if (BX_CPU_THIS_PTR fuzz_executing_input == false)
+    return;
+
   // check on events which occurred for previous instructions (traps)
   // and ones which are asynchronous to the CPU (hardware interrupts)
   if (BX_CPU_THIS_PTR async_event) {
@@ -191,6 +194,11 @@ void BX_CPU_C::cpu_run_trace(void)
   bxInstruction_c *last = i + (entry->tlen);
 
   for(;;) {
+    if (BX_CPU_THIS_PTR fuzz_executing_input == false)
+      return;
+
+    if (BX_CPU_THIS_PTR fuzztrace)
+      debug_disasm_instruction(BX_CPU_THIS_PTR prev_rip);
     // want to allow changing of the instruction inside instrumentation callback
     BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
     RIP += i->ilen();

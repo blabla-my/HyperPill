@@ -16,6 +16,7 @@
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include "memory/memory-bochs.h"
+#include "hp_cpu.h"
 
 #define PG_PRESENT_BIT  0
 #define PG_RW_BIT       1
@@ -127,7 +128,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len);
 
 void icp_init_params();
 void icp_init_mem(const char* filename);
-void icp_init_regs(const char* filename);
+void icp_init_regs_cpu(const char* filename, unsigned cpu);
 void icp_init_shadow_vmcs_layout(const char* filename);
 void icp_init_vmcs_layout(const char* filename);
 void icp_set_vmcs(uint64_t vmcs);
@@ -179,10 +180,11 @@ bool found_pc(uint64_t pc);
 void add_pc_range(size_t base, size_t len);
 void add_opt_infer_range(size_t base, size_t len);
 
-void fuzz_emu_stop_normal();
-void fuzz_emu_stop_unhealthy();
-void fuzz_emu_stop_crash(const char *type);
-void fuzz_emu_stop_polling();
+	void fuzz_emu_stop_normal();
+	void fuzz_emu_stop_unhealthy();
+	void fuzz_emu_stop_crash(const char *type);
+	void fuzz_emu_stop_polling();
+	void pause_cpu();
 
 extern uint64_t vmcs_addr;
 void redo_paging();

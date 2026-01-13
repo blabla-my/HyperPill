@@ -433,15 +433,15 @@ static uint16_t pio_region_size(uint16_t addr) {
 
 bool inject_halt() {
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_HLT);
-	BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_HLT);
+	hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
 	cpu_physical_memory_write(phy, "\xf4", 1);
 	return true;
 }
@@ -449,49 +449,49 @@ bool inject_halt() {
 // INJECTORS
 bool inject_write(bx_address addr, int size, uint64_t val) {
 	enum Sizes { Byte, Word, Long, Quad, end_sizes };
-	BX_CPU(id)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
+	hp::vcpu()->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
 	uint32_t exit_reason = vmcs_translate_guest_physical_ept(addr, NULL, NULL);
 	/* printf("Exit reason: %lx\n", exit_reason); */
 	if (!exit_reason)
 		return false;
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
 
 	if (exit_reason == VMX_VMEXIT_EPT_VIOLATION)
-		BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 2);
+		hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 2);
 	else
-		BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
+		hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
 
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RDX, addr);
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RAX, val);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RDX, addr);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RAX, val);
 
-	if (BX_CPU(id)->fuzztrace || log_ops) {
+	if (hp::vcpu()->fuzztrace || log_ops) {
 		printf("!write inject: [GPA: %lx] len: %d data: ", addr, 1<<size);
 		for (int i = 0; i < (1 << size); i++)
 			printf("%02x", ((uint8_t *)&val)[i]);
 		printf(" (reason: %d)\n", exit_reason);
 	}
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
 	switch (size) {
 	case Byte:
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		cpu_physical_memory_write(phy, "\x88\x02", 2);
 		break;
 	case Word:
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
 		cpu_physical_memory_write(phy, "\x66\x89\x02", 3);
 		break;
 	case Long:
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		cpu_physical_memory_write(phy, "\x89\x02", 2);
 		break;
 	case Quad:
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
 		cpu_physical_memory_write(phy, "\x48\x89\x02", 3);
 		break;
 	}
@@ -505,55 +505,46 @@ bool inject_read(bx_address addr, int size) {
 		vmcs_translate_guest_physical_ept(addr, NULL, NULL);
 	if (!exit_reason)
 		return false;
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
 
-	BX_CPU(id)->VMwrite32(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
+	hp::vcpu()->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
 
 	if (exit_reason == VMX_VMEXIT_EPT_VIOLATION)
-		BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 1);
+		hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 1);
 	else
-		BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
+		hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
 
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RCX, addr);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RCX, addr);
 
-	if (BX_CPU(id)->fuzztrace || log_ops) {
+	if (hp::vcpu()->fuzztrace || log_ops) {
 		printf("!read inject: [GPA: %lx] len: %d\n", addr, 1<<size);
 	}
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
 	switch (size) {
 	case Byte:
-		cpu_physical_memory_write(phy,
-					  "\x67\x8a\x01", // mov al,BYTE PTR
-							  // [ecx]
-					  3);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
+		cpu_physical_memory_write(phy, "\x8a\x01", 2); // mov al,BYTE PTR [rcx]
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		break;
 	case Word:
-		cpu_physical_memory_write(phy,
-					  "\x67\x66\x8b\x01", // mov ax,WORD PTR
-							      // [ecx]
-					  4);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 4);
+		cpu_physical_memory_write(phy, "\x66\x8b\x01", 3); // mov ax,WORD PTR [rcx]
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
 		break;
 	case Long:
-		cpu_physical_memory_write(phy,
-					  "\x67\x8b\x01", // mov eax,DWORD PTR
-							  // [ecx]
-					  3);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
+		cpu_physical_memory_write(phy, "\x8b\x01", 2); // mov eax,DWORD PTR [rcx]
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		break;
 	case Quad:
 		cpu_physical_memory_write(phy,
 					  "\x48\x8b\x01", // mov rax,QWORD PTR
 							  // [rcx]
 					  3);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
 		break;
 	}
 	return true;
@@ -562,14 +553,14 @@ bool inject_read(bx_address addr, int size) {
 bool inject_in(uint16_t addr, uint16_t size) {
 	enum Sizes { Byte, Word, Long, end_sizes };
 	uint64_t field_64 = 0;
-	if (BX_CPU(id)->fuzztrace || log_ops) {
+	if (hp::vcpu()->fuzztrace || log_ops) {
 		printf("!in inject: [GPA: %x] len: %d\n", addr, size);
 	}
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
 	switch (size) {
@@ -583,72 +574,72 @@ bool inject_in(uint16_t addr, uint16_t size) {
 					  // existing code somewhere that
 					  // alreaedy does the conversion
 					  "\xec", 1);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
 		break;
 	case Word:
 		cpu_physical_memory_write(phy, "\x66\xed", 2);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		field_64 |= 1; // access size
 		break;
 	case Long:
 		cpu_physical_memory_write(phy, "\xed", 1);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
 		field_64 |= 3; // access size
 		break;
 	}
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
 			      VMX_VMEXIT_IO_INSTRUCTION);
 
 	field_64 |= (addr << 16); // port number
 	field_64 |= (1 << 3); // //IN
-	BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RDX, addr);
+	hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RDX, addr);
 	return true;
 }
 
 bool inject_out(uint16_t addr, uint16_t size, uint32_t value) {
 	enum Sizes { Byte, Word, Long, end_sizes };
 	uint64_t field_64 = 0;
-	if (BX_CPU(id)->fuzztrace || log_ops) {
+	if (hp::vcpu()->fuzztrace || log_ops) {
 		printf("!out inject: [GPA: %x] len: %d data: ", addr, size);
 		for (int i = 0; i < size; i++)
 			printf("%02x", ((uint8_t *)&value)[i]);
 		printf("\n");
 	}
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
 	switch (size) {
 	case Byte:
 		cpu_physical_memory_write(phy, "\xee", 1);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
 		break;
 	case Word:
 		cpu_physical_memory_write(phy, "\x66\xef", 2);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		field_64 |= 1; // access size
 		break;
 	case Long:
 		cpu_physical_memory_write(phy, "\xef", 1);
-		BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+		hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
 		field_64 |= 3; // access size
 		break;
 	}
 
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RDX, addr);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RDX, addr);
 
 	// write value for out
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RAX, value);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RAX, value);
 
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
 			      VMX_VMEXIT_IO_INSTRUCTION);
 
 	field_64 |= (addr << 16);
-	BX_CPU(id)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
+	hp::vcpu()->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
 	return true;
 }
 
@@ -659,7 +650,7 @@ uint32_t inject_pci_read(uint8_t device, uint8_t function, uint8_t offset) {
 	start_cpu();
 	inject_in(0xcfc, 2);
 	start_cpu();
-	uint32_t val = BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx;
+	uint32_t val = hp::vcpu()->gen_reg[BX_64BIT_REG_RAX].rrx;
 	return val;
 }
 
@@ -675,40 +666,40 @@ bool inject_pci_write(uint8_t device, uint8_t function, uint8_t offset,
 
 bool inject_wrmsr(bx_address msr, uint64_t value) {
 	bx_address phy;
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RAX, value & 0xFFFFFFFF);
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RDX, value >> 32);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RAX, value & 0xFFFFFFFF);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RDX, value >> 32);
 
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
 	cpu_physical_memory_write(phy, "\x0f\x30", 2);
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_WRMSR);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_WRMSR);
 
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RCX, msr);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RCX, msr);
 	start_cpu();
 	return true;
 }
 
 uint64_t inject_rdmsr(bx_address msr) {
 	bx_address phy;
-	int res = vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
 		printf("failed to write instruction to %lx (vaddr: %lx)\n",
-		       BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phy);
+		       hp::vcpu()->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
 	cpu_physical_memory_write(phy, "\x0f\x32", 2);
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
-	BX_CPU(id)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_RDMSR);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
+	hp::vcpu()->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_RDMSR);
 
-	BX_CPU(id)->set_reg64(BX_64BIT_REG_RCX, msr);
+	hp::vcpu()->set_reg64(BX_64BIT_REG_RCX, msr);
 	start_cpu();
-	return (BX_CPU(id)->get_reg64(BX_64BIT_REG_RDX) << 32) |
-	       (BX_CPU(id)->get_reg64(BX_64BIT_REG_RAX) & 0xFFFFFFFF);
+	return (hp::vcpu()->get_reg64(BX_64BIT_REG_RDX) << 32) |
+	       (hp::vcpu()->get_reg64(BX_64BIT_REG_RAX) & 0xFFFFFFFF);
 }
 
 /* OPERATIONS */
@@ -1235,12 +1226,13 @@ uint64_t get_guest_ram_size() {
 }
 
 bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw) { 
-	auto tlb_entry = BX_DTLB_ENTRY_OF(laddr, 0);
-    Bit32u lpf_mask = 0xfff; 
-    Bit32u pkey = 0; 
-    bx_phy_address phy; 
-    phy = BX_CPU(id)->translate_linear(tlb_entry, laddr, 0, rw); 
-    return phy;
+	Bit32u lpf_mask = 0xfff;
+	Bit32u pkey = 0;
+	// Bochs encodes access/memtype bits in the low bits of the returned value.
+	// Mask those out and apply the offset bits from the original linear address.
+	bx_phy_address xlated =
+		hp::cur_cpu()->translate_linear_long_mode(laddr, lpf_mask, pkey, 0, rw);
+	return (xlated & ~((bx_phy_address)lpf_mask)) | (laddr & lpf_mask);
 }
 
 void bx_kernel_read(bx_address laddr, void *buf, size_t len) {
