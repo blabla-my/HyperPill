@@ -25,9 +25,10 @@
 VRing::VRing(size_t size, bx_address addr_gpa, VQueue* vqueue): size(size), addr_gpa(addr_gpa), 
 										type(VRING_BASE), align(VRING_BASE_ALIGN) {
 	addr_hpa = 0UL;
-	vmcs_translate_guest_physical_ept(addr_gpa, &addr_hpa, NULL);
+	if (addr_gpa)
+		assert(vmcs_translate_guest_physical_ept(addr_gpa, &addr_hpa, NULL) == 0);
 	queue = vqueue;
-	printf("VRing: hpa %lx, size: %lx, vqueue: %p\n", addr_hpa, size, queue);
+	printf("VRing: hpa %lx, gpa %lx, size: %lx, vqueue: %p\n", addr_hpa, addr_gpa, size, queue);
 }
 
 void VRing::write_elem(int index, void* elem) const {
@@ -312,7 +313,7 @@ unsigned long ConfigSpace::read(size_t offset, size_t sz) const {
 		return 0;
 	}
 	if (!inject_ok) {
-		printf("Failed to inject read in ConfigSpace::read to %lx size %lx\n", addr+offset, sz);
+		printf("Failed to inject read in ConfigSpace::read to %lx size %lx\n", addr, sz);
 		return 0;
 	}
     start_cpu(true);
@@ -477,7 +478,7 @@ bool ConfigSpace::write(size_t offset, size_t sz, unsigned long value) const {
 		return false;
 	}
 	if (!inject_ok) {
-		printf("Failed to inject write in ConfigSpace::write to %lx size %lx\n", addr+offset, sz);
+		printf("Failed to inject write in ConfigSpace::write to %lx size %lx\n", addr, sz);
 		return false;
 	}
 
