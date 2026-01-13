@@ -38,7 +38,7 @@ uint8_t *cow_bitmap;
 uint8_t *overlay_map; // 0: from shadowmem 1: from workershadowmem
 
 tsl::robin_set<bx_phy_address> dirtyset;
-tsl::robin_set<bx_phy_address> guest_code_pages;
+tsl::robin_set<bx_phy_address> guest_page_table;
 
 typedef std::vector<uint64_t> persist_range_vec;
 tsl::robin_map<bx_phy_address, persist_range_vec> persist_ranges;
@@ -84,7 +84,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
     // used to identify DMA accesses in the guest
     // contains a mapping for each host physical page, for whether it corresponds to a guest page
     // if an access uses such an address, it is likely a DMA
-    if (rw == BX_READ && is_l2_page_bitmap[phy >> 12] && !guest_code_pages.contains(phy>>12)) {
+    if (rw == BX_READ && is_l2_page_bitmap[phy >> 12] && !guest_page_table.contains(phy>>12)) {
         if(BX_CPU(id)->fuzztrace) {
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
@@ -120,7 +120,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
     
         prioraccess = -1;
     } 
-    if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_code_pages.contains(phy>>12) && data && len >= sizeof(uint16_t)) {
+    if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_page_table.contains(phy>>12) && data && len >= sizeof(uint16_t)) {
         auto gpa = lookup_gpa_by_hpa(phy);
         auto vring = get_vqueue_manager().get_belonging_vring(gpa);
         if (vring && vring->queue->vdev->to_fuzz && vring->type == VRing::VRING_USED) {
@@ -352,7 +352,7 @@ void BX_MEM_C::readPhysicalPage(BX_CPU_C *cpu, bx_phy_address addr, unsigned len
 void mark_page_not_guest(bx_phy_address addr, int level) {
     printf("Mark page not present: %lx\n", addr);
     is_l2_page_bitmap[addr>>12] = 0;
-    guest_code_pages.insert(addr>>12);
+    guest_page_table.insert(addr>>12);
 }
 
 bool frame_is_guest(bx_phy_address addr) {
