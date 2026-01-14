@@ -238,7 +238,7 @@ int DescRing::ingest_elem(unsigned cpu, void* opaque, int index) const {
 				return -2;
 			}
 
-			bx_address table_gpa = alloc_indirect_table_gpa(queue, table_bytes_len);
+			bx_address table_gpa = get_vqueue_manager().alloc_indirect_table_gpa(table_bytes_len);
 			if (table_gpa == 0) {
 				return -2;
 			}
@@ -504,7 +504,7 @@ unsigned long ConfigSpace::read(size_t offset, size_t sz) const {
     start_cpu(true);
     
 	unsigned long mask = (1ULL << (sz * 8)) - 1;
-    unsigned long value = hp::vcpu()->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
+    unsigned long value = BX_CPU(0)->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
     return value;
 }
 
@@ -1063,6 +1063,33 @@ const std::vector<uint8_t>* VQueueManager::find_indirect_table(bx_address gpa, b
 	return nullptr;
 }
 
+bx_address VQueueManager::alloc_indirect_table_gpa(size_t bytes_len) {
+    if (bytes_len == 0 || bytes_len > PAGE_SIZE) {
+        return 0;
+    }
+    extern std::vector<size_t> guest_page_scratchlist;
+    const size_t kAlign = 16;
+
+    while (indirect_alloc_scratch_idx < guest_page_scratchlist.size()) {
+        if (indirect_alloc_scratch_idx == 9) {
+            indirect_alloc_scratch_idx++;
+            indirect_alloc_off = 0;
+            continue;
+        }
+
+        bx_address page = (bx_address)guest_page_scratchlist[indirect_alloc_scratch_idx];
+        size_t off = (indirect_alloc_off + (kAlign - 1)) & ~(kAlign - 1);
+        if (off + bytes_len <= PAGE_SIZE) {
+            indirect_alloc_off = off + bytes_len;
+            return page + (bx_address)off;
+        }
+
+        indirect_alloc_scratch_idx++;
+        indirect_alloc_off = 0;
+    }
+    return 0;
+}
+
 bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
 	if (vdev->inited())
 		return true;
@@ -1385,7 +1412,8 @@ const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_o
  *  0: handled/no-op
  * -1: failed to ingest buffer
  */
-static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void* data) {
+static int ingest_vring_buffer(unsigned cpu, bx_address addr, bx_address gpa, size_t len,
+                               void* data) {
 	static void* replay = getenv("REPLAY");
 	static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
 
@@ -1417,7 +1445,7 @@ static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void
 		return -1;
 	/* fetch overlapped data */
 	if (no_double_fetch && overlapped_size) 
-		BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
+		BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), addr, overlapped_size, buf);
 			
 	if (queue->vdev->is_scsi && is_out) {
 		const uint8_t valid_lun[8] = {1, 1, 0, 0, 0, 0, 0, 0};
@@ -1435,7 +1463,7 @@ static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void
 	}
 			
 	/* adjust addr = addr + len - remaining_len to avoid duplicated region */
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, (void *)buf);
 	memcpy(data, buf, len);
 	get_vqueue_manager().add_seen_buffer(gpa, len);
 	update_virtio_req_counter(desc_with_info->desc_info.queue_id,
@@ -1451,7 +1479,7 @@ static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void
 	-2: stop polling
 	1: not a vring element
 */
-static int ingest_vring_split(bx_address addr, size_t len, void* data) {
+static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* data) {
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
@@ -1474,7 +1502,7 @@ static int ingest_vring_split(bx_address addr, size_t len, void* data) {
 		if (get_vqueue_manager().hooks_disabled()) {
 			return 0;
 		}
-		rc = vring->ingest_idx(&vring_idx);
+		rc = vring->ingest_idx(cpu, &vring_idx);
 		if (rc == -1) {  
 			// -1, ingest error
 			// -2, queue locates at page 0
@@ -1491,14 +1519,14 @@ static int ingest_vring_split(bx_address addr, size_t len, void* data) {
 			// just mark the region, do nothing
 			return 0;
 		}
-		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
+		BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, (void*)&vring_idx);
 		memcpy(data, &vring_idx, len);
 		return 0;
 	case VRing::FILED_TYPE::VRING_ELEM:
 		if (get_vqueue_manager().hooks_disabled()) {
 			return 0;
 		}
-		rc = vring->ingest_elem((void*)vring_elem, vring->element_index(gpa));
+		rc = vring->ingest_elem(cpu, (void*)vring_elem, vring->element_index(gpa));
 		off_in_elem = gpa - (vring->start() + vring->ring_offset() + vring->element_index(gpa) * vring->element_size());
 		if (rc == -1) {
 			/* here we should not call fuzz_emu_stop_unhealthy */
@@ -1508,7 +1536,7 @@ static int ingest_vring_split(bx_address addr, size_t len, void* data) {
 			fuzz_emu_stop_polling();
 			return -2;
 		} else if (rc == 0) {
-			vring->write_elem(vring->element_index(gpa), vring_elem);
+			vring->write_elem(cpu, vring->element_index(gpa), vring_elem);
 			memcpy(data, vring_elem + off_in_elem, len);
 		} else if (rc == 1) { // genereted elem, already written
 			// just mark the region, do nothing
@@ -1524,7 +1552,7 @@ static int ingest_vring_split(bx_address addr, size_t len, void* data) {
 }
 
 /* packed queue variant mirroring ingest_vring_split for packed ring support */
-static int ingest_vring_packed(bx_address addr, size_t len, void* data) {
+static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* data) {
 	static char* vring_log = getenv("VIRTIO_VRING_LOG");
 	static tsl::robin_map<size_t, bool> logged_init;
 	auto gpa = lookup_gpa_by_hpa(addr);
@@ -1590,7 +1618,7 @@ static int ingest_vring_packed(bx_address addr, size_t len, void* data) {
 			}
 		}
 	}
-	rc = vring->ingest_elem((void*)vring_elem, desc_idx);
+	rc = vring->ingest_elem(cpu, (void*)vring_elem, desc_idx);
 	if (rc == -1) {
 		/* here we should not call fuzz_emu_stop_unhealthy */
 		// fuzz_emu_stop_unhealthy();
@@ -1599,7 +1627,7 @@ static int ingest_vring_packed(bx_address addr, size_t len, void* data) {
 		fuzz_emu_stop_polling();
 		return -2;
 	} else if (rc == 0) {
-		vring->write_elem(desc_idx, vring_elem);
+		vring->write_elem(cpu, desc_idx, vring_elem);
 		memcpy(data, vring_elem + off_in_elem, len);
 	} else if (rc == 1) { // genereted elem, already written
 		// just mark the region, do nothing
@@ -1607,7 +1635,7 @@ static int ingest_vring_packed(bx_address addr, size_t len, void* data) {
 	return 0;
 }
 
-int ingest_vring(bx_address addr, size_t len, void* data) {
+int ingest_vring(unsigned cpu, bx_address addr, size_t len, void* data) {
 	static char* vring_log = getenv("VIRTIO_VRING_LOG");
 	static tsl::robin_map<uint64_t, bool> logged_dispatch;
 	auto gpa = lookup_gpa_by_hpa(addr);
@@ -1639,9 +1667,9 @@ int ingest_vring(bx_address addr, size_t len, void* data) {
 			}
 		}
 		if (packed) {
-			return ingest_vring_packed(addr, len, data);
+			return ingest_vring_packed(cpu, addr, len, data);
 		}
-		return ingest_vring_split(addr, len, data);
+		return ingest_vring_split(cpu, addr, len, data);
 	}
 	{
 		bx_address base_gpa = 0;
@@ -1651,7 +1679,8 @@ int ingest_vring(bx_address addr, size_t len, void* data) {
 			size_t remaining = bytes->size() > off ? bytes->size() - off : 0;
 			size_t to_copy = std::min(len, remaining);
 			if (to_copy) {
-				BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, to_copy, (void*)(bytes->data() + off));
+				BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, to_copy,
+				                             (void*)(bytes->data() + off));
 				memcpy(data, bytes->data() + off, to_copy);
 			}
 			if (to_copy < len) {
@@ -1660,5 +1689,5 @@ int ingest_vring(bx_address addr, size_t len, void* data) {
 			return 0;
 		}
 	}
-	return ingest_vring_buffer(addr, gpa, len, data);
+	return ingest_vring_buffer(cpu, addr, gpa, len, data);
 }

@@ -493,7 +493,7 @@ static int access_linear(uint64_t laddress,
   return(valid);
 }
 
-static BX_CPU_C *dbg_cpu() { return hp::vcpu(); }
+static BX_CPU_C *dbg_cpu() { return BX_CPU(0); }
 
 char last_seen_binary[1024] = { '\0' };
 

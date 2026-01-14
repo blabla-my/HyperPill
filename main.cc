@@ -68,7 +68,7 @@ static void dump_hex(const uint8_t *data, size_t len) {
 }
 
 static void dump_regs_cpu(unsigned cpu_id) {
-	auto *cpu = hp::cpu(cpu_id);
+	auto *cpu = BX_CPU(cpu_id);
 	static const char *general_64bit_regname[17] = {
 		"rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8",
 		"r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip"
@@ -85,7 +85,7 @@ static void dump_regs_cpu(unsigned cpu_id) {
 void dump_regs() { dump_regs_cpu(0); }
 
 static void dump_instr_cpu(unsigned cpu_id) {
-	auto *cpu = hp::cpu(cpu_id);
+	auto *cpu = BX_CPU(cpu_id);
 	auto s = addr_to_sym(cpu->get_rip());
 	printf("0x%lx<< %s %s\n", cpu->get_rip(), s.bin.c_str(),
 	       s.symbol.c_str());
@@ -116,9 +116,9 @@ static void hp_init_cpus(unsigned int cpu_count) {
 
 static void init_cpu(void) {
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		hp::cpu(cpu)->initialize();
-		hp::cpu(cpu)->reset(BX_RESET_HARDWARE);
-		hp::cpu(cpu)->sanity_checks();
+		BX_CPU(cpu)->initialize();
+		BX_CPU(cpu)->reset(BX_RESET_HARDWARE);
+		BX_CPU(cpu)->sanity_checks();
 	}
 }
 
@@ -127,23 +127,23 @@ void start_cpu(bool enumerating) {
 		return;
 
 	srand(1); /* rdrand */
-	hp::vcpu()->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
+	BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
 	icount = 0;
 	pio_icount = 0;
 	clear_seen_dma();
-	if (hp::vcpu()->fuzztrace) {
+	if (BX_CPU(0)->fuzztrace) {
 		dump_regs();
 	}
 	reset_op_cov();
 
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		hp::cpu(cpu)->fuzz_executing_input = true;
+		BX_CPU(cpu)->fuzz_executing_input = true;
 	}
-	if (hp::vcpu()->fuzzdebug_gdb && !enumerating)
+	if (BX_CPU(0)->fuzzdebug_gdb && !enumerating)
 		hp_gdbstub_debug_loop();
 	if (hp::num_cpus() == 1) {
-		while (hp::vcpu()->fuzz_executing_input) {
-			hp::vcpu()->cpu_loop();
+		while (BX_CPU(0)->fuzz_executing_input) {
+			BX_CPU(0)->cpu_loop();
 		}
 	} else {
 	#if BX_SUPPORT_SMP
@@ -153,22 +153,22 @@ void start_cpu(bool enumerating) {
 		const Bit32u quantum = SIM->get_param_num(BXPN_SMP_QUANTUM)->get();
 
 		for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-			hp::cpu(cpu)->icount_last_sync = hp::cpu(cpu)->get_icount();
+			BX_CPU(cpu)->icount_last_sync = BX_CPU(cpu)->get_icount();
 		}
 
 		if (setjmp(BX_CPU_C::jmp_buf_env)) {
-			hp::cpu(processor)->icount++;
+			BX_CPU(processor)->icount++;
 			run = false;
 		}
 
-		while (hp::vcpu()->fuzz_executing_input) {
+		while (BX_CPU(0)->fuzz_executing_input) {
 			if (run)
-				hp::cpu(processor)->cpu_run_trace();
+				BX_CPU(processor)->cpu_run_trace();
 			else
 				run = true;
 
-			Bit32u n = (Bit32u)(hp::cpu(processor)->get_icount() -
-			                    hp::cpu(processor)->icount_last_sync);
+			Bit32u n = (Bit32u)(BX_CPU(processor)->get_icount() -
+			                    BX_CPU(processor)->icount_last_sync);
 			if (n == 0)
 				n = quantum;
 			executed += n;
@@ -179,22 +179,22 @@ void start_cpu(bool enumerating) {
 				executed %= hp::num_cpus();
 			}
 
-			hp::cpu(processor)->icount_last_sync =
-				hp::cpu(processor)->get_icount();
+			BX_CPU(processor)->icount_last_sync =
+				BX_CPU(processor)->get_icount();
 		}
 #else
-		while (hp::vcpu()->fuzz_executing_input) {
-			hp::vcpu()->cpu_loop();
+		while (BX_CPU(0)->fuzz_executing_input) {
+			BX_CPU(0)->cpu_loop();
 		}
 	#endif
 		}
 		pause_cpu();
 		if (fuzz_unhealthy_input || fuzz_do_not_continue)
 			return;
-		hp::vcpu()->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
+		BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
 
 	bx_address phy;
-	int res = vmcs_linear2phy(hp::vcpu()->VMread64(VMCS_GUEST_RIP), &phy);
+	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
 	// assert(res == 1); // Guest page table should be guarded
 	if (res != 1){
 		fuzz_emu_stop_unhealthy();
@@ -218,7 +218,7 @@ void start_cpu(bool enumerating) {
 
 static void fuzz_emu_stop() {
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		hp::cpu(cpu)->fuzz_executing_input = false;
+		BX_CPU(cpu)->fuzz_executing_input = false;
 	}
 }
 
@@ -270,10 +270,8 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 	}
 }
 
-void fuzz_hook_exception(unsigned vector, unsigned error_code) {
-	// if (verbose)
-		printf("Exception: 0x%x 0x%x\n", vector, error_code);
-	exit(1);
+void fuzz_hook_exception(unsigned cpu, unsigned vector, unsigned error_code) {
+	printf("Exception: 0x%x 0x%x\n", vector, error_code);
 }
 
 void fuzz_hook_hlt(unsigned cpu) {
@@ -294,14 +292,14 @@ unsigned long int get_pio_icount() {
 void reset_bx_vm() {
 #if BX_SUPPORT_SMP
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		*hp::cpu(cpu) = shadow_bx_cpus[cpu];
+		*BX_CPU(cpu) = shadow_bx_cpus[cpu];
 	}
 #else
 	bx_cpu = shadow_bx_cpu;
 #endif
 	bx_pc_system = shadow_bx_pc_system;
-	if (hp::vcpu()->vmcs_map)
-		hp::vcpu()->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
+	if (BX_CPU(0)->vmcs_map)
+		BX_CPU(0)->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
 	fuzz_reset_memory();
 }
 
@@ -374,7 +372,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	static void *ic_test = getenv("FUZZ_IC_TEST");
 	static void *virtio_core = getenv("VIRTIO_CORE");
 	static int done;
-	if (hp::vcpu()->fuzztrace)
+	if (BX_CPU(0)->fuzztrace)
 		printf("NEW INPUT\n");
 	if (!done) {
 		if (!log_writes)
@@ -540,8 +538,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	bx_init_pc_system();
 
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		hp::cpu(cpu)->fuzzdebug_gdb = getenv("GDB");
-		hp::cpu(cpu)->fuzztrace = (getenv("FUZZ_DEBUG_DISASM") != 0);
+		BX_CPU(cpu)->fuzzdebug_gdb = getenv("GDB");
+		BX_CPU(cpu)->fuzztrace = (getenv("FUZZ_DEBUG_DISASM") != 0);
 	}
 
 	/* Load the snapshot */
@@ -611,7 +609,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	ept_locate_pc();
 
 	/* Save guest RIP so that we can restore it after each fuzzer input */
-	guest_rip = hp::vcpu()->get_rip();
+	guest_rip = BX_CPU(0)->get_rip();
 	
 	/* Load symbols from files */
 	if (getenv("KALLSYMS") and getenv("MAPS")) {
@@ -648,7 +646,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	}
 
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++)
-		hp::cpu(cpu)->TLB_flush();
+		BX_CPU(cpu)->TLB_flush();
 	fuzz_walk_ept();
 	vmcs_fixup();
 	ept_mark_page_table();
@@ -685,7 +683,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	 */
 #if BX_SUPPORT_SMP
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		shadow_bx_cpus[cpu] = *hp::cpu(cpu);
+		shadow_bx_cpus[cpu] = *BX_CPU(cpu);
 	}
 #else
 	shadow_bx_cpu = bx_cpu;

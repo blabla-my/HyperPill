@@ -182,17 +182,17 @@ void init_register_feedback() {
             for(int j=0; j<sizeof(value); j++)
                 ptr[j] = rand();
             memcpy(cursor, &value, sizeof(value));
-            hp::vcpu()->set_reg64(i, value);
+            BX_CPU(0)->set_reg64(i, value);
             register_contents[i] = std::make_pair(cursor, 8);
             cursor += 8;
             printf("REG%d: %lx\n", i, value);
     }
     for(int i=0; i<BX_XMM_REGISTERS+1; i++) {
-            uint8_t* ptr = (uint8_t*)&hp::vcpu()->vmm[i];
-            for(int j=0; j<sizeof(hp::vcpu()->vmm[i]); j++)
+            uint8_t* ptr = (uint8_t*)&BX_CPU(0)->vmm[i];
+            for(int j=0; j<sizeof(BX_CPU(0)->vmm[i]); j++)
                 ptr[j] = rand();
-            memcpy(cursor, &hp::vcpu()->vmm[i], sizeof(hp::vcpu()->vmm[i]));
-            register_contents[16+i] = std::make_pair(cursor, sizeof(hp::vcpu()->vmm[i]));
-            cursor += sizeof(hp::vcpu()->vmm[i]);
+            memcpy(cursor, &BX_CPU(0)->vmm[i], sizeof(BX_CPU(0)->vmm[i]));
+            register_contents[16+i] = std::make_pair(cursor, sizeof(BX_CPU(0)->vmm[i]));
+            cursor += sizeof(BX_CPU(0)->vmm[i]);
     }
 }

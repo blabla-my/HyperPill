@@ -893,9 +893,10 @@ struct BxExceptionInfo exceptions_info[BX_CPU_HANDLED_EXCEPTIONS] = {
   /* 31 */ { BX_ET_BENIGN,       BX_EXCEPTION_CLASS_FAULT, 0 }
 };
 
-void fuzz_hook_exception(unsigned vector, unsigned error_code);
+void fuzz_hook_exception(unsigned cpu, unsigned vector, unsigned error_code);
 
-__attribute__((weak)) void fuzz_hook_exception(unsigned vector, unsigned error_code) {
+__attribute__((weak)) void fuzz_hook_exception(unsigned cpu, unsigned vector, unsigned error_code) {
+  (void)cpu;
 }
 
 // vector:     0..255: vector in IDT
@@ -930,7 +931,7 @@ void BX_CPU_C::exception(unsigned vector, Bit16u error_code)
   bx_dbg_exception(BX_CPU_ID, vector, error_code);
 #endif
 
-  fuzz_hook_exception(vector, error_code);
+  fuzz_hook_exception(BX_CPU_ID, vector, error_code);
 
 #if BX_SUPPORT_VMX
   VMexit_Event(BX_HARDWARE_EXCEPTION, vector, error_code, push_error);

@@ -109,7 +109,7 @@ uint16_t SplitRingModel::allocate_descriptors(DescChainFSM& fsm) {
 		}
 
 		memcpy(desc_with_info->desc, &desc, sizeof(desc));
-		queue()->desc_ring->write_elem(index, desc_with_info->desc);
+		queue()->desc_ring->write_elem(0, index, desc_with_info->desc);
 
 		get_vqueue_manager().add_desc(desc_with_info);
 		fsm.add_desc(desc_with_info);
@@ -125,13 +125,13 @@ void SplitRingModel::notify(uint16_t head) {
 
 	uint16_t avail_idx = 0;
 	if (q->avail_ring->addr_hpa) {
-		BX_MEM(0)->readPhysicalPage(BX_CPU(id), q->avail_ring->addr_hpa + sizeof(uint16_t),
+		BX_MEM(0)->readPhysicalPage(BX_CPU(0), q->avail_ring->addr_hpa + sizeof(uint16_t),
 									sizeof(avail_idx), &avail_idx);
 	}
 	uint16_t avail_pos = (uint16_t)(avail_idx % q->avail_ring->size);
 	vring_avail_elem elem = head;
-	q->avail_ring->write_elem(avail_pos, &elem);
-	q->avail_ring->set_idx((uint16_t)(avail_idx + 1));
+	q->avail_ring->write_elem(0, avail_pos, &elem);
+	q->avail_ring->set_idx(0, (uint16_t)(avail_idx + 1));
 
 	vdev().common_cfg.set_queue_enable(q->queue_sel);
 	bx_address addr = vdev().notify_cfg.address + vdev().multiplier * queue_notify_off(q->queue_sel);
@@ -158,6 +158,7 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 		return UINT16_MAX;
 	}
 
+	static void* dbg_packed_desc = getenv("DBG_PACKED_DESC");
 	auto& state = state_for_queue(q->queue_sel);
 	uint16_t total = (uint16_t)(fsm.sg_num_out + fsm.sg_num_in);
 	if (total == 0) {
@@ -165,6 +166,10 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 	}
 
 	uint16_t head = state.next_desc_idx;
+	if (dbg_packed_desc) {
+		printf("packed desc alloc: qsel=%u qid=%zu head=%u total=%u wrap=%u\n",
+		       q->queue_sel, q->idx, head, total, state.wrap ? 1 : 0);
+	}
 	for (uint16_t i = 0; i < total; i++) {
 		fuzzer::DescInfo desc_info {
 			.queue_id = (uint16_t)q->idx,
@@ -193,8 +198,11 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 			desc.flags |= VRING_DESC_F_NEXT;
 		}
 		desc.flags |= state.wrap ? VIRTQ_DESC_F_AVAIL : VIRTQ_DESC_F_USED;
-		q->desc_ring->write_elem(index, &desc);
+		q->desc_ring->write_elem(0, index, &desc);
 		memcpy(desc_with_info->desc, &desc, sizeof(desc));
+		// printf("packed desc: qid=%zu idx=%u id=%u addr=%lx len=%x flags=%x\n",
+		// 		q->idx, index, desc.id, (unsigned long)desc.addr, desc.len,
+		// 		desc.flags);
 
 		if (index + 1 == q->desc_ring->size) {
 			state.next_desc_idx = 0;

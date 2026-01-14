@@ -50,7 +50,7 @@ void walk_ept(){
 extern size_t guest_mem_size;
 void fuzz_walk_ept() {
     printf(".performing ept walk \n");
-    uint64_t eptp = hp::vcpu()->VMread64(VMCS_64BIT_CONTROL_EPTPTR);
+    uint64_t eptp = BX_CPU(0)->VMread64(VMCS_64BIT_CONTROL_EPTPTR);
     printf("EPTP: %lx\n", eptp);
     /* printf("EPT Paging Structure Memory Type: %lx\n", eptp&0b111); */
     /* printf("EPT Page Walk Length: %lx\n", ((eptp>>3)&0b111) + 1); */
@@ -77,7 +77,7 @@ void fuzz_walk_ept() {
 
 int vmcs_translate_guest_physical_ept(bx_phy_address guest_paddr, bx_phy_address *phy, int *translation_level)
 {
-  BX_CPU_C *cpu = hp::vcpu();
+  BX_CPU_C *cpu = BX_CPU(0);
   VMCS_CACHE *vm = &cpu->vmcs;
   bx_phy_address pt_address = LPFOf(vm->eptptr) ;//BX_CPU(id)->VMread64(VMCS_64BIT_CONTROL_EPTPTR) & (~0xFFF);
 

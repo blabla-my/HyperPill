@@ -142,7 +142,7 @@ void fuzz_inject_vmcall(uint64_t rcx, uint64_t r8, const void* xmm0, const void*
 
 void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
                              unsigned memtype, unsigned rw, void* data);
-void fuzz_hook_exception(unsigned vector, unsigned error_code);
+void fuzz_hook_exception(unsigned cpu, unsigned vector, unsigned error_code);
 void fuzz_hook_hlt(unsigned cpu);
 void fuzz_hook_cr3_change(bx_address old, bx_address val);
 void fuzz_reset_exception_counter();
@@ -309,19 +309,21 @@ void dump_instr();
 void hp_gdbstub_debug_loop();
 int hp_gdbstub_mem_check(unsigned cpu, uint64_t lin, unsigned len, unsigned rw);
 
+unsigned bx_kernel_cpu();
+
 bx_phy_address bx_kernel_translate_linear(unsigned cpu, bx_address laddr, int rw);
 inline bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw) {
-	return bx_kernel_translate_linear(0, laddr, rw);
+	return bx_kernel_translate_linear(bx_kernel_cpu(), laddr, rw);
 }
 
 void bx_kernel_read(unsigned cpu, bx_address kaddr, void* buf, size_t sz);
 inline void bx_kernel_read(bx_address kaddr, void* buf, size_t sz) {
-	bx_kernel_read(0, kaddr, buf, sz);
+	bx_kernel_read(bx_kernel_cpu(), kaddr, buf, sz);
 }
 
 void bx_kernel_write(unsigned cpu, bx_address kaddr, void* buf, size_t sz);
 inline void bx_kernel_write(bx_address kaddr, void* buf, size_t sz) {
-	bx_kernel_write(0, kaddr, buf, sz);
+	bx_kernel_write(bx_kernel_cpu(), kaddr, buf, sz);
 }
 
 #define bx_kernel_deref_ptr(kaddr,obj) \

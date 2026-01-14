@@ -247,7 +247,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
     bx_address page_start = (start >> 12) << 12;
     bx_address page_end = ((start + len - 1) >> 12) << 12;
     if (page_start == page_end) {
-        region_start = hp::vcpu()->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
+        region_start = BX_CPU(bx_kernel_cpu())->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
         region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
         region_end = region_start + len;
         add_persistent_memory_range(region_start, len);
@@ -255,7 +255,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
     }
     for (bx_address page = page_start; page <= page_end; page += 0x1000) {
         if (start > page) {
-            region_start = hp::vcpu()->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
+            region_start = BX_CPU(bx_kernel_cpu())->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
             region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
             region_end = (page + 0x1000);
             assert((region_start & lpf_mask) != 0);
@@ -264,7 +264,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
             continue;
         }
         if (page + 0x1000 > start + len) {
-            region_start = hp::vcpu()->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
+            region_start = BX_CPU(bx_kernel_cpu())->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
             region_start = (region_start & ~((Bit64u) lpf_mask));
             region_end = region_start + (start + len - page);
             assert((region_start & lpf_mask) == 0);
@@ -272,7 +272,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
             add_persistent_memory_range(region_start, region_end - region_start);
             continue;
         }
-        region_start = hp::vcpu()->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
+        region_start = BX_CPU(bx_kernel_cpu())->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
         region_start = (region_start & ~((Bit64u) lpf_mask));
         region_end = region_start + 0x1000;
         assert((region_start & lpf_mask) == 0);

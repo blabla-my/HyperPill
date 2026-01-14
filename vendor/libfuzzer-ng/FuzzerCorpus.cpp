@@ -135,8 +135,8 @@ vring_desc_with_info* DescPool::new_desc() {
     len++;
     srand(__rdtsc());
     vring_desc desc = {};
-    desc.addr = GUEST_MEM_START + (rand() % GUEST_MEM_SIZE);
-    desc.len = rand() % 0x10000;
+    desc.addr = ((uint64_t)rand() << 32) | rand();
+    desc.len = rand();
     desc.flags = 0;
     desc.next = 0;
     memcpy(ret->desc, &desc, sizeof(desc));

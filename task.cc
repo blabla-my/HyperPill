@@ -109,9 +109,12 @@ unsigned long pgd2cr3(unsigned cpu, unsigned long pgd) {
 
 void iterate_tasks(bx_address task_struct_head) {
     if (task_struct_head == 0UL) return; 
+    const unsigned cpu = bx_kernel_cpu();
     bx_address task = task_struct_head;
     do {
-        Task* task_ptr = task_manager.add_task(0, task);
+        Task* task_ptr = task_manager.add_task(cpu, task);
+        if (!task_ptr)
+            break;
 
         printf("Task at %lx PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx, flags: %x, stack: %lx, RIP: %lx\n",
                task, task_ptr->pid, task_ptr->kernel_task, task_ptr->hypervisor_task, task_ptr->userspace_vmm_task, task_ptr->comm,
@@ -223,7 +226,7 @@ Task* TaskManager::add_task(Task* task_addr){
 Task* TaskManager::add_hypervisor_task(bx_address task_addr){
     Task* already_in = get_hypervisor_task(task_addr);
     if (!already_in){
-        Task* new_task = add_task(0, task_addr);
+        Task* new_task = add_task(bx_kernel_cpu(), task_addr);
         hypervisor_task_map[task_addr] = new_task;
         return new_task;
     }

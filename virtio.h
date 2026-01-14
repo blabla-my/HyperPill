@@ -424,9 +424,14 @@ public:
     void enable_hook() {hook_disabled = false;}
     bool hooks_disabled() const {return hook_disabled;}
 
-    void reset_indirect_tables() {indirect_tables.clear();}
+    void reset_indirect_tables() {
+        indirect_tables.clear();
+        indirect_alloc_scratch_idx = 4;
+        indirect_alloc_off = 0;
+    }
     void add_indirect_table(bx_address base_gpa, std::vector<uint8_t>&& bytes);
     const std::vector<uint8_t>* find_indirect_table(bx_address gpa, bx_address* base_gpa_out) const;
+    bx_address alloc_indirect_table_gpa(size_t bytes_len);
 
 private:
     void group_vring_by_page(const VRing* vring);
@@ -438,6 +443,8 @@ private:
     std::vector<const fuzzer::vring_desc_with_info*> generated_descs;
     tsl::robin_map<uint64_t, size_t> seen_buffers;
     tsl::robin_map<bx_address, std::vector<uint8_t>> indirect_tables;
+    size_t indirect_alloc_scratch_idx = 4;
+    size_t indirect_alloc_off = 0;
     VirtioDev* fuzzed_dev_cache;
     bool hook_disabled = false;
 };
@@ -464,7 +471,10 @@ typedef struct VirtQueueElement
 
 int read_virtqueue_element(unsigned cpu, bx_address elem_ptr_hva, VirtQueueElement* elem);
 
-int ingest_vring(bx_address addr, size_t len, void* data);
+int ingest_vring(unsigned cpu, bx_address addr, size_t len, void* data);
+inline int ingest_vring(bx_address addr, size_t len, void* data) {
+    return ingest_vring(0, addr, len, data);
+}
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
 const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);
