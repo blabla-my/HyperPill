@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
@@ -29,91 +30,118 @@ namespace fuzzer {
 
 namespace DescMutator {
 
+static inline vring_desc load_desc(const fuzzer::vring_desc_with_info* desc_with_info) {
+    vring_desc desc = {};
+    memcpy(&desc, desc_with_info->desc, sizeof(desc));
+    return desc;
+}
+
+static inline void store_desc(fuzzer::vring_desc_with_info* desc_with_info, const vring_desc& desc) {
+    memcpy(desc_with_info->desc, &desc, sizeof(desc));
+}
+
 static void AlignLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     const size_t align[] = {512, 1024};
     auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
     int mul = gen() % 4 + 1;
-    desc->desc.len = mul * choice;  
+    vring_desc desc = load_desc(desc_with_info);
+    desc.len = mul * choice;
+    store_desc(desc_with_info, desc);
 }
 
 static void AlignLengthForAll(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     for (int i = 0; i < desc_pool->len; i++) {
-        auto desc_with_info = &desc_pool->array[i];
+        auto* desc_with_info = &desc_pool->array[i];
         const auto& info = desc_with_info->desc_info;
         if (info.desc_idx == 0 && info.is_out == 1) {
             continue;
         }
         const size_t align[] = {512, 1024};
         auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
-        desc_with_info->desc.len = choice;
+        vring_desc desc = load_desc(desc_with_info);
+        desc.len = choice;
+        store_desc(desc_with_info, desc);
     }
 }
 
 static void SmallLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     size_t new_len = gen() % 0x80; // [0,64]
-    desc->desc.len = new_len;
+    vring_desc desc = load_desc(desc_with_info);
+    desc.len = new_len;
+    store_desc(desc_with_info, desc);
 }
 
 static void MiddleLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     size_t new_len = (gen() % 0x200) + 0x50; // [256,4352]
-    desc->desc.len = new_len;
+    vring_desc desc = load_desc(desc_with_info);
+    desc.len = new_len;
+    store_desc(desc_with_info, desc);
 }
 
 static void MutateLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     size_t change = (gen() % 33); // [0,32]
+    vring_desc desc = load_desc(desc_with_info);
     if (gen() % 2 == 0) {
         // increase length
-        desc->desc.len += change;
+        desc.len += change;
     } else {
         // decrease length
-        if (desc->desc.len > change) {
-            desc->desc.len -= change;
+        if (desc.len > change) {
+            desc.len -= change;
         } else {
-            desc->desc.len = 0;
+            desc.len = 0;
         }
     }
+    store_desc(desc_with_info, desc);
 }
 
 static void FlipBitLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     // Assuming desc->desc.len is a 32-bit unsigned integer
     uint32_t bit_pos = gen() % 32; // Random bit position from 0 to 31
-    desc->desc.len ^= (1U << bit_pos); // Flip the bit
+    vring_desc desc = load_desc(desc_with_info);
+    desc.len ^= (1U << bit_pos); // Flip the bit
+    store_desc(desc_with_info, desc);
 }
 
 static void ByteFlipLength(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     // Assuming desc->desc.len is a 32-bit unsigned integer
     uint32_t byte_pos = gen() % 4; // Random byte position from 0 to 3
     uint32_t bit_pos = gen() % 8; // Random bit position within the byte from 0 to 7
     uint32_t mask = (1U << bit_pos) << (byte_pos * 8); // Create a mask for the specific bit
-    desc->desc.len ^= mask; // Flip the bit in the chosen byte
+    vring_desc desc = load_desc(desc_with_info);
+    desc.len ^= mask; // Flip the bit in the chosen byte
+    store_desc(desc_with_info, desc);
 }
 
 static void AlignAddress(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
     const size_t align[] = {16, 256, 512, 1024};
     auto choice = align[gen() % (sizeof(align)/sizeof(align[0]))];
-    if (desc->desc.addr % choice != 0) {
-        desc->desc.addr = (desc->desc.addr / choice) * choice;
+    vring_desc desc = load_desc(desc_with_info);
+    if (desc.addr % choice != 0) {
+        desc.addr = (desc.addr / choice) * choice;
     }
+    store_desc(desc_with_info, desc);
 }
 
 static void UpdateWithHints(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
-    auto desc = &desc_pool->array[gen() % desc_pool->len];
-    auto hints = GetDescSizeHints(desc->desc_info.queue_id, desc->desc_info.desc_idx, desc->desc_info.is_out);
+    auto* desc_with_info = &desc_pool->array[gen() % desc_pool->len];
+    auto hints = GetDescSizeHints(desc_with_info->desc_info.queue_id, desc_with_info->desc_info.desc_idx,
+                                  desc_with_info->desc_info.is_out);
     if (hints) {
         size_t len = 0;
         auto cur = hints;
@@ -121,10 +149,13 @@ static void UpdateWithHints(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
         for (cur=hints;cur;cur = cur->next, len++);
         auto choosed_hint_idx = gen() % len;
         for (cur=hints; cur && choosed_hint_idx >0; cur = cur->next, choosed_hint_idx--);
-        desc->desc.len = cur->size;
+        vring_desc desc = load_desc(desc_with_info);
+        desc.len = cur->size;
+        store_desc(desc_with_info, desc);
         DBG_PRINT {
             printf("Mutator: Updated desc len with hint: queue %d, desc %d, is_out %d, len %u\n",
-                    desc->desc_info.queue_id,desc->desc_info.desc_idx, desc->desc_info.is_out, desc->desc.len);
+                    desc_with_info->desc_info.queue_id, desc_with_info->desc_info.desc_idx,
+                    desc_with_info->desc_info.is_out, desc.len);
         }
     } else {
         // no hints, do nothing
@@ -135,7 +166,8 @@ static void RemoveDesc(fuzzer::DescPool* desc_pool, std::mt19937 &gen) {
     if (desc_pool->len == 0) return;
     size_t idx = gen() % desc_pool->len;
     if (idx < desc_pool->len - 1) {
-        memmove(&desc_pool->array[idx], &desc_pool->array[idx + 1], (desc_pool->len - idx - 1) * sizeof(vring_desc_with_info));
+        memmove(&desc_pool->array[idx], &desc_pool->array[idx + 1],
+                (desc_pool->len - idx - 1) * sizeof(fuzzer::vring_desc_with_info));
     }
     desc_pool->len--;
 }

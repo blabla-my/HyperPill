@@ -9,10 +9,15 @@
 #include "fuzz.h"
 #include "task.h"
 #include "pc_system.h"
+#include "cov.h"
 #include <bits/types/struct_iovec.h>
 #include <cassert>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include "conveyor.h"
 #include <linux/virtio_config.h>
 #include <sys/types.h>
@@ -154,70 +159,245 @@ int DescRing::ingest_elem(unsigned cpu, void* opaque, int index) const {
 	if (queue->desc_chain_fsm.has_used_index(index)){
 		return 1;
 	} 
-	auto* desc_ptr = (vring_desc*)opaque;
+	uint64_t* addr_ptr = nullptr;
+	uint32_t* len_ptr = nullptr;
+	uint16_t* flags_ptr = nullptr;
+	bool is_packed = queue && queue->vdev && queue->vdev->packed;
+	vring_desc* split_desc = nullptr;
+	vring_packed_desc* packed_desc = nullptr;
+	if (is_packed) {
+		packed_desc = (vring_packed_desc*)opaque;
+		addr_ptr = &packed_desc->addr;
+		len_ptr = &packed_desc->len;
+		flags_ptr = &packed_desc->flags;
+	} else {
+		split_desc = (vring_desc*)opaque;
+		addr_ptr = &split_desc->addr;
+		len_ptr = &split_desc->len;
+		flags_ptr = &split_desc->flags;
+	}
 
 	if (queue->desc_chain_fsm.is_done()){
 		/* do not chaining */
-		desc_ptr->flags &= ~VRING_DESC_F_NEXT;
+		*flags_ptr = 0;
+		if (is_packed) {
+			bool wrap_phase = ((size_t)index / size) % 2 == 0;
+			if (wrap_phase) {
+				*flags_ptr |= VIRTQ_DESC_F_AVAIL;
+			} else {
+				*flags_ptr |= VIRTQ_DESC_F_USED;
+			}
+		}
 	}
 	else if (queue->desc_chain_fsm.is_inited()){
 		DescChainFSM::SGType sg_type = queue->desc_chain_fsm.consume();
+		bool indirect_enabled = queue && queue->vdev && queue->vdev->indirect_desc;
+		bool is_head = sg_type == DescChainFSM::SGType::OUT_HEAD ||
+		               sg_type == DescChainFSM::SGType::IN_HEAD ||
+		               sg_type == DescChainFSM::SGType::IN_HEAD_TAIL;
 
-		auto addr_ptr = (uint64_t*)&desc_ptr->addr;
-		desc_ptr->next = (index+1) % size;
-		// desc_ptr->flags = 0;
+		if (indirect_enabled && is_head) {
+			if (is_packed) {
+				packed_desc->id = index;
+				*flags_ptr = 0;
+				bool wrap_phase = ((size_t)index / size) % 2 == 0;
+				if (wrap_phase) {
+					*flags_ptr |= VIRTQ_DESC_F_AVAIL;
+				} else {
+					*flags_ptr |= VIRTQ_DESC_F_USED;
+				}
+			} else {
+				*flags_ptr = 0;
+				split_desc->next = 0;
+			}
 
-		switch (sg_type) {
-			case DescChainFSM::SGType::OUT_HEAD:
-				desc_ptr->flags |= VRING_DESC_F_NEXT;
-				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
-				break;
-			case DescChainFSM::SGType::OUT:
-				desc_ptr->flags |= VRING_DESC_F_NEXT;
-				desc_ptr->flags &= ~VRING_DESC_F_WRITE;
-				break;
-			case DescChainFSM::SGType::IN_HEAD:
-				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
-				break;
-			case DescChainFSM::SGType::IN:
-				desc_ptr->flags |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
-				break;
-			case DescChainFSM::SGType::IN_HEAD_TAIL:
-				desc_ptr->flags |= VRING_DESC_F_WRITE;
-				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
-				break;
-			case DescChainFSM::SGType::IN_TAIL:
-				desc_ptr->flags |= VRING_DESC_F_WRITE;
-				desc_ptr->flags &= ~VRING_DESC_F_NEXT;
-				break;
-			case DescChainFSM::SGType::NONE:
-				break;
-		}
-		uint16_t queue_idx = queue->idx;
-		bool is_out = !(desc_ptr->flags & VRING_DESC_F_WRITE);
-		auto desc_seq = queue->desc_chain_fsm.desc_seq();
-		fuzzer::DescInfo desc_info = {
-			.queue_id = queue_idx,
-			.desc_idx = desc_seq,
-			.is_out = is_out
-		};
-		const fuzzer::vring_desc_with_info* desc_with_info = desc_pool_get()->ingest_desc(&desc_info, get_guest_ram_start(), get_guest_ram_size());
-		if (!desc_with_info) { 
-			return -2;
-		}
-		desc_ptr->addr = desc_with_info->desc.addr;
-		desc_ptr->len = desc_with_info->desc.len;
-		queue->desc_chain_fsm.add_used_index(index);
-		queue->desc_chain_fsm.add_desc(desc_with_info);
-		get_vqueue_manager().add_desc(desc_with_info);
-		if (desc_ptr->len > 0x1000) { // record large desc size, having more chance to be identified by cmplog
-			AddDescSize(queue_idx, desc_seq, is_out, desc_ptr->len);
+			struct TablePlan {
+				DescChainFSM::SGType sg_type;
+				uint16_t desc_seq;
+				bool is_out;
+			};
+			std::vector<TablePlan> plans;
+			plans.reserve(DESC_CHAIN_MAX_LEN * 2);
+			auto push_plan = [&](DescChainFSM::SGType t) {
+				bool out = (t == DescChainFSM::SGType::OUT_HEAD || t == DescChainFSM::SGType::OUT);
+				plans.push_back({t, queue->desc_chain_fsm.desc_seq(), out});
+			};
+			push_plan(sg_type);
+			while (!queue->desc_chain_fsm.is_done() && plans.size() < DESC_CHAIN_MAX_LEN * 2) {
+				DescChainFSM::SGType t = queue->desc_chain_fsm.consume();
+				if (t == DescChainFSM::SGType::NONE) {
+					break;
+				}
+				push_plan(t);
+			}
+
+			size_t elem_sz = is_packed ? sizeof(vring_packed_desc) : sizeof(vring_desc);
+			size_t table_elems = plans.size();
+			size_t table_bytes_len = table_elems * elem_sz;
+			if (table_elems == 0 || table_bytes_len == 0 || table_bytes_len > PAGE_SIZE) {
+				return -2;
+			}
+
+			bx_address table_gpa = alloc_indirect_table_gpa(queue, table_bytes_len);
+			if (table_gpa == 0) {
+				return -2;
+			}
+			*addr_ptr = table_gpa;
+			*len_ptr = (uint32_t)table_bytes_len;
+
+			/*
+			 * Optional deterministic noise for error-handling coverage:
+			 * - 0: set VRING_DESC_F_INDIRECT inside the table
+			 * - 1: break chaining (split: out-of-range next, packed: NEXT on last)
+			 */
+			uint8_t noise = 0xff;
+			if (ic_ingest8(&noise, 0, 0xff, true) < 0) {
+				noise = 0xff;
+			}
+
+			std::vector<uint8_t> table_bytes;
+			table_bytes.resize(table_bytes_len);
+			uint16_t queue_idx = queue->idx;
+			for (size_t i = 0; i < table_elems; i++) {
+				bool has_next = (i + 1) < table_elems;
+				uint16_t entry_flags = 0;
+				if (has_next) {
+					entry_flags |= VRING_DESC_F_NEXT;
+				}
+				if (!plans[i].is_out) {
+					entry_flags |= VRING_DESC_F_WRITE;
+				}
+
+				if (noise == 0 && i == 0) {
+					entry_flags |= VRING_DESC_F_INDIRECT;
+				}
+				if (noise == 1 && is_packed && i + 1 == table_elems) {
+					entry_flags |= VRING_DESC_F_NEXT;
+				}
+
+				fuzzer::DescInfo desc_info = {
+					.queue_id = queue_idx,
+					.desc_idx = plans[i].desc_seq,
+					.is_out = plans[i].is_out,
+				};
+				auto* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
+				if (!desc_with_info) {
+					return -2;
+				}
+				vring_desc canonical = {};
+				memcpy(&canonical, desc_with_info->desc, sizeof(canonical));
+				queue->desc_chain_fsm.add_desc(desc_with_info);
+				get_vqueue_manager().add_desc(desc_with_info);
+				if (canonical.len > 0x1000) {
+					AddDescSize(queue_idx, plans[i].desc_seq, plans[i].is_out, canonical.len);
+				}
+
+				if (is_packed) {
+					vring_packed_desc entry = {0};
+					entry.addr = canonical.addr;
+					entry.len = canonical.len;
+					entry.id = (uint16_t)i;
+					entry.flags = entry_flags;
+					memcpy(table_bytes.data() + i * elem_sz, &entry, elem_sz);
+				} else {
+					vring_desc entry = {0};
+					entry.addr = canonical.addr;
+					entry.len = canonical.len;
+					entry.flags = entry_flags;
+					entry.next = (uint16_t)(i + 1);
+					if (!has_next) {
+						entry.next = 0;
+					}
+					if (noise == 1 && i == 0 && has_next) {
+						entry.next = (uint16_t)table_elems;
+					}
+					memcpy(table_bytes.data() + i * elem_sz, &entry, elem_sz);
+				}
+			}
+
+			get_vqueue_manager().add_indirect_table(table_gpa, std::move(table_bytes));
+
+			*flags_ptr |= VRING_DESC_F_INDIRECT;
+			*flags_ptr &= ~(VRING_DESC_F_NEXT | VRING_DESC_F_WRITE);
+			queue->desc_chain_fsm.add_used_index(index);
+		} else {
+			if (is_packed) {
+				packed_desc->id = index;
+				*flags_ptr = 0;
+				bool wrap_phase = ((size_t)index / size) % 2 == 0;
+				if (wrap_phase) {
+					*flags_ptr |= VIRTQ_DESC_F_AVAIL;
+				} else {
+					*flags_ptr |= VIRTQ_DESC_F_USED;
+				}
+			} else {
+				*flags_ptr = 0;
+				split_desc->next = (index+1) % size;
+			}
+			// desc_ptr->flags = 0;
+
+			switch (sg_type) {
+				case DescChainFSM::SGType::OUT_HEAD:
+					*flags_ptr |= VRING_DESC_F_NEXT;
+					*flags_ptr &= ~VRING_DESC_F_WRITE;
+					break;
+				case DescChainFSM::SGType::OUT:
+					*flags_ptr |= VRING_DESC_F_NEXT;
+					*flags_ptr &= ~VRING_DESC_F_WRITE;
+					break;
+				case DescChainFSM::SGType::IN_HEAD:
+					*flags_ptr |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
+					break;
+				case DescChainFSM::SGType::IN:
+					*flags_ptr |= (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT);
+					break;
+				case DescChainFSM::SGType::IN_HEAD_TAIL:
+					*flags_ptr |= VRING_DESC_F_WRITE;
+					*flags_ptr &= ~VRING_DESC_F_NEXT;
+					break;
+				case DescChainFSM::SGType::IN_TAIL:
+					*flags_ptr |= VRING_DESC_F_WRITE;
+					*flags_ptr &= ~VRING_DESC_F_NEXT;
+					break;
+				case DescChainFSM::SGType::NONE:
+					break;
+			}
+			uint16_t queue_idx = queue->idx;
+			bool is_out = !(*flags_ptr & VRING_DESC_F_WRITE);
+			auto desc_seq = queue->desc_chain_fsm.desc_seq();
+			fuzzer::DescInfo desc_info = {
+				.queue_id = queue_idx,
+				.desc_idx = desc_seq,
+				.is_out = is_out
+			};
+			auto* desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
+			if (!desc_with_info) { 
+				return -2;
+			}
+			vring_desc canonical = {};
+			memcpy(&canonical, desc_with_info->desc, sizeof(canonical));
+			*addr_ptr = canonical.addr;
+			*len_ptr = canonical.len;
+			queue->desc_chain_fsm.add_used_index(index);
+			queue->desc_chain_fsm.add_desc(desc_with_info);
+			get_vqueue_manager().add_desc(desc_with_info);
+			if (*len_ptr > 0x1000) { // record large desc size, having more chance to be identified by cmplog
+				AddDescSize(queue_idx, desc_seq, is_out, *len_ptr);
+			}
 		}
 	}
 	DBG_PRINT {
-		printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
-			type_str(), element_size(),
-			desc_ptr->addr, desc_ptr->len, desc_ptr->next, desc_ptr->flags);
+		if (is_packed) {
+			auto* desc_ptr = (vring_packed_desc*)opaque;
+			printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, id: %x, flags: %x\n", 
+				type_str(), element_size(),
+				desc_ptr->addr, desc_ptr->len, desc_ptr->id, desc_ptr->flags);
+		} else {
+			auto* desc_ptr = (vring_desc*)opaque;
+			printf("!virtio: inject vring %s elem, size: %lx, addr: %lx, len: %x, next: %x, flags: %x\n", 
+				type_str(), element_size(),
+				desc_ptr->addr, desc_ptr->len, desc_ptr->next, desc_ptr->flags);
+		}
 		for (int i = 0; i < element_size(); i++){
 			printf("%.2x", *((uint8_t*)opaque + i));
 		}
@@ -501,6 +681,8 @@ VirtioDev::VirtioDev() {
 	memset(this, 0, sizeof(VirtioDev));
 	this->multiplier = 4;
 	this->to_fuzz = false;
+	this->packed = false;
+	this->indirect_desc = false;
 }
 
 void VirtioDev::set_status(uint8_t status) {
@@ -555,77 +737,74 @@ bool VirtioDev::renegotiate_features(uint64_t new_guest_features) {
 
 	get_vqueue_manager().disable_hook();
 
-	bx_address desc_before[VIRTIO_QUEUE_MAX] = {0};
-	bx_address avail_before[VIRTIO_QUEUE_MAX] = {0};
-	bx_address used_before[VIRTIO_QUEUE_MAX] = {0};
-	size_t old_sel = common_cfg.get_queue_sel();
-
-	// for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
-	// 	if (!queues[i]) continue;
-	// 	common_cfg.set_queue_sel(i);
-	// 	/* Disable queue before reset per renegotiation */
-	// 	common_cfg.write(VIRTIO_PCI_COMMON_Q_ENABLE, sizeof(uint16_t), 0);
-	// }
-	// common_cfg.set_queue_sel(old_sel);
-
-	for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
-		if (!queues[i]) continue;
-		desc_before[i] = queues[i]->desc_ring ? queues[i]->desc_ring->addr_gpa : 0;
-		avail_before[i] = queues[i]->avail_ring ? queues[i]->avail_ring->addr_gpa : 0;
-		used_before[i] = queues[i]->used_ring ? queues[i]->used_ring->addr_gpa : 0;
-	}
-
-	uint8_t prev_status = get_status();
-
-	/* Reset and re-do feature negotiation */
-	set_status(0);
-	set_status(VIRTIO_CONFIG_S_ACKNOWLEDGE);
-	set_status(VIRTIO_CONFIG_S_DRIVER | get_status());
-
 	uint64_t device_features = get_device_features();
 	uint64_t negotiated = new_guest_features & device_features;
+	uint8_t prev_status = get_status();
+	uint8_t cleared_features_ok = prev_status & ~VIRTIO_CONFIG_S_FEATURES_OK;
+
+	/*
+	 * Avoid `status = 0` resets because they tear down ioeventfd/irqfd/MSI-X
+	 * notifiers (e.g. `msix_unset_vector_notifiers`) and can hang snapshot
+	 * replay. To allow updating guest features via common cfg, temporarily
+	 * clear FEATURES_OK (while keeping DRIVER_OK unchanged).
+	 */
+	if (prev_status & VIRTIO_CONFIG_S_FEATURES_OK) {
+		set_status(cleared_features_ok);
+	}
 	set_guest_features(negotiated);
-	set_status(VIRTIO_CONFIG_S_FEATURES_OK | get_status());
-
-	if (prev_status & VIRTIO_CONFIG_S_DRIVER_OK) {
-		set_status(VIRTIO_CONFIG_S_DRIVER_OK | get_status());
+	if (prev_status & VIRTIO_CONFIG_S_FEATURES_OK) {
+		set_status(prev_status);
 	}
 
-	for (size_t i = 0; i < queue_num && i < VIRTIO_QUEUE_MAX; ++i) {
-		if (!queues[i]) continue;
-		common_cfg.set_queue_sel(i);
-		if (desc_before[i]) common_cfg.set_desc_ring_addr(desc_before[i]);
-		if (avail_before[i]) common_cfg.set_avail_ring_addr(avail_before[i]);
-		if (used_before[i]) common_cfg.set_used_ring_addr(used_before[i]);
+	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+	packed = (negotiated & packed_bit) != 0;
+	uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+	indirect_desc = (negotiated & indirect_bit) != 0;
+	uint64_t guest_features = get_guest_features();
 
-		bx_address desc_after = common_cfg.get_desc_ring_addr();
-		bx_address avail_after = common_cfg.get_avail_ring_addr();
-		bx_address used_after = common_cfg.get_used_ring_addr();
-		printf("VirtioDev %s: queue %zu desc %lx -> %lx, avail %lx -> %lx, used %lx -> %lx\n",
-		       name, i, desc_before[i], desc_after, avail_before[i], avail_after, used_before[i], used_after);
+	if (guest_features != negotiated) {
+		printf("VirtioDev %s: Guest features readback %lx does not match negotiated %lx.\n", name, guest_features, negotiated);
 	}
 
-	common_cfg.set_queue_sel(old_sel);
-
-	printf("VirtioDev %s: re-negotiated features to %lx.\n", name, negotiated);
+	DBG_PRINT {
+		printf("VirtioDev %s: updated guest features to %lx (packed=%d indirect=%d).\n",
+		       name, negotiated, packed ? 1 : 0, indirect_desc ? 1 : 0);
+	}
 	get_vqueue_manager().enable_hook();
 	return true;
 }
 
-bool VirtioDev::disable_packed_queue() {
-	uint64_t device_features = get_device_features();
-	uint64_t guest_features = get_guest_features();
-	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
-	bool packed_enabled = (device_features & packed_bit) && (guest_features & packed_bit);
-	if (!packed_enabled) {
+bool VirtioDev::set_packed_queue(bool enable) {
+	if (common_cfg.type != ConfigSpace::COMMON) {
+		printf("VirtioDev %s: Common config not set, cannot set packed ring.\n", name);
 		return false;
 	}
 
-	uint64_t new_guest_features = guest_features & ~packed_bit;
-	bool ok = renegotiate_features(new_guest_features);
-	printf("VirtioDev %s: Packed ring disabled, guest features %lx -> %lx (renegotiate %s)\n",
-	       name, guest_features, new_guest_features, ok ? "ok" : "failed");
-	return ok;
+	uint64_t device_features = get_device_features();
+	uint64_t guest_features = get_guest_features();
+	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+
+	bool device_supports_packed = (device_features & packed_bit) != 0;
+	bool current_packed = device_supports_packed && ((guest_features & packed_bit) != 0);
+	bool desired_packed = enable && device_supports_packed;
+
+	if (current_packed == desired_packed) {
+		packed = current_packed;
+		return true;
+	}
+
+	uint64_t new_guest_features = guest_features;
+	if (desired_packed) {
+		new_guest_features |= packed_bit;
+	} else {
+		new_guest_features &= ~packed_bit;
+	}
+
+	return renegotiate_features(new_guest_features);
+}
+
+bool VirtioDev::disable_packed_queue() {
+	return set_packed_queue(false);
 }
 
 void VirtioDev::enumerate_queues_from_common_cfg() {
@@ -787,6 +966,14 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 				break;
 			}
 			dev->common_cfg = {address, size, type};
+			{
+				uint64_t dev_features = dev->get_device_features();
+				uint64_t guest_features = dev->get_guest_features();
+				uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+				dev->packed = (dev_features & packed_bit) && (guest_features & packed_bit);
+				uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+				dev->indirect_desc = (dev_features & indirect_bit) && (guest_features & indirect_bit);
+			}
 			dev->enumerate_queues_from_common_cfg();
 			break;
 		case ConfigSpace::ISR:
@@ -858,6 +1045,24 @@ void VQueueManager::reset_all_queue(){
 	}
 }
 
+void VQueueManager::add_indirect_table(bx_address base_gpa, std::vector<uint8_t>&& bytes) {
+	indirect_tables[base_gpa] = std::move(bytes);
+}
+
+const std::vector<uint8_t>* VQueueManager::find_indirect_table(bx_address gpa, bx_address* base_gpa_out) const {
+	for (const auto& it : indirect_tables) {
+		bx_address base = it.first;
+		const auto& bytes = it.second;
+		if (gpa >= base && gpa < base + bytes.size()) {
+			if (base_gpa_out) {
+				*base_gpa_out = base;
+			}
+			return &bytes;
+		}
+	}
+	return nullptr;
+}
+
 bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
 	if (vdev->inited())
 		return true;
@@ -868,9 +1073,10 @@ bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
 	/* set features */
 	uint64_t features = vdev->get_device_features();
 	assert(features & (1ULL << VIRTIO_F_VERSION_1));
-	features &= ~((1ULL << VIRTIO_RING_F_EVENT_IDX) | (1ULL << VIRTIO_RING_F_INDIRECT_DESC));
+	features &= ~(1ULL << VIRTIO_RING_F_EVENT_IDX);
 	vdev->set_guest_features(features);
 	vdev->get_guest_features();
+	vdev->indirect_desc = (features & (1ULL << VIRTIO_RING_F_INDIRECT_DESC)) != 0;
 
 	vdev->set_status(VIRTIO_CONFIG_S_FEATURES_OK | vdev->get_status());
 
@@ -966,11 +1172,13 @@ bool VQueueManager::init_queues() {
 
 const fuzzer::vring_desc_with_info* VQueueManager::get_desc_by_gpa(uint64_t gpa) {
 	for (const auto* desc : generated_descs) {
-		if (gpa >= desc->desc.addr && gpa < desc->desc.addr + desc->desc.len) {
+		vring_desc canonical = {};
+		memcpy(&canonical, desc->desc, sizeof(canonical));
+		if (gpa >= canonical.addr && gpa < canonical.addr + canonical.len) {
 			return desc;
 		}
 	}
-    return nullptr;
+	return nullptr;
 }
 
 void VQueueManager::add_seen_buffer(uint64_t start, size_t size) {
@@ -1145,11 +1353,13 @@ size_t DescChainFSM::get_request_offset(bx_address gpa) const {
 	size_t offset = 0;
 	for (size_t i = 0; i < generated_descs_size; i++) {
 		const auto* d = generated_descs[i];
-		if (gpa >= d->desc.addr && gpa < d->desc.addr + d->desc.len) {
-			offset += (gpa - d->desc.addr);
+		vring_desc canonical = {};
+		memcpy(&canonical, d->desc, sizeof(canonical));
+		if (gpa >= canonical.addr && gpa < canonical.addr + canonical.len) {
+			offset += (gpa - canonical.addr);
 			break;
 		} else {
-			offset += d->desc.len;
+			offset += canonical.len;
 		}
 	}
 	return offset;
@@ -1166,4 +1376,289 @@ const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_o
 	if (enabled)
 		return (DescSize*)__trace_pc_get_desc_size_hints(queue_id, desc_idx, is_out);
 	return nullptr;
+}
+
+/*
+ * Ingest DMA reads to descriptor-backed buffers (when addr doesn't belong to a VRing).
+ *
+ * returns:
+ *  0: handled/no-op
+ * -1: failed to ingest buffer
+ */
+static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void* data) {
+	static void* replay = getenv("REPLAY");
+	static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
+
+	/* get the corresponding desc */
+	if (get_vqueue_manager().hooks_disabled()) {
+		return 0;
+	}
+	auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
+	if (!desc_with_info) { /* the DMA is not issued by fuzzer, do nothing */
+		return 0;
+	}
+
+	auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
+	auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
+	assert(overlapped_size <= len);
+			
+	size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
+	bool is_out = desc_with_info->desc_info.is_out;
+	bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0);
+	possible_switch = false;
+			
+	if (offset > 0x100) 
+		return 0;
+
+	/* ingest random data */
+	bool overwrite = (replay == NULL);
+	uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
+	if (!buf)
+		return -1;
+	/* fetch overlapped data */
+	if (no_double_fetch && overlapped_size) 
+		BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr, overlapped_size, buf);
+			
+	if (queue->vdev->is_scsi && is_out) {
+		const uint8_t valid_lun[8] = {1, 1, 0, 0, 0, 0, 0, 0};
+		if (queue->type == VQueue::QUEUE_NORMAL) {
+			if (offset == 0) {
+				buf[0] = 1; // just fix lun[0] to 1
+			}
+		} else if (queue->type == VQueue::QUEUE_CTRL) {
+			// lun should be [8, 16) or [4, 12)
+			if (offset == 8)
+				buf[0] = 1;
+			else if (offset == 4)
+				buf[0] = 1;	
+		}
+	}
+			
+	/* adjust addr = addr + len - remaining_len to avoid duplicated region */
+	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void *)buf);
+	memcpy(data, buf, len);
+	get_vqueue_manager().add_seen_buffer(gpa, len);
+	update_virtio_req_counter(desc_with_info->desc_info.queue_id,
+							  desc_with_info->desc_info.desc_idx,
+							  is_out);
+	return 0;
+}
+
+/* 
+	returns:
+	 0: handled/no-op
+	-1: failed to ingest element
+	-2: stop polling
+	1: not a vring element
+*/
+static int ingest_vring_split(bx_address addr, size_t len, void* data) {
+	auto gpa = lookup_gpa_by_hpa(addr);
+	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
+	int rc;
+	bx_address off_in_elem = 0;
+	if (!vring) {
+		return 1;
+	}
+
+	if (vring->queue && vring->queue->vdev && !vring->queue->vdev->to_fuzz) {
+		// device is not being fuzzed
+		// just ignore
+		return 0;
+	}
+	uint16_t vring_idx = 0;
+	uint8_t vring_elem[16] = {0};
+	switch (vring->filed_type(gpa)) {
+	case VRing::FILED_TYPE::FLAGS:
+		return 0;
+	case VRing::FILED_TYPE::INDEX:
+		if (get_vqueue_manager().hooks_disabled()) {
+			return 0;
+		}
+		rc = vring->ingest_idx(&vring_idx);
+		if (rc == -1) {  
+			// -1, ingest error
+			// -2, queue locates at page 0
+			// if (rc == -1) // ingest error
+			/* here we should not call fuzz_emu_stop_unhealthy */
+			// fuzz_emu_stop_unhealthy();
+			return rc;				
+		}
+		if (rc == -2) {
+			fuzz_emu_stop_polling();
+			return -2;
+		}
+		if (rc == 1) { // genereted index, already written
+			// just mark the region, do nothing
+			return 0;
+		}
+		BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, len, (void*)&vring_idx);
+		memcpy(data, &vring_idx, len);
+		return 0;
+	case VRing::FILED_TYPE::VRING_ELEM:
+		if (get_vqueue_manager().hooks_disabled()) {
+			return 0;
+		}
+		rc = vring->ingest_elem((void*)vring_elem, vring->element_index(gpa));
+		off_in_elem = gpa - (vring->start() + vring->ring_offset() + vring->element_index(gpa) * vring->element_size());
+		if (rc == -1) {
+			/* here we should not call fuzz_emu_stop_unhealthy */
+			// fuzz_emu_stop_unhealthy();
+			return -1;
+		} else if (rc == -2) {
+			fuzz_emu_stop_polling();
+			return -2;
+		} else if (rc == 0) {
+			vring->write_elem(vring->element_index(gpa), vring_elem);
+			memcpy(data, vring_elem + off_in_elem, len);
+		} else if (rc == 1) { // genereted elem, already written
+			// just mark the region, do nothing
+		}
+		return 0;
+	case VRing::FILED_TYPE::EVENT_INDEX:
+		return 0; // not a vring element
+	default:
+		assert(false);
+		return -1;
+	}
+	return 1;
+}
+
+/* packed queue variant mirroring ingest_vring_split for packed ring support */
+static int ingest_vring_packed(bx_address addr, size_t len, void* data) {
+	static char* vring_log = getenv("VIRTIO_VRING_LOG");
+	static tsl::robin_map<size_t, bool> logged_init;
+	auto gpa = lookup_gpa_by_hpa(addr);
+	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
+	int rc;
+	bx_address off_in_elem = 0;
+	if (!vring) {
+		return 1;
+	}
+
+	if (vring->queue && vring->queue->vdev && !vring->queue->vdev->to_fuzz) {
+		// device is not being fuzzed
+		// just ignore
+		return 0;
+	}
+	if (get_vqueue_manager().hooks_disabled()) {
+		return 0;
+	}
+	if (vring->filed_type(gpa) != VRing::FILED_TYPE::VRING_ELEM) {
+		return 0;
+	}
+	uint8_t vring_elem[16] = {0};
+	uint16_t desc_idx = vring->element_index(gpa);
+	off_in_elem = gpa - (vring->start() + vring->ring_offset() + desc_idx * vring->element_size());
+	auto* queue = vring->queue;
+	if (queue) {
+		bool verbose = vring_log && (vring_log[0] == '2' || vring_log[0] == 'v' || vring_log[0] == 'V');
+		bool needs_init = queue->desc_chain_fsm.is_wait() || queue->desc_chain_fsm.is_done();
+		bool same_desc_partial = queue->desc_chain_fsm.is_done() &&
+			queue->desc_chain_fsm.has_used_index(desc_idx) && off_in_elem != 0;
+		if (vring_log && vring_log[0] != '0' && verbose) {
+			printf("!virtio: ingest_vring packed ring=%s dev=%s qid=%zu sel=%u idx=%u off=%lx len=%zx needs_init=%d same_desc_partial=%d\n",
+				   vring->type_str(),
+				   queue->vdev ? queue->vdev->name : "<null>",
+				   queue->idx,
+				   queue->queue_sel,
+				   desc_idx,
+				   off_in_elem,
+				   len,
+				   needs_init ? 1 : 0,
+				   same_desc_partial ? 1 : 0);
+		}
+		if (needs_init && !same_desc_partial) {
+			queue->desc_chain_fsm.reset();
+			queue->desc_chain_fsm.init(vring->size, queue->type);
+			queue->submit_request(desc_idx);
+			bool log_enabled = vring_log && vring_log[0] != '0';
+			bool should_log = log_enabled && verbose;
+			if (log_enabled && !verbose) {
+				auto it = logged_init.find(queue->idx);
+				if (it == logged_init.end()) {
+					logged_init[queue->idx] = true;
+					should_log = true;
+				}
+			}
+			if (should_log) {
+				printf("!virtio: ingest_vring packed init dev=%s qid=%zu sel=%u head=%u size=%zu\n",
+					   queue->vdev ? queue->vdev->name : "<null>",
+					   queue->idx,
+					   queue->queue_sel,
+					   desc_idx,
+					   vring->size);
+			}
+		}
+	}
+	rc = vring->ingest_elem((void*)vring_elem, desc_idx);
+	if (rc == -1) {
+		/* here we should not call fuzz_emu_stop_unhealthy */
+		// fuzz_emu_stop_unhealthy();
+		return -1;
+	} else if (rc == -2) {
+		fuzz_emu_stop_polling();
+		return -2;
+	} else if (rc == 0) {
+		vring->write_elem(desc_idx, vring_elem);
+		memcpy(data, vring_elem + off_in_elem, len);
+	} else if (rc == 1) { // genereted elem, already written
+		// just mark the region, do nothing
+	}
+	return 0;
+}
+
+int ingest_vring(bx_address addr, size_t len, void* data) {
+	static char* vring_log = getenv("VIRTIO_VRING_LOG");
+	static tsl::robin_map<uint64_t, bool> logged_dispatch;
+	auto gpa = lookup_gpa_by_hpa(addr);
+	if (const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa)) {
+		bool packed = vring->queue && vring->queue->vdev && vring->queue->vdev->packed;
+		bool log_enabled = vring_log && vring_log[0] != '0';
+		bool log_all = log_enabled && (vring_log[0] == 'a' || vring_log[0] == 'A');
+		bool verbose = log_enabled && (vring_log[0] == '2' || vring_log[0] == 'v' || vring_log[0] == 'V');
+		if (log_enabled && (packed || log_all)) {
+			size_t qid = vring->queue ? vring->queue->idx : 0;
+			uint64_t key = (((uint64_t)qid) << 8) | (((uint64_t)vring->type) << 1) | (packed ? 1 : 0);
+			bool should_log = verbose;
+			if (!verbose) {
+				auto it = logged_dispatch.find(key);
+				if (it == logged_dispatch.end()) {
+					logged_dispatch[key] = true;
+					should_log = true;
+				}
+			}
+			if (should_log) {
+				printf("!virtio: ingest_vring dispatch=%s dev=%s packed=%d qid=%zu sel=%u ring=%s filed=%d\n",
+					   packed ? "packed" : "split",
+					   vring->queue && vring->queue->vdev ? vring->queue->vdev->name : "<null>",
+					   packed ? 1 : 0,
+					   qid,
+					   vring->queue ? vring->queue->queue_sel : 0,
+					   vring->type_str(),
+					   (int)vring->filed_type(gpa));
+			}
+		}
+		if (packed) {
+			return ingest_vring_packed(addr, len, data);
+		}
+		return ingest_vring_split(addr, len, data);
+	}
+	{
+		bx_address base_gpa = 0;
+		const auto* bytes = get_vqueue_manager().find_indirect_table(gpa, &base_gpa);
+		if (bytes) {
+			size_t off = (size_t)(gpa - base_gpa);
+			size_t remaining = bytes->size() > off ? bytes->size() - off : 0;
+			size_t to_copy = std::min(len, remaining);
+			if (to_copy) {
+				BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, to_copy, (void*)(bytes->data() + off));
+				memcpy(data, bytes->data() + off, to_copy);
+			}
+			if (to_copy < len) {
+				memset((uint8_t*)data + to_copy, 0, len - to_copy);
+			}
+			return 0;
+		}
+	}
+	return ingest_vring_buffer(addr, gpa, len, data);
 }

@@ -63,6 +63,9 @@ struct vring_desc_with_info;
 /* This means the buffer contains a list of buffer descriptors. */
 #define VRING_DESC_F_INDIRECT	4
 
+#define VIRTQ_DESC_F_AVAIL	(1u << 7)
+#define VIRTQ_DESC_F_USED	(1u << 15)
+
 #define VIRTIO_RING_F_INDIRECT_DESC	28
 
 /* The Guest publishes the used index for which it expects an interrupt
@@ -100,13 +103,24 @@ public:
         NONE
     };
 
-    DescChainFSM() : state(WAIT), sg_num_in(0), sg_num_out(0), used_index() {}
+    DescChainFSM()
+        : state(WAIT), used_index(), sg_num_in(0), sg_num_in_remain(0), sg_num_out(0),
+          sg_num_out_remain(0), inited_count(0), generated_descs{}, generated_descs_size(0) {}
     void init(unsigned max_len, int queue_type);
     SGType consume();
     State get_state() {return state;}
     uint8_t get_inited_count() const {return inited_count;}
     uint16_t desc_seq(); // return the number of last consumed desc; out, in, counts independently
-    void reset() {state = WAIT; sg_num_in=0; sg_num_out=0; used_index.clear();}
+    void reset() {
+        state = WAIT;
+        used_index.clear();
+        sg_num_in = 0;
+        sg_num_in_remain = 0;
+        sg_num_out = 0;
+        sg_num_out_remain = 0;
+        inited_count = 0;
+        generated_descs_size = 0;
+    }
     void add_used_index(uint16_t idx) {used_index.insert(idx);}
     void remove_used_index(uint16_t idx) {used_index.erase(idx);}
     void add_desc(const fuzzer::vring_desc_with_info* desc_with_info);
@@ -118,7 +132,7 @@ public:
     bool is_done() const {return state == DONE;}
     bool is_running() const {return state == RUNNING;}
     bool is_inited() const {return state == INITED or state == RUNNING;}
-private:
+
     State state;
     tsl::robin_set<uint16_t> used_index;
     uint8_t sg_num_in;
@@ -135,6 +149,13 @@ struct vring_desc {
 	uint32_t len;
 	uint16_t flags;
 	uint16_t next;
+};
+
+struct vring_packed_desc {
+	uint64_t addr;
+	uint32_t len;
+	uint16_t id;
+	uint16_t flags;
 };
 
 struct vring_desc_with_info {
@@ -350,6 +371,8 @@ struct VirtioDev {
     bool to_fuzz;
     bool is_net;
     bool is_scsi;
+    bool packed;
+    bool indirect_desc;
     void enumerate_queues_from_common_cfg();
     bool inited();
     void set_status(uint8_t status);
@@ -358,6 +381,7 @@ struct VirtioDev {
     uint8_t get_status();
     uint64_t get_device_features();
     uint64_t get_guest_features();
+    bool set_packed_queue(bool enable);
     bool disable_packed_queue();
     bool renegotiate_features(uint64_t new_guest_features);
     
@@ -365,7 +389,7 @@ struct VirtioDev {
 
 class VQueueManager {
 public:
-    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs(), fuzzed_dev_cache(nullptr), hook_disabled(false) {}
+    VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs(), seen_buffers(), indirect_tables(), fuzzed_dev_cache(nullptr), hook_disabled(false) {}
     typedef tsl::robin_set<const VRing*> VRingSet;
     bool create_virtio_device(const std::string& name, bool to_fuzz=false);
     void add_config_space(const std::string& name, enum ConfigSpace::ConfigSpaceType type, unsigned long address, size_t size);
@@ -400,6 +424,10 @@ public:
     void enable_hook() {hook_disabled = false;}
     bool hooks_disabled() const {return hook_disabled;}
 
+    void reset_indirect_tables() {indirect_tables.clear();}
+    void add_indirect_table(bx_address base_gpa, std::vector<uint8_t>&& bytes);
+    const std::vector<uint8_t>* find_indirect_table(bx_address gpa, bx_address* base_gpa_out) const;
+
 private:
     void group_vring_by_page(const VRing* vring);
     tsl::robin_map<std::string, VirtioDev*> virtio_devs; // Map of Virtio devices by name
@@ -409,6 +437,7 @@ private:
     size_t all_queue_count;
     std::vector<const fuzzer::vring_desc_with_info*> generated_descs;
     tsl::robin_map<uint64_t, size_t> seen_buffers;
+    tsl::robin_map<bx_address, std::vector<uint8_t>> indirect_tables;
     VirtioDev* fuzzed_dev_cache;
     bool hook_disabled = false;
 };
@@ -434,6 +463,8 @@ typedef struct VirtQueueElement
 } VirtQueueElement;
 
 int read_virtqueue_element(unsigned cpu, bx_address elem_ptr_hva, VirtQueueElement* elem);
+
+int ingest_vring(bx_address addr, size_t len, void* data);
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
 const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);

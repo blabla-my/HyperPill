@@ -57,6 +57,7 @@ uint8_t* ic_ingest_len(size_t len);
 uint8_t* ic_ingest_buf(size_t *len, const char* token, size_t token_len, int minlen, int string);
 void *ic_advance_until_token(const char* token, size_t len);
 size_t ic_get_last_token(void);
+void ic_mark_token(void);
 void* ic_insert(void* src, size_t len, size_t pos);
 void* ic_append(const void* src, size_t len);
 size_t ic_length_until_token(const char* token, size_t len);

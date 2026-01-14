@@ -56,7 +56,7 @@ static void *log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-uint64_t icount_limit = 50000000;
+uint64_t icount_limit = 5000000;
 uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;
@@ -355,7 +355,7 @@ void fuzz_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
 	}
 	if (pio_icount > pio_icount_limit && fuzzenum){
 		printf("pio_icount abort %ld\n", pio_icount);
-		// fuzz_emu_stop_unhealthy();
+		fuzz_emu_stop_unhealthy();
 	}
     icount++;
     pio_icount++;
@@ -425,6 +425,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		get_vqueue_manager().reset_all_queue();
 		get_vqueue_manager().reset_generated_desc();
 		get_vqueue_manager().reset_seen_buffer();
+		get_vqueue_manager().reset_indirect_tables();
 		done = 1;
 		return 0;
 	}
@@ -434,6 +435,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	get_vqueue_manager().reset_all_queue();
 	get_vqueue_manager().reset_generated_desc();
 	get_vqueue_manager().reset_seen_buffer();
+	get_vqueue_manager().reset_indirect_tables();
 
 	/*
 	 * The IC_TEST mode

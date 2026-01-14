@@ -67,6 +67,7 @@ OBJS       = main.o \
              gdbstub.o \
              task.o \
              virtio.o \
+             syntax.o \
 			 mutate.o \
              gcov.o \
              gcov_base.o \

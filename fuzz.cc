@@ -2,6 +2,7 @@
 #include "bochs.h"
 #include "config.h"
 #include "conveyor.h"
+#include "syntax.h"
 #include "virtio.h"
 #include "cov.h"
 #include "vendor/libfuzzer-ng/FuzzerInternal.h"
@@ -1056,40 +1057,21 @@ bool op_vmcall() {
 }
 
 bool op_notify() {
-	/* inject an mmio write to notify cfg */
-	/*
-	  1. select a random virtio device
-	  2. select a random queue 
-	  3. set queue_sel to that queue
-	  4. set queue_enable to that queue
-	  5. inject write to notify start + multiplier * index
-	*/
-	uint16_t vdev_idx;
-	uint16_t vqueue_idx;
-	if (get_vqueue_manager().get_num_virtio_dev() < 1) {
+	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	if (!vdev || vdev->queue_num < 1) {
 		return false;
 	}
-	if (ic_ingest16(&vdev_idx, 0, get_vqueue_manager().get_num_virtio_dev()-1) < 0) {
+
+	uint16_t queue_sel = 0;
+	if (ic_ingest16(&queue_sel, 0, (uint16_t)(vdev->queue_num - 1)) < 0) {
 		return false;
 	}
-	auto* vdev = get_vqueue_manager().get_virtio_dev(vdev_idx);
-	if (vdev->queue_num < 1) {
+
+	auto model = SyntaxModel::Create(*vdev);
+	if (!model) {
 		return false;
 	}
-	if (ic_ingest16(&vqueue_idx, 0, vdev->queue_num-1) < 0) {
-		return false;
-	}
-	if (!vdev->common_cfg.set_queue_enable(vqueue_idx)) {
-		return false;
-	}
-	bx_address addr = vdev->notify_cfg.address + vdev->multiplier * vqueue_idx; // make it mis-aligned
-	assert(addr < vdev->notify_cfg.address + vdev->notify_cfg.size);
-	if (!inject_write(addr, 2, vqueue_idx)) { //should be set according multiplier
-		printf("failed to inject notify at %lx (base %lx)!\n", addr, vdev->notify_cfg.address);
-		return false;
-	}
-	start_cpu();
-	return true;
+	return model->submit_request(queue_sel) != UINT16_MAX;
 }
 
 bool op_trigger_aio() {
@@ -1100,6 +1082,46 @@ bool op_trigger_aio() {
 }
 
 extern bool fuzz_unhealthy_input, fuzz_do_not_continue, fuzz_should_abort;
+
+static void virtio_select_driver_features_for_input() {
+	static bool log_enabled_inited;
+	static bool log_enabled;
+	if (!log_enabled_inited) {
+		log_enabled_inited = true;
+		log_enabled = getenv("VIRTIO_FEATURE_LOG") != nullptr ||
+			getenv("VIRTIO_RING_FORMAT_LOG") != nullptr;
+	}
+
+	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	if (!vdev) {
+		return;
+	}
+	if (vdev->common_cfg.type != ConfigSpace::COMMON) {
+		return;
+	}
+
+	uint64_t device_features = vdev->get_device_features();
+	uint64_t mask = 0;
+	if (ic_ingest64(&mask, 0, UINT64_MAX, true) < 0) {
+		mask = 0;
+	}
+
+	uint64_t candidate = device_features & mask;
+	/* Keep modern virtio (common cfg) semantics. */
+	candidate |= (1ULL << VIRTIO_F_VERSION_1);
+
+	if (log_enabled || log_ops || BX_CPU(id)->fuzztrace) {
+		uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+		uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+		int want_packed = (candidate & packed_bit) != 0;
+		int want_indirect = (candidate & indirect_bit) != 0;
+		printf("virtio feature select: dev=%s mask=%lx dev=%lx -> guest=%lx (packed=%d indirect=%d)\n",
+		       vdev->name, mask, device_features, candidate, want_packed, want_indirect);
+	}
+
+	vdev->renegotiate_features(candidate);
+}
+
 void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	bool (*ops[])() = {
 		[OP_READ] = op_read,
@@ -1128,10 +1150,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	if (virtio_core) {
 		reset_input_output();
 		input_deserialize(Data, Size, input_get(), input_len_get(), dma_data_get(), desc_pool_get());
-		auto fuzzed_dev = get_vqueue_manager().get_fuzzed_dev();
-		if (fuzzed_dev) {
-			fuzzed_dev->disable_packed_queue();
-		}
+		virtio_select_driver_features_for_input();
 	} else {
 		ic_new_input(Data, Size);
 	}
