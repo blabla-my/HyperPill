@@ -438,7 +438,6 @@ void icp_init_regs_cpu(const char* filename, unsigned cpu) {
     std::stringstream buffer;
     buffer << t.rdbuf();
 
-    hp::set_current_cpu(cpu);
     printf(".loading registers from %s (cpu %u)\n", filename, cpu);
     std::string s = buffer.str();
 

@@ -12,21 +12,21 @@ void fuzz_hook_vmptrld(Bit64u vmcs){
 }
 
 bool fuzz_hook_vmwrite(bxInstruction_c *i) {
-    unsigned encoding = BX_CPU(id)->gen_reg[i->dst()].dword.erx;
+    unsigned encoding = BX_CPU(0)->gen_reg[i->dst()].dword.erx;
     return false;
 }
 
 static uint64_t auto_vmread(Bit32u encoding){
     switch ((encoding >> 13) & 0x3) {
         case 0:
-            return BX_CPU(id)->VMread16(encoding);
+            return BX_CPU(0)->VMread16(encoding);
             break;
         case 1:
         case 3:
-            return BX_CPU(id)->VMread64(encoding);
+            return BX_CPU(0)->VMread64(encoding);
             break;
         case 2:
-            return BX_CPU(id)->VMread32(encoding);
+            return BX_CPU(0)->VMread32(encoding);
             break;
         default:
             abort();
@@ -38,7 +38,7 @@ extern "C" void __sanitizer_print_stack_trace();
 
 unsigned fuzz_get_vmcs_field_offset(Bit32u encoding) {
     static int reenter; 
-    if(BX_CPU(id)->fuzztrace && !reenter){
+    if(BX_CPU(0)->fuzztrace && !reenter){
         reenter = 1;
         printf("VMCS->%x = VMCS[%lx] = %lx\n", encoding, shadow_vmcs_layout[encoding], auto_vmread(encoding));
         reenter = 0;
@@ -66,21 +66,21 @@ void redo_paging() {
     pd_addr = guest_page_scratchlist[2];
     pt_addr = guest_page_scratchlist[3];
     code_addr = guest_page_scratchlist[9];
-    BX_CPU(id)->VMwrite64(VMCS_GUEST_CR3, pml4_addr);
-    BX_CPU(id)->VMwrite64(VMCS_GUEST_RIP, code_addr);
+    BX_CPU(0)->VMwrite64(VMCS_GUEST_CR3, pml4_addr);
+    BX_CPU(0)->VMwrite64(VMCS_GUEST_RIP, code_addr);
     
     printf("USING %lx for PML4 and %lx for PDPT and %lx for PD and %lx for PT and %lx for CODE\n", pml4_addr, pdpt_addr, pd_addr, pt_addr, code_addr);
 
     // Set up identity mapping in the guest
-    int res = BX_CPU(id)->dbg_translate_guest_physical_ept(pml4_addr, &pml4, 1);
+    int res = BX_CPU(0)->dbg_translate_guest_physical_ept(pml4_addr, &pml4, 1);
     assert(pml4);
-    res = BX_CPU(id)->dbg_translate_guest_physical_ept(pdpt_addr, &pdpt, 1);
+    res = BX_CPU(0)->dbg_translate_guest_physical_ept(pdpt_addr, &pdpt, 1);
     assert(pdpt);
-    res = BX_CPU(id)->dbg_translate_guest_physical_ept(pd_addr, &pd, 1);
+    res = BX_CPU(0)->dbg_translate_guest_physical_ept(pd_addr, &pd, 1);
     assert(pd);
-    res = BX_CPU(id)->dbg_translate_guest_physical_ept(pt_addr, &pt, 1);
+    res = BX_CPU(0)->dbg_translate_guest_physical_ept(pt_addr, &pt, 1);
     assert(pt);
-    res = BX_CPU(id)->dbg_translate_guest_physical_ept(code_addr, &code, 1);
+    res = BX_CPU(0)->dbg_translate_guest_physical_ept(code_addr, &code, 1);
     assert(code);
 
 
@@ -110,7 +110,7 @@ void redo_paging() {
 
     if(!fuzzing) {
         uint64_t phy;
-        if(!vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phy)){
+        if(!vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy)){
             fflush(stdout);
             printf("failed to redo paging\n");
             abort();
@@ -122,12 +122,12 @@ void redo_paging() {
 void vmcs_fixup() {
     // Set program counter
 
-    BX_CPU(id)->VMwrite32(VMCS_32BIT_IDT_VECTORING_INFO, 0);
+    BX_CPU(0)->VMwrite32(VMCS_32BIT_IDT_VECTORING_INFO, 0);
    
-    BX_CPU(id)->VMwrite64(VMCS_GUEST_RFLAGS, 0);
-    BX_CPU(id)->VMwrite32(VMCS_32BIT_GUEST_SS_ACCESS_RIGHTS, 0);
+    BX_CPU(0)->VMwrite64(VMCS_GUEST_RFLAGS, 0);
+    BX_CPU(0)->VMwrite32(VMCS_32BIT_GUEST_SS_ACCESS_RIGHTS, 0);
 
-    BX_CPU(id)->VMwrite64(VMCS_64BIT_GUEST_IA32_EFER, 0x500);
+    BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_IA32_EFER, 0x500);
 
     redo_paging();
     // TODO: Need to make sure the gaddr is associated with a valid EPT entry.

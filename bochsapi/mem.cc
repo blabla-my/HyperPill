@@ -51,7 +51,7 @@ static int memory_commit_level;
 size_t ndirty=0;
 
 static bx_address prioraccess;
-void fuzz_hook_memory_access(bx_address phy, unsigned len, 
+void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
                              unsigned memtype, unsigned rw, void* data) {
     static char* kernel_dma = getenv("KERNEL_DMA");
     bx_address aligned = phy&(~0xFFFLL);
@@ -85,12 +85,12 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
     // contains a mapping for each host physical page, for whether it corresponds to a guest page
     // if an access uses such an address, it is likely a DMA
     if (rw == BX_READ && is_l2_page_bitmap[phy >> 12] && !guest_page_table.contains(phy>>12)) {
-        if(BX_CPU(id)->fuzztrace) {
+        if(BX_CPU(cpu)->fuzztrace) {
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
         static void* hv = getenv("HYPERV");
-        if(BX_CPU(0)->user_pl || hv || kernel_dma) {
-            Task* current_task = task_manager.get_current_task();
+        if(BX_CPU(cpu)->user_pl || hv || kernel_dma) {
+            Task* current_task = task_manager.get_current_task(cpu);
             if (!current_task) 
                 return;
             if (current_task->CPU_KVM)
@@ -100,10 +100,10 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                 printf("DMA read by task %d (%s) at %lx\n",
                        current_task->pid, current_task->comm, phy);
             }
-            fuzz_dma_read_cb(phy, len, data);
+            fuzz_dma_read_cb(cpu, phy, len, data);
             if (log_ops) {
-                uint8_t data[len];
-                BX_MEM_C::readPhysicalPage(BX_CPU(id), phy, len, data);
+                uint8_t buf[len];
+                BX_MEM_C::readPhysicalPage(BX_CPU(cpu), phy, len, buf);
                 bx_address gpa = lookup_gpa_by_hpa(phy);
                 const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa);
                 if (vring && vring->queue->vdev->to_fuzz)
@@ -113,7 +113,7 @@ void fuzz_hook_memory_access(bx_address phy, unsigned len,
                     printf("!dma inject: [HPA: %lx, GPA: %lx] len: %x data: ",
                             phy, gpa, len);
                 for (int i = 0; i < len; i++)
-                    printf("%02x", data[i]);
+                    printf("%02x", buf[i]);
                 printf("\n");
             }
         }
@@ -247,7 +247,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
     bx_address page_start = (start >> 12) << 12;
     bx_address page_end = ((start + len - 1) >> 12) << 12;
     if (page_start == page_end) {
-        region_start = BX_CPU(id)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
+        region_start = hp::vcpu()->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
         region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
         region_end = region_start + len;
         add_persistent_memory_range(region_start, len);
@@ -255,7 +255,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
     }
     for (bx_address page = page_start; page <= page_end; page += 0x1000) {
         if (start > page) {
-            region_start = BX_CPU(id)->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
+            region_start = hp::vcpu()->translate_linear_long_mode(start, lpf_mask, pkey, 0, BX_RW);
             region_start = (region_start & ~((Bit64u) lpf_mask)) | (start & lpf_mask);
             region_end = (page + 0x1000);
             assert((region_start & lpf_mask) != 0);
@@ -264,7 +264,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
             continue;
         }
         if (page + 0x1000 > start + len) {
-            region_start = BX_CPU(id)->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
+            region_start = hp::vcpu()->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
             region_start = (region_start & ~((Bit64u) lpf_mask));
             region_end = region_start + (start + len - page);
             assert((region_start & lpf_mask) == 0);
@@ -272,7 +272,7 @@ void add_persistent_kernel_memory_range(bx_address start, size_t len) {
             add_persistent_memory_range(region_start, region_end - region_start);
             continue;
         }
-        region_start = BX_CPU(id)->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
+        region_start = hp::vcpu()->translate_linear_long_mode(page, lpf_mask, pkey, 0, BX_RW);
         region_start = (region_start & ~((Bit64u) lpf_mask));
         region_end = region_start + 0x1000;
         assert((region_start & lpf_mask) == 0);
@@ -332,7 +332,7 @@ void BX_MEM_C::writePhysicalPage(BX_CPU_C *cpu, bx_phy_address addr,
 
     notify_write(addr);
     if (hook_access)
-        fuzz_hook_memory_access(addr, len, 0, BX_WRITE, NULL) ;
+        fuzz_hook_memory_access(cpu ? cpu->which_cpu() : 0, addr, len, 0, BX_WRITE, NULL) ;
 
     memcpy(addr_conv(addr), data, len);
 

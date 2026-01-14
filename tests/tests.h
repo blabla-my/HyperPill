@@ -2,11 +2,11 @@
 #include "fuzz.h"
 
 static void test_mem_write(uint64_t addr, size_t size, void *data) {
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, size, data);
+	BX_MEM(0)->writePhysicalPage(hp::vcpu(), addr, size, data);
 }
 
 static void test_mem_write_up_to_8(uint64_t addr, size_t size, uint64_t value) {
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr, size, &value);
+	BX_MEM(0)->writePhysicalPage(hp::vcpu(), addr, size, &value);
 }
 
 // addr: guest physical address

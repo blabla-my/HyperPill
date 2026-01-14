@@ -265,7 +265,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EdGdM(bxInstruction_c *i)
   op1_32 = read_virtual_dword(i->seg(), eaddr);
   op2_32 = BX_READ_32BIT_REG(i->src());
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32));
+  fuzz_hook_cmp(BX_CPU_ID, op1_32, op2_32, sizeof(op1_32));
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 
@@ -279,7 +279,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_GdEdR(bxInstruction_c *i)
   op1_32 = BX_READ_32BIT_REG(i->dst());
   op2_32 = BX_READ_32BIT_REG(i->src());
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32));
+  fuzz_hook_cmp(BX_CPU_ID, op1_32, op2_32, sizeof(op1_32));
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 
@@ -295,7 +295,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_GdEdM(bxInstruction_c *i)
   op1_32 = BX_READ_32BIT_REG(i->dst());
   op2_32 = read_virtual_dword(i->seg(), eaddr);
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32));
+  fuzz_hook_cmp(BX_CPU_ID, op1_32, op2_32, sizeof(op1_32));
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 
@@ -471,7 +471,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EdIdM(bxInstruction_c *i)
   op1_32 = read_virtual_dword(i->seg(), eaddr);
   op2_32 = i->Id();
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32), true);
+  fuzz_hook_cmp(BX_CPU_ID, op1_32, op2_32, sizeof(op1_32), true);
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 
@@ -485,7 +485,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EdIdR(bxInstruction_c *i)
   op1_32 = BX_READ_32BIT_REG(i->dst());
   op2_32 = i->Id();
   diff_32 = op1_32 - op2_32;
-  fuzz_hook_cmp(op1_32, op2_32, sizeof(op1_32), true);
+  fuzz_hook_cmp(BX_CPU_ID, op1_32, op2_32, sizeof(op1_32), true);
 
   SET_FLAGS_OSZAPC_SUB_32(op1_32, op2_32, diff_32);
 

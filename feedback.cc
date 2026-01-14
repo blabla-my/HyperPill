@@ -7,7 +7,8 @@
 #include <map>
 
 uint8_t* random_register_data;
-size_t random_register_data_len = 16 * 8 + (BX_XMM_REGISTERS + 1) * sizeof(BX_CPU(id)->vmm[0]);
+size_t random_register_data_len =
+    16 * 8 + (BX_XMM_REGISTERS + 1) * sizeof(BX_CPU(0)->vmm[0]);
 std::map<int, std::tuple<uint8_t*, size_t>> register_contents;
 
 std::unordered_set<uint64_t> indicator_values;
@@ -25,14 +26,14 @@ struct Hasher {
 
 tsl::robin_set<std::tuple<uint64_t, uint64_t, uint64_t>, Hasher> structset;
 
-bool fuzz_hook_vmlaunch() {
+bool fuzz_hook_vmlaunch(unsigned cpu) {
     /* printf("Vmlaunch:%lx\n", BX_CPU(id)->vmcsptr); */
-    if(vmcs_addr == BX_CPU(id)->vmcsptr){
+    if(vmcs_addr == BX_CPU(cpu)->vmcsptr){
         pause_cpu();
         return true;
     } else {
         verbose_printf("Warning: vmcsptr has been changed from 0x%08lx to 0x%08lx\n",
-            vmcs_addr, BX_CPU(id)->vmcsptr);
+            vmcs_addr, BX_CPU(cpu)->vmcsptr);
         fuzz_emu_stop_unhealthy();
         return true;
     }
@@ -73,20 +74,21 @@ void indicator_cb(void(*cb)(uint64_t)) {
     }
 }
 
-void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){
+void fuzz_hook_cmp(unsigned cpu, uint64_t op1, uint64_t op2, size_t size,
+                   bool constant){
     static void* constant_only = getenv("CMPLOG_CONSTANT_ONLY"); 
     if (constant_only && !constant)
         return;
 
-    uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
-    if(BX_CPU(id)->fuzztrace)
+    uint64_t PC = BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RIP].rrx;
+    if(BX_CPU(cpu)->fuzztrace)
         printf("CMP%ld: %lx vs %lx @ %lx\n", size, op1, op2, PC);
 
     // if(!op1 || !op2 || op1 == op2 || size < 2)
     if(!op1 || !op2 || op1 == op2)
         return;
 
-    if(ignore_pc(PC))
+    if(ignore_pc(cpu, PC))
         return;
 
     if(constant_only)
@@ -151,15 +153,15 @@ TRACE_CMP:
 
 }
 
-void fuzz_hook_alignment(uint64_t op1, uint64_t op2, size_t size) {
+void fuzz_hook_alignment(unsigned cpu, uint64_t op1, uint64_t op2, size_t size) {
     if(size != 4 && size != 8)
         return;
 
-    uint64_t PC = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
-    if(BX_CPU(id)->fuzztrace)
+    uint64_t PC = BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RIP].rrx;
+    if(BX_CPU(cpu)->fuzztrace)
         printf("ALIGN%ld: %lx vs %lx @ %lx\n", size, op1, op2, PC);
 
-    if(ignore_pc(PC))
+    if(ignore_pc(cpu, PC))
         return;
 
     // printf("ALIGN: %lx vs %lx @ %lx\n", op1, op2, PC);

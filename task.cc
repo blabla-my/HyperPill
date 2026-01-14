@@ -26,37 +26,37 @@ static std::string userspace_vmm_task_signatures[] = {
     "vbox",
 };
 
-int read_task_struct(bx_address task_struct, void* buf, size_t len) {
+int read_task_struct(unsigned cpu, bx_address task_struct, void* buf, size_t len) {
     if (task_struct == 0){
         return -1;
     }
     if (len < TASK_SIZE) {
         return -1; // Buffer too small
     }
-    bx_kernel_read(task_struct, buf, TASK_SIZE);
+    bx_kernel_read(cpu, task_struct, buf, TASK_SIZE);
     return 0; // Success
 }
 
-int read_mm_struct(bx_address mm_struct, void* buf, size_t len){
+int read_mm_struct(unsigned cpu, bx_address mm_struct, void* buf, size_t len){
     if (mm_struct == 0) {
         return -1; // Invalid mm_struct address
     }
     if (len < MM_SIZE) {
         return -1; // Buffer too small
     }
-    bx_kernel_read(mm_struct, buf, MM_SIZE);
+    bx_kernel_read(cpu, mm_struct, buf, MM_SIZE);
     return 0; // Success
 }
 
-int read_pt_regs(bx_address pt_regs_addr, struct pt_regs *regs){
+int read_pt_regs(unsigned cpu, bx_address pt_regs_addr, struct pt_regs *regs){
     if (pt_regs_addr == 0) {
         return -1; // Invalid pt_regs address
     }
-    bx_kernel_read(pt_regs_addr, regs, sizeof(struct pt_regs));
+    bx_kernel_read(cpu, pt_regs_addr, regs, sizeof(struct pt_regs));
     return 0; // Success
 }
 
-int task_buf_to_task(const uint8_t* task_buf, Task* task_ptr) {
+int task_buf_to_task(unsigned cpu, const uint8_t* task_buf, Task* task_ptr) {
     if (!task_buf || !task_ptr) {
         return -1; // Invalid buffer
     }
@@ -86,24 +86,24 @@ int task_buf_to_task(const uint8_t* task_buf, Task* task_ptr) {
         // fuzz_task_ptr->pgd = task_mm(task_buf);
         // fuzz_task_ptr->cr3 = pgd2cr3(fuzz_task_ptr->pgd);
         uint8_t mm_buf[MM_SIZE];
-        if (read_mm_struct(mm, mm_buf, sizeof(mm_buf)) < 0) {
+        if (read_mm_struct(cpu, mm, mm_buf, sizeof(mm_buf)) < 0) {
             return -1; // Failed to read mm_struct
         }
         task_ptr->pgd = mm_pgd(mm_buf);
-        task_ptr->cr3 = pgd2cr3(task_ptr->pgd);
+        task_ptr->cr3 = pgd2cr3(cpu, task_ptr->pgd);
     }
     
     bx_address task_pt_regs_addr = (bx_address)task_pt_regs(task_buf);
-    if (read_pt_regs(task_pt_regs_addr, &task_ptr->regs) < 0) {
+    if (read_pt_regs(cpu, task_pt_regs_addr, &task_ptr->regs) < 0) {
         return -1; // Failed to read pt_regs
     }
 
     return 0; // Success
 }
 
-unsigned long pgd2cr3(unsigned long pgd) {
+unsigned long pgd2cr3(unsigned cpu, unsigned long pgd) {
     bx_phy_address cr3;
-    BX_CPU(x)->dbg_xlate_linear2phy(pgd, &cr3);
+    BX_CPU(cpu)->dbg_xlate_linear2phy(pgd, &cr3);
     return cr3;
 }
 
@@ -111,7 +111,7 @@ void iterate_tasks(bx_address task_struct_head) {
     if (task_struct_head == 0UL) return; 
     bx_address task = task_struct_head;
     do {
-        Task* task_ptr = task_manager.add_task(task);
+        Task* task_ptr = task_manager.add_task(0, task);
 
         printf("Task at %lx PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx, flags: %x, stack: %lx, RIP: %lx\n",
                task, task_ptr->pid, task_ptr->kernel_task, task_ptr->hypervisor_task, task_ptr->userspace_vmm_task, task_ptr->comm,
@@ -137,35 +137,35 @@ Task* TaskManager::get_task(bx_address task_addr){
     return NULL;
 }
 
-bx_address TaskManager::get_current_task_bx_addr(){
+bx_address TaskManager::get_current_task_bx_addr(unsigned cpu){
     if (!current_task) {
         current_task = sym_to_addr("vmlinux", "current_task");
     }
 
-    bx_address taskpp = BX_CPU(id)->get_laddr(BX_SEG_REG_GS, current_task);
+    bx_address taskpp = BX_CPU(cpu)->get_laddr(BX_SEG_REG_GS, current_task);
     // check whether GS==0
     if (taskpp == current_task) return 0;
 
     bx_address taskp;
-    bx_kernel_deref_ptr(taskpp, taskp);
+    bx_kernel_read(cpu, taskpp, &taskp, sizeof(taskp));
     return taskp;
 }
 
-Task* TaskManager::get_current_task(){
+Task* TaskManager::get_current_task(unsigned cpu){
     // only in kernel mode, GS is not 0
-    if (BX_CPU(id)->get_cpl() == 0){
-        bx_address current_task_bx_addr = get_current_task_bx_addr();
+    if (BX_CPU(cpu)->get_cpl() == 0){
+        bx_address current_task_bx_addr = get_current_task_bx_addr(cpu);
         if (!current_task_bx_addr) return NULL;
         Task* current_task_fuzz = get_task(current_task_bx_addr);
         if (!current_task_fuzz) {
-            return add_task(current_task_bx_addr);
+            return add_task(cpu, current_task_bx_addr);
         } else {
             return current_task_fuzz;
         }
     }
     else {
-        if (user_task_map.contains(BX_CPU(id)->cr3 >> PAGE_SHIFT))
-            return user_task_map[BX_CPU(id)->cr3 >> PAGE_SHIFT];
+        if (user_task_map.contains(BX_CPU(cpu)->cr3 >> PAGE_SHIFT))
+            return user_task_map[BX_CPU(cpu)->cr3 >> PAGE_SHIFT];
         else
             return NULL;
     }
@@ -178,10 +178,10 @@ Task* TaskManager::get_hypervisor_task(bx_address task_addr){
     return NULL;
 }
 
-Task* TaskManager::add_task(bx_address task_addr){
+Task* TaskManager::add_task(unsigned cpu, bx_address task_addr){
     Task* already_in = get_task(task_addr);
     if (!already_in){
-        Task* new_task = alloca_task(task_addr);
+        Task* new_task = alloca_task(cpu, task_addr);
         if (!new_task) return NULL;
         if (!new_task->kernel_task){
             // if new_task is a userspace task, index it by CR3 as well
@@ -223,7 +223,7 @@ Task* TaskManager::add_task(Task* task_addr){
 Task* TaskManager::add_hypervisor_task(bx_address task_addr){
     Task* already_in = get_hypervisor_task(task_addr);
     if (!already_in){
-        Task* new_task = add_task(task_addr);
+        Task* new_task = add_task(0, task_addr);
         hypervisor_task_map[task_addr] = new_task;
         return new_task;
     }
@@ -253,19 +253,19 @@ bool TaskManager::has_hypervisor_task(bx_address task_addr){
     return hypervisor_task_map.contains(task_addr);
 }
 
-Task* TaskManager::alloca_task(bx_address task_addr){
+Task* TaskManager::alloca_task(unsigned cpu, bx_address task_addr){
     uint8_t *task_buf = (uint8_t*)malloc(TASK_SIZE);
     if (!task_buf){
         printf("Error: failed to allocate task_buf\n");
         return NULL;
     };
-    if (read_task_struct(task_addr, task_buf, TASK_SIZE) < 0){
+    if (read_task_struct(cpu, task_addr, task_buf, TASK_SIZE) < 0){
         printf("Error: failed to read task struct from guest memory\n");
         free(task_buf);
         return NULL;
     }
     Task* new_task = new Task();
-    if (task_buf_to_task(task_buf, new_task) < 0){
+    if (task_buf_to_task(cpu, task_buf, new_task) < 0){
         printf("Error: failed to convert task buf to task\n");
         free(task_buf);
         delete new_task;

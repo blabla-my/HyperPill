@@ -50,7 +50,7 @@ void walk_ept(){
 extern size_t guest_mem_size;
 void fuzz_walk_ept() {
     printf(".performing ept walk \n");
-    uint64_t eptp = BX_CPU(id)->VMread64(VMCS_64BIT_CONTROL_EPTPTR);
+    uint64_t eptp = hp::vcpu()->VMread64(VMCS_64BIT_CONTROL_EPTPTR);
     printf("EPTP: %lx\n", eptp);
     /* printf("EPT Paging Structure Memory Type: %lx\n", eptp&0b111); */
     /* printf("EPT Page Walk Length: %lx\n", ((eptp>>3)&0b111) + 1); */
@@ -77,7 +77,7 @@ void fuzz_walk_ept() {
 
 int vmcs_translate_guest_physical_ept(bx_phy_address guest_paddr, bx_phy_address *phy, int *translation_level)
 {
-  BX_CPU_C *cpu = hp::cur_cpu();
+  BX_CPU_C *cpu = hp::vcpu();
   VMCS_CACHE *vm = &cpu->vmcs;
   bx_phy_address pt_address = LPFOf(vm->eptptr) ;//BX_CPU(id)->VMread64(VMCS_64BIT_CONTROL_EPTPTR) & (~0xFFF);
 
@@ -135,10 +135,10 @@ bool vmcs_linear2phy(bx_address laddr, bx_phy_address *phy)
   bx_phy_address paddress;
   bx_address offset_mask = 0xfff;
 
-  uint64_t cr0 = BX_CPU(id)->VMread64(VMCS_GUEST_CR0);
-  uint64_t cr3 = BX_CPU(id)->VMread64(VMCS_GUEST_CR3);
-  uint64_t cr4 = BX_CPU(id)->VMread64(VMCS_GUEST_CR4);
-  uint64_t efer = BX_CPU(id)->VMread64(VMCS_64BIT_GUEST_IA32_EFER);
+  uint64_t cr0 = BX_CPU(0)->VMread64(VMCS_GUEST_CR0);
+  uint64_t cr3 = BX_CPU(0)->VMread64(VMCS_GUEST_CR3);
+  uint64_t cr4 = BX_CPU(0)->VMread64(VMCS_GUEST_CR4);
+  uint64_t efer = BX_CPU(0)->VMread64(VMCS_64BIT_GUEST_IA32_EFER);
 
   int long_mode = (efer  >> 10) &1;
   if (!((cr0 >> 31) & 1)) { // get_PG
@@ -162,7 +162,7 @@ bool vmcs_linear2phy(bx_address laddr, bx_phy_address *phy)
         offset_mask >>= 9;
         if (vmcs_translate_guest_physical_ept(pt_address, &pt_address, NULL))
             goto page_fault;
-        BX_MEM(0)->readPhysicalPage(BX_CPU(id), pt_address, 8, &pte);
+        BX_MEM(0)->readPhysicalPage(BX_CPU(0), pt_address, 8, &pte);
         if(!(pte & 1))
           goto page_fault;
         if (pte & BX_PAGING_PHY_ADDRESS_RESERVED_BITS)
@@ -174,7 +174,7 @@ bool vmcs_linear2phy(bx_address laddr, bx_phy_address *phy)
           pt_address &= BX_CONST64(0x000fffffffffe000);
           if (pt_address & offset_mask)
             goto page_fault;
-          if (BX_CPU(id)->is_cpu_extension_supported(BX_ISA_1G_PAGES) && level == BX_LEVEL_PDPTE) break;
+          if (BX_CPU(0)->is_cpu_extension_supported(BX_ISA_1G_PAGES) && level == BX_LEVEL_PDPTE) break;
           if (level == BX_LEVEL_PDE) break;
           goto page_fault;
         }
@@ -200,8 +200,8 @@ page_fault:
 
 void ept_locate_pc() {
     bx_address phyaddr;
-    vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phyaddr);
-    printf("%lx -> %lx\n", BX_CPU(id)->VMread64(VMCS_GUEST_RIP), phyaddr);
+    vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phyaddr);
+    printf("%lx -> %lx\n", BX_CPU(0)->VMread64(VMCS_GUEST_RIP), phyaddr);
     
     vmcs_linear2phy(0, &phyaddr);
     printf("%lx -> %lx\n", 0UL, phyaddr);
@@ -216,7 +216,7 @@ void iterate_page_table(int level, bx_phy_address pt_address) {
     for(int i=0; i<512 && level!=BX_LEVEL_PTE; i++) {
         Bit64u pte;
         vmcs_translate_guest_physical_ept(pt_address + i*8, &translated_pt_address, NULL);
-        BX_MEM(0)->readPhysicalPage(BX_CPU(id), translated_pt_address, 8, &pte);
+        BX_MEM(0)->readPhysicalPage(BX_CPU(0), translated_pt_address, 8, &pte);
         printf("PTE: %lx\n", pte);
         if(level != BX_LEVEL_PTE && !(pte & 0x80)) {
             iterate_page_table(level -= 1, 
@@ -271,7 +271,7 @@ static void page_walk_la48(uint64_t pml4_addr,
         if (l1 == 0 && page_table_cb) {
             page_table_cb(physical_pt_address, BX_LEVEL_PML4);
         }
-        BX_MEM(0)->readPhysicalPage(BX_CPU(id), physical_pt_address, 8, &pml4e);
+        BX_MEM(0)->readPhysicalPage(BX_CPU(0), physical_pt_address, 8, &pml4e);
         if (!(pml4e & PG_PRESENT_MASK)) {
             continue;
         }
@@ -290,7 +290,7 @@ static void page_walk_la48(uint64_t pml4_addr,
             if (l2 == 0 && page_table_cb) {
                 page_table_cb(physical_pt_address, BX_LEVEL_PDPTE);
             }
-            BX_MEM(0)->readPhysicalPage(BX_CPU(id), physical_pt_address, 8, &pdpe);
+            BX_MEM(0)->readPhysicalPage(BX_CPU(0), physical_pt_address, 8, &pdpe);
             if (!(pdpe & PG_PRESENT_MASK)) {
                 continue;
             }
@@ -317,7 +317,7 @@ static void page_walk_la48(uint64_t pml4_addr,
                 if (l3 == 0 && page_table_cb) {
                     page_table_cb(physical_pt_address, BX_LEVEL_PDE);
                 }
-                BX_MEM(0)->readPhysicalPage(BX_CPU(id), physical_pt_address, 8, &pde);
+                BX_MEM(0)->readPhysicalPage(BX_CPU(0), physical_pt_address, 8, &pde);
                 if (!(pde & PG_PRESENT_MASK)) {
                     continue;
                 }
@@ -343,7 +343,7 @@ static void page_walk_la48(uint64_t pml4_addr,
                     if (l4 == 0 && page_table_cb) {
                         page_table_cb(physical_pt_address, BX_LEVEL_PTE);
                     }
-                    BX_MEM(0)->readPhysicalPage(BX_CPU(id), physical_pt_address, 8, &pte);
+                    BX_MEM(0)->readPhysicalPage(BX_CPU(0), physical_pt_address, 8, &pte);
                     if (pte & PG_PRESENT_MASK) {
                         if(leaf_pte_cb)
                             leaf_pte_cb((l0 << 48) + (l1 << 39) +
@@ -359,7 +359,7 @@ static void page_walk_la48(uint64_t pml4_addr,
 void ept_mark_page_table() {
     bx_address phyaddr;
 
-    uint64_t cr3 = BX_CPU(id)->VMread64(VMCS_GUEST_CR3);
+    uint64_t cr3 = BX_CPU(0)->VMread64(VMCS_GUEST_CR3);
     bx_phy_address pt_address = cr3 & BX_CONST64(0x000ffffffffff000);
     page_walk_la48(pt_address, true, mark_page_not_guest, NULL);
 
@@ -370,7 +370,7 @@ void ept_mark_page_table() {
 
     // unmark the page containing the current guest RIP
     // alternatively, check that (addr != guest RIP) in the DMA hook
-    if(vmcs_linear2phy(BX_CPU(id)->VMread64(VMCS_GUEST_RIP), &phyaddr)) {
+    if(vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phyaddr)) {
         mark_page_not_guest(phyaddr, BX_LEVEL_PTE);
     } else {
         fprintf(stderr, "GUEST_RIP page not mapped");
@@ -382,7 +382,7 @@ static void print_page(bx_phy_address entry, int level, bx_phy_address virt ){
     uint64_t pte;
     return;
     for(int i=0; i<512; i++) {
-        BX_MEM(0)->readPhysicalPage(BX_CPU(id), entry + i*8, 8, &pte);
+        BX_MEM(0)->readPhysicalPage(BX_CPU(0), entry + i*8, 8, &pte);
         uint64_t final_virt = virt + ((uint64_t)i << (12 + (level*9)));
         if(pte & PG_PRESENT_MASK){
             printf("%lx: %d %lx[%d] %lx\n", final_virt, level, entry, i, pte);
@@ -391,7 +391,7 @@ static void print_page(bx_phy_address entry, int level, bx_phy_address virt ){
 }
 
 void fuzz_walk_cr3() {
-    bx_phy_address pt_address = BX_CPU(id)->cr3 & BX_CONST64(0x000ffffffffff000);
-    pt_address  = BX_CPU(id)->VMread64(VMCS_GUEST_CR3) & 0x000ffffffffff000;
+    bx_phy_address pt_address = BX_CPU(0)->cr3 & BX_CONST64(0x000ffffffffff000);
+    pt_address  = BX_CPU(0)->VMread64(VMCS_GUEST_CR3) & 0x000ffffffffff000;
     page_walk_la48(pt_address, true, NULL, print_pte);
 }

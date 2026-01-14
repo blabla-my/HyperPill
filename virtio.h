@@ -192,10 +192,10 @@ struct VRing {
     virtual uint16_t element_index(bx_address gpa) const {
         return (gpa - start() - ring_offset()) / element_size();
     }
-    virtual int ingest_elem(void*, int index=-1) const {return 0;};
+    virtual int ingest_elem(unsigned cpu, void*, int index=-1) const {return 0;};
     virtual const char* type_str() const {return "base";};
-    virtual void write_elem(int index, void* elem) const;
-    virtual void read_elem(int index, void* elem) const;
+    virtual void write_elem(unsigned cpu, int index, void* elem) const;
+    virtual void read_elem(unsigned cpu, int index, void* elem) const;
 
     enum FILED_TYPE {
         FLAGS, 
@@ -205,10 +205,10 @@ struct VRing {
     };
     virtual FILED_TYPE filed_type(bx_address address) const {return FILED_TYPE::VRING_ELEM;};
 
-    virtual int ingest_idx(uint16_t* idx) const {return 0;};
-    void set_flags(uint16_t flags) const;
-    void set_idx(uint16_t idx) const;
-    void set_event(uint16_t event) const;
+    virtual int ingest_idx(unsigned cpu, uint16_t* idx) const {return 0;};
+    void set_flags(unsigned cpu, uint16_t flags) const;
+    void set_idx(unsigned cpu, uint16_t idx) const;
+    void set_event(unsigned cpu, uint16_t event) const;
 };
 
 struct AvailRing: VRing {
@@ -223,10 +223,10 @@ struct AvailRing: VRing {
     }
     size_t element_size() const override {return sizeof(vring_avail_elem);}
     size_t ring_offset() const override {return sizeof(uint16_t)*2;}
-    int ingest_elem(void*, int index) const override;
+    int ingest_elem(unsigned cpu, void*, int index) const override;
     const char* type_str() const override {return "avail";}
     virtual FILED_TYPE filed_type(bx_address address) const override;
-    virtual int ingest_idx(uint16_t* idx) const override;
+    virtual int ingest_idx(unsigned cpu, uint16_t* idx) const override;
 };
 
 struct UsedRing: VRing {
@@ -240,7 +240,7 @@ struct UsedRing: VRing {
     }
     size_t element_size() const override {return sizeof(vring_used_elem);}
     size_t ring_offset() const override {return sizeof(uint16_t)*2;}
-    int ingest_elem(void*, int index) const override;
+    int ingest_elem(unsigned cpu, void*, int index) const override;
     const char* type_str() const override {return "used";}
     virtual FILED_TYPE filed_type(bx_address address) const override;
 };
@@ -256,7 +256,7 @@ struct DescRing: VRing {
     }
     size_t element_size() const override  {return sizeof(vring_desc);}
     size_t ring_offset() const override {return 0;}
-    int ingest_elem(void*, int index) const override;
+    int ingest_elem(unsigned cpu, void*, int index) const override;
     const char* type_str() const override {return "desc";}
 };
 
@@ -429,11 +429,11 @@ typedef struct VirtQueueElement
     hwaddr *out_addr;
     struct iovec *in_sg;
     struct iovec *out_sg;
-    size_t in_sgl_size();
-    size_t out_sgl_size();
+    size_t in_sgl_size(unsigned cpu);
+    size_t out_sgl_size(unsigned cpu);
 } VirtQueueElement;
 
-int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem);
+int read_virtqueue_element(unsigned cpu, bx_address elem_ptr_hva, VirtQueueElement* elem);
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size);
 const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out);

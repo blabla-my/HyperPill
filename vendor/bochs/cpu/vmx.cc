@@ -2991,13 +2991,14 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::VMCALL(bxInstruction_c *i)
   BX_NEXT_TRACE(i);
 }
 
-bool fuzz_hook_vmlaunch();
-__attribute__((weak)) bool fuzz_hook_vmlaunch() {
+bool fuzz_hook_vmlaunch(unsigned cpu);
+__attribute__((weak)) bool fuzz_hook_vmlaunch(unsigned cpu) {
+    (void)cpu;
     return true;
 }
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::VMLAUNCH(bxInstruction_c *i)
 {
-    if(fuzz_hook_vmlaunch()) {
+    if(fuzz_hook_vmlaunch(BX_CPU_ID)) {
         BX_NEXT_TRACE(i);
         return;
     }

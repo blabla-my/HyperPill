@@ -33,7 +33,7 @@
  * These breakpoints need to be pretty fast
  */
 #define MAX_BPS 16 
-using breakpoint_handler_t = void (*)(bxInstruction_c *);
+using breakpoint_handler_t = void (*)(unsigned cpu, bxInstruction_c *);
 struct breakpoint_info_t {
     bx_address addr;
     bool after_ret;
@@ -45,23 +45,21 @@ static unsigned int bp_index;
 bx_address min_bp = -1;
 bx_address max_bp;
 
-
-
-void handle_breakpoints(bxInstruction_c *insn) {
-    auto rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
+void handle_breakpoints(unsigned cpu, bxInstruction_c *insn) {
+    auto rip = BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RIP].rrx;
     if(rip < min_bp || rip > max_bp)
         return;
     for (unsigned int i =0; i<bp_index; i++){
         if(!breakpoints[i].after_ret && breakpoints[i].addr == rip)
-            breakpoints[i].handler(insn);
+            breakpoints[i].handler(cpu, insn);
     }
 }
-void handle_breakpoints_func_call(bx_address func, bx_address rip){
+void handle_breakpoints_func_call(unsigned cpu, bx_address func, bx_address rip){
     if (rip < min_bp || rip>max_bp)
         return;
     for (unsigned int i =0; i<bp_index; i++){
         if(breakpoints[i].after_ret && breakpoints[i].addr == func)
-            breakpoints[i].handler(NULL);
+            breakpoints[i].handler(cpu, NULL);
     }
 }
 
@@ -78,23 +76,23 @@ bx_address add_breakpoint(bx_address addr, const breakpoint_handler_t h, bool af
     return addr;
 }
 
-static char* copy_string_from_vm(bx_address addr, size_t len) {
+static char* copy_string_from_vm(unsigned cpu, bx_address addr, size_t len) {
     len = len&0xFFF;
     char *buf = (char*)malloc(len);
-    bx_kernel_read(addr, buf, len);
+    bx_kernel_read(cpu, addr, buf, len);
     buf[len-1] = 0;
     return buf;
 }
 
-static void bp__stdio_write(bxInstruction_c *i){
+static void bp__stdio_write(unsigned cpu, bxInstruction_c *i){
     i->execute1 = &BX_CPU_C::RETnear64_Iw;
     i->modRMForm.Iw[0] = 0;
     i->modRMForm.Iw[1] = 0;
-    BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-    BX_CPU(id)->async_event = 1;
+    BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+    BX_CPU(cpu)->async_event = 1;
 
-    char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx,
-            BX_CPU(id)->gen_reg[BX_64BIT_REG_RDX].rrx);
+    char* msg = copy_string_from_vm(cpu, BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RSI].rrx,
+            BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RDX].rrx);
     printf("__stdio_write: %s\n", msg);
     free(msg);
 }
@@ -109,22 +107,23 @@ void apply_breakpoints_linux() {
     //     -> __asan::ScopedInErrorReport::~ScopedInErrorReport()
     //         -> __asan::DescribeThread()
     //         -> __sanitizer::Die(), abort or exit
-    add_breakpoint(sym_to_addr("firecracker", "core::panicking::panic_fmt"), [](bxInstruction_c *i) {
-            fuzz_emu_stop_crash("firecracker: panic");
+    add_breakpoint(sym_to_addr("firecracker", "core::panicking::panic_fmt"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
+            fuzz_emu_stop_crash(cpu, "firecracker: panic");
             });
-    add_breakpoint(sym_to_addr("vmm", "pthread_rwlock_rdlock"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("vmm", "pthread_rwlock_rdlock"), [](unsigned cpu, bxInstruction_c *i) {
             i->execute1 = &BX_CPU_C::RETnear64_Iw;
             i->modRMForm.Iw[0] = 0;
             i->modRMForm.Iw[1] = 0;
-            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-            BX_CPU(id)->async_event = 1;
+            BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+            BX_CPU(cpu)->async_event = 1;
             });
-    add_breakpoint(sym_to_addr("vmm", "pthread_rwlock_unlock"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("vmm", "pthread_rwlock_unlock"), [](unsigned cpu, bxInstruction_c *i) {
             i->execute1 = &BX_CPU_C::RETnear64_Iw;
             i->modRMForm.Iw[0] = 0;
             i->modRMForm.Iw[1] = 0;
-            BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-            BX_CPU(id)->async_event = 1;
+            BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+            BX_CPU(cpu)->async_event = 1;
             });
     // add_breakpoint(sym_to_addr("libc", "pthread_rwlock_rdlock"), [](bxInstruction_c *i) {
     //         i->execute1 = BX_CPU_C::RETnear64_Iw;
@@ -140,70 +139,79 @@ void apply_breakpoints_linux() {
     //         BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
     //         BX_CPU(id)->async_event = 1;
     //         });
-	    add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](bxInstruction_c *i) {
+	    add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](unsigned cpu, bxInstruction_c *i) {
 	            printf("Skipping __asan::CheckUnwind");
 	            print_stacktrace();
 	            i->execute1 = &BX_CPU_C::RETnear64_Iw;
 	            i->modRMForm.Iw[0] = 0;
 	            i->modRMForm.Iw[1] = 0;
-	            BX_CPU(id)->async_event = 1;
+	            BX_CPU(cpu)->async_event = 1;
 	            });
-    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
             // every error through asan should reach this
             printf("ASAN error report\n");
             fuzz_stacktrace();
-            fuzz_emu_stop_crash("asan-scoped-error");
+            fuzz_emu_stop_crash(cpu, "asan-scoped-error");
             }, false);
-    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
             printf("ASAN GENERIC ERROR\n");
-            fuzz_emu_stop_crash("asan-generic-error");
+            fuzz_emu_stop_crash(cpu, "asan-generic-error");
             });
-    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::AsanOnDeadlySignal"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
             printf("ASAN Deadly Signal\n");
-            fuzz_emu_stop_crash("asan-deadly-signal");
+            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
             });
-    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
             printf("ASAN GENERIC ERROR\n");
-            fuzz_emu_stop_crash("asan-generic-error");
+            fuzz_emu_stop_crash(cpu, "asan-generic-error");
             }, false);
-    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
             printf("ASAN Deadly Signal\n");
-            fuzz_emu_stop_crash("asan-deadly-signal");
+            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
             }, false);
-    add_breakpoint(sym_to_addr("libc.so", "abort@@GLIBC_2.2.5"), [](bxInstruction_c *i) {
-            fuzz_emu_stop_crash("abort");
+    add_breakpoint(sym_to_addr("libc.so", "abort@@GLIBC_2.2.5"), [](unsigned cpu, bxInstruction_c *i) {
+            (void)cpu;
+            fuzz_emu_stop_crash(cpu, "abort");
     });
 
     add_breakpoint(sym_to_addr("vmm", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("libc", "__stdio_write"), bp__stdio_write);
     add_breakpoint(sym_to_addr("ld-musl", "__stdio_write"), bp__stdio_write);
     //add_breakpoint(sym_to_addr("ld-musl", "out"), bp__stdio_write);
-    add_breakpoint(sym_to_addr("vmlinux", "crash_kexec"), [](bxInstruction_c *i) { 
-        fuzz_emu_stop_crash("crash_kexec");
+    add_breakpoint(sym_to_addr("vmlinux", "crash_kexec"), [](unsigned cpu, bxInstruction_c *i) { 
+        (void)cpu;
+        fuzz_emu_stop_crash(cpu, "crash_kexec");
     });
     // add_breakpoint(sym_to_addr("vmlinux", "exc_page_fault"), [](bxInstruction_c *i) {
     //         printf("page fault at: 0x%lx\n", BX_CPU(id)->cr2);
     //         // fuzz_emu_stop_crash("page fault");
     // });
-    add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](bxInstruction_c *i) {
+    add_breakpoint(sym_to_addr("vmlinux", "univ8250_console_write"), [](unsigned cpu, bxInstruction_c *i) {
         i->execute1 = &BX_CPU_C::RETnear64_Iw;
         i->modRMForm.Iw[0] = 0;
         i->modRMForm.Iw[1] = 0;
-        BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
-        BX_CPU(id)->async_event = 1;
+        BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
+        BX_CPU(cpu)->async_event = 1;
         if (log_ops) {
-            char* msg = copy_string_from_vm(BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx,
-                    BX_CPU(id)->gen_reg[BX_64BIT_REG_RDX].rrx+1);
+            char* msg = copy_string_from_vm(cpu, BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RSI].rrx,
+                    BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RDX].rrx+1);
             printf("#console_write\n%s\n#end_console_write", msg);
             free(msg);
         }
     });
     // hook kasan
-    add_breakpoint(sym_to_addr("vmlinux", "kasan_report"), [](bxInstruction_c *i) {
-        fuzz_emu_stop_crash("kasan-report");
+    add_breakpoint(sym_to_addr("vmlinux", "kasan_report"), [](unsigned cpu, bxInstruction_c *i) {
+        (void)cpu;
+        fuzz_emu_stop_crash(cpu, "kasan-report");
     });
-    add_breakpoint(sym_to_addr("vmlinux", "kasan_report_invalid_free"), [](bxInstruction_c *i) {
-        fuzz_emu_stop_crash("kasan-report-invalid-free");
+    add_breakpoint(sym_to_addr("vmlinux", "kasan_report_invalid_free"), [](unsigned cpu, bxInstruction_c *i) {
+        (void)cpu;
+        fuzz_emu_stop_crash(cpu, "kasan-report-invalid-free");
     });
     // abort of all processes
     // auto abort_addresses = select_sym("abort");
@@ -216,44 +224,45 @@ void apply_breakpoints_linux() {
 }
 
 
-void handle_syscall_hooks(bxInstruction_c *i)
+void handle_syscall_hooks(unsigned cpu, bxInstruction_c *i)
 {
     // crashes often go for exit/abort
     /* Hook Syscalls */
     static void* nocov = getenv("NOCOV");
     if (i->getIaOpcode() == 0x471) {
-        switch(BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx) {
+        switch(BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx) {
             case 231:
             case 60:    // exit
                 if (nocov)
-                    fuzz_emu_stop_crash("exit-syscall");
+                    fuzz_emu_stop_crash(cpu, "exit-syscall");
                 break;
             case 62:    // kill
             case 200:   // tkill
-                if (nocov && BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
-                    fuzz_emu_stop_crash("kill-syscall");
+                if (nocov && BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
+                    fuzz_emu_stop_crash(cpu, "kill-syscall");
                     return;
                 }
                 break;
 	            case 1:     // write
-	                if (BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx == 1 ||
-	                        BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx == 2) {
+	                if (BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RDI].rrx == 1 ||
+	                        BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RDI].rrx == 2) {
 	                    i->execute1 = &BX_CPU_C::NOP;
-	                    size_t len = BX_CPU(id)
+	                    size_t len = BX_CPU(cpu)
 	                        ->gen_reg[BX_64BIT_REG_RDX]
 	                        .rrx &
 	                        0xFFF;
-                    if (log_ops || BX_CPU(id)->fuzztrace) {
+                    if (log_ops || BX_CPU(cpu)->fuzztrace) {
                         char *buf = (char *)malloc(len + 1);
-                        BX_CPU(0)->access_read_linear(
-                                BX_CPU(id)
+                        BX_CPU(cpu)->access_read_linear(
+                                BX_CPU(cpu)
                                 ->gen_reg[BX_64BIT_REG_RSI]
                                 .rrx,
                                 len, 3, BX_READ, 0x0, buf);
                         buf[len] = 0;
                         printf("#write\n%s\n#end_write\n", buf);
+                        free(buf);
                     }
-                    BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = len;
+                    BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx = len;
                     return;
                 }
                 break;

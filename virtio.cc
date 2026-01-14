@@ -31,25 +31,25 @@ VRing::VRing(size_t size, bx_address addr_gpa, VQueue* vqueue): size(size), addr
 	printf("VRing: hpa %lx, gpa %lx, size: %lx, vqueue: %p\n", addr_hpa, addr_gpa, size, queue);
 }
 
-void VRing::write_elem(int index, void* elem) const {
+void VRing::write_elem(unsigned cpu, int index, void* elem) const {
 	if (!addr_hpa) return;
 	if (index >= size) return;
 	// BX_CPU(id)->access_write_physical(addr_hpa + ring_offset() + index * element_size() , element_size(), elem);
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
 }
 
-void VRing::read_elem(int index, void* elem) const {
+void VRing::read_elem(unsigned cpu, int index, void* elem) const {
 	if (!addr_hpa) return;
 	if (index >= size) return;
-	BX_MEM(0)->readPhysicalPage(BX_CPU(id), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
+	BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), addr_hpa + ring_offset() + index*element_size(), element_size(), elem);
 }
 
 /* AvailRing */
-int AvailRing::ingest_idx(uint16_t *idx) const {
+int AvailRing::ingest_idx(unsigned cpu, uint16_t *idx) const {
 	// read last index
 	if (!addr_hpa) return -2;
 	uint16_t last_idx;
-	BX_CPU(x)->access_read_physical(addr_hpa + sizeof(uint16_t), sizeof(last_idx), &last_idx);
+	BX_CPU(cpu)->access_read_physical(addr_hpa + sizeof(uint16_t), sizeof(last_idx), &last_idx);
 	if (last_generated_idx == UINT16_MAX) {
 		*idx = last_idx + MAX_REQUEST_NUMBER;
 		last_generated_idx = *idx;
@@ -65,7 +65,9 @@ int AvailRing::ingest_idx(uint16_t *idx) const {
 	return 0;
 }
 
-int AvailRing::ingest_elem(void* opaque, int index) const {
+int AvailRing::ingest_elem(unsigned cpu, void* opaque, int index) const {
+	(void)cpu;
+	(void)index;
 	auto* avail_elem_ptr = (vring_avail_elem*)opaque;
 	if(ic_ingest_uint(avail_elem_ptr, sizeof(uint16_t), 0, size) < 0){
 		return -1;
@@ -96,26 +98,28 @@ VRing::FILED_TYPE AvailRing::filed_type(bx_address address) const {
 	}
 }
 
-void VRing::set_flags(uint16_t flags) const {
+void VRing::set_flags(unsigned cpu, uint16_t flags) const {
 	if (!addr_hpa) return;
 	uint16_t flags_stack = flags;
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa, sizeof(uint16_t), &flags_stack);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr_hpa, sizeof(uint16_t), &flags_stack);
 }
 
-void VRing::set_idx(uint16_t idx) const {
+void VRing::set_idx(unsigned cpu, uint16_t idx) const {
 	if (!addr_hpa) return;
 	uint16_t idx_stack = idx;
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + sizeof(uint16_t), sizeof(uint16_t), &idx_stack);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr_hpa + sizeof(uint16_t), sizeof(uint16_t), &idx_stack);
 }
 
-void VRing::set_event(uint16_t event) const {
+void VRing::set_event(unsigned cpu, uint16_t event) const {
 	if (!addr_hpa) return;
 	uint16_t event_stack = event;
-	BX_MEM(0)->writePhysicalPage(BX_CPU(id), addr_hpa + sizeof(uint16_t) + size * element_size(), sizeof(uint16_t), &event_stack);
+	BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr_hpa + sizeof(uint16_t) + size * element_size(), sizeof(uint16_t), &event_stack);
 }
 
 /* UsedRing */
-int UsedRing::ingest_elem(void* opaque, int index) const {
+int UsedRing::ingest_elem(unsigned cpu, void* opaque, int index) const {
+	(void)cpu;
+	(void)index;
 	auto* used_elem_ptr = (vring_used_elem*)opaque;
 	if(ic_ingest64((uint64_t*)used_elem_ptr, 0, -1) < 0){
 		return -1;
@@ -143,7 +147,8 @@ VRing::FILED_TYPE UsedRing::filed_type(bx_address address) const {
 }
 
 /* DescRing */
-int DescRing::ingest_elem(void* opaque, int index) const {
+int DescRing::ingest_elem(unsigned cpu, void* opaque, int index) const {
+	(void)cpu;
 	/* firstly, we query desc chain fsm for genereted desc index */
 	/* we assume here the desc chain fsm has been initialized */
 	if (queue->desc_chain_fsm.has_used_index(index)){
@@ -319,7 +324,7 @@ unsigned long ConfigSpace::read(size_t offset, size_t sz) const {
     start_cpu(true);
     
 	unsigned long mask = (1ULL << (sz * 8)) - 1;
-    unsigned long value = BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
+    unsigned long value = hp::vcpu()->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
     return value;
 }
 
@@ -921,19 +926,19 @@ bool VQueueManager::init_queues_for_dev(VirtioDev *vdev) {
 				queue->avail_ring = new AvailRing(queue_size, avail_addr, queue);
 				queue->used_ring = new UsedRing(queue_size, used_addr, queue);
 				
-				// Initialize descriptor table
-				for (size_t j = 0; j < queue_size; ++j) {
-					vring_desc desc_elem = {0}; // Initialize all fields to 0
-					desc_elem.next = (j + 1) % queue_size;
-					queue->desc_ring->write_elem(j, &desc_elem);
-				}
-				
-				queue->avail_ring->set_flags(0);
-				queue->avail_ring->set_idx(0);
-				queue->avail_ring->set_event(0);
-				queue->used_ring->set_flags(0);
-				queue->used_ring->set_idx(0);
-				queue->used_ring->set_event(0);				
+					// Initialize descriptor table
+					for (size_t j = 0; j < queue_size; ++j) {
+						vring_desc desc_elem = {0}; // Initialize all fields to 0
+						desc_elem.next = (j + 1) % queue_size;
+						queue->desc_ring->write_elem(0, j, &desc_elem);
+					}
+					
+					queue->avail_ring->set_flags(0, 0);
+					queue->avail_ring->set_idx(0, 0);
+					queue->avail_ring->set_event(0, 0);
+					queue->used_ring->set_flags(0, 0);
+					queue->used_ring->set_idx(0, 0);
+					queue->used_ring->set_event(0, 0);				
 
 				group_vring_by_page(queue->desc_ring);
 				group_vring_by_page(queue->avail_ring);
@@ -991,33 +996,33 @@ uint64_t VQueueManager::overlapped_size(uint64_t start, uint64_t size) {
 }
 
 /* VirtQueueElement */
-int read_virtqueue_element(bx_address elem_ptr_hva, VirtQueueElement* elem){
+int read_virtqueue_element(unsigned cpu, bx_address elem_ptr_hva, VirtQueueElement* elem){
 	if (elem_ptr_hva == 0 || elem == NULL) {
 		return -1;
 	}
 
-	int r = BX_CPU(id)->access_read_linear(elem_ptr_hva, sizeof(VirtQueueElement), 3, BX_READ, 0, elem);
+	int r = BX_CPU(cpu)->access_read_linear(elem_ptr_hva, sizeof(VirtQueueElement), 3, BX_READ, 0, elem);
 	if (r<0) 
 		return -1;
 	return 0;
 }
 
-size_t VirtQueueElement::in_sgl_size() {
+size_t VirtQueueElement::in_sgl_size(unsigned cpu) {
 	size_t total = 0;
 	size_t cur;
 	for(size_t i=0; i<in_num; i++){
 		// total += in_sg[i].iov_len;
-		BX_CPU(id)->access_read_linear((bx_address)&in_sg[i].iov_len, sizeof(size_t), 3, BX_READ, 0, &cur);
+		BX_CPU(cpu)->access_read_linear((bx_address)&in_sg[i].iov_len, sizeof(size_t), 3, BX_READ, 0, &cur);
 		total += cur;
 	}
 	return total;
 }
 
-size_t VirtQueueElement::out_sgl_size() {
+size_t VirtQueueElement::out_sgl_size(unsigned cpu) {
 	size_t total = 0;
 	size_t cur;
 	for(size_t i=0; i<out_num; i++){
-		BX_CPU(id)->access_read_linear((bx_address)&in_sg[i].iov_len, sizeof(size_t), 3, BX_READ, 0, &cur);
+		BX_CPU(cpu)->access_read_linear((bx_address)&in_sg[i].iov_len, sizeof(size_t), 3, BX_READ, 0, &cur);
 		total += cur;
 	}
 	return total;

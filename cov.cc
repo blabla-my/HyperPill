@@ -69,10 +69,10 @@ void add_pc_range(size_t base, size_t len) {
     pc_ranges.push_back(std::make_pair(base, len));
 }
 
-bool ignore_pc(bx_address pc) {
+bool ignore_pc(unsigned cpu, bx_address pc) {
     static char* pc_filter = getenv("PC_FILTER");
     if (pc_filter){
-        return task_filter();
+        return task_filter(cpu);
     }
     
     if (pc_ranges.size() == 0) // No ranges = fuzz everthing
@@ -87,15 +87,15 @@ bool ignore_pc(bx_address pc) {
     return ignore;
 }
 
-bool task_filter(bool user_only) {
+bool task_filter(unsigned cpu, bool user_only) {
     if (!fuzzing) return false;
-    Task* cur_task = task_manager.get_current_task();
+    Task* cur_task = task_manager.get_current_task(cpu);
     bool reject = false;
     if(cur_task == NULL) {
         return true;
     }
     else if (cur_task->is_userspace_vmm_task()){
-        reject = BX_CPU(id)->get_cpl() == 0;
+        reject = BX_CPU(cpu)->get_cpl() == 0;
     }
     else if (!user_only && cur_task->is_hypervisor_task()){
         reject = false;
@@ -202,15 +202,14 @@ void stacktrace_hash_add(uint64_t hash) {
     seen_stacktraces.insert(hash);
 }
 
-void add_edge_not_taken(bx_address prev_rip) {
-    // printf("add_edge_not_taken: %lx -> %lx\n", prev_rip, BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx);
-    bx_address new_rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
-    add_edge(prev_rip, new_rip);
+void add_edge_not_taken(unsigned cpu, bx_address prev_rip) {
+    bx_address new_rip = BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RIP].rrx;
+    add_edge(cpu, prev_rip, new_rip);
 }
 
-void add_edge(bx_address prev_rip, bx_address new_rip) {
+void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip) {
     static char* NEW_PC_QEMU_ONLY=getenv("NEW_PC_QEMU_ONLY");
-    if(ignore_pc(new_rip))
+    if(ignore_pc(cpu, new_rip))
         // goto out;
         return ;
     
@@ -252,12 +251,12 @@ void reset_cur_cov() {
     libfuzzer_coverage[0] = 1;
 }
 
-void fuzz_instr_cnear_branch_taken(bx_address branch_rip, bx_address new_rip) {
-    add_edge(branch_rip, new_rip);
+void fuzz_instr_cnear_branch_taken(unsigned cpu, bx_address branch_rip, bx_address new_rip) {
+    add_edge(cpu, branch_rip, new_rip);
 }
 
-void fuzz_instr_cnear_branch_not_taken(bx_address branch_rip) {
-    add_edge_not_taken(branch_rip);
+void fuzz_instr_cnear_branch_not_taken(unsigned cpu, bx_address branch_rip) {
+    add_edge_not_taken(cpu, branch_rip);
 }
 
 uint32_t get_sysret_status() { return status; }
@@ -306,39 +305,39 @@ void print_page_fault_pt_regs(){
     printf("ss: %lx\n", regs.ss);
 }
 
-void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
+void fuzz_instr_ucnear_branch(unsigned cpu, unsigned what, bx_address branch_rip,
                               bx_address new_rip) {
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
     if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
-        our_stacktrace.push_back({branch_rip, new_rip, BX_CPU(id)->cr3});
+        our_stacktrace.push_back({branch_rip, new_rip, BX_CPU(cpu)->cr3});
         /* fuzz_stacktrace(); */
     } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
         calltrace_t last_call = our_stacktrace.back();
         our_stacktrace.pop_back();
-        handle_breakpoints_func_call(last_call.callee, new_rip);
+        handle_breakpoints_func_call(cpu, last_call.callee, new_rip);
         /* fuzz_stacktrace(); */
     }
-    add_edge(branch_rip, new_rip);
+    add_edge(cpu, branch_rip, new_rip);
 }
 
-void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs, bx_address prev_rip,
+void fuzz_instr_far_branch(unsigned cpu, unsigned what, Bit16u prev_cs, bx_address prev_rip,
                            Bit16u new_cs, bx_address new_rip) {
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
 
     if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
-        our_stacktrace.push_back({prev_rip, new_rip, BX_CPU(id)->cr3});
+        our_stacktrace.push_back({prev_rip, new_rip, BX_CPU(cpu)->cr3});
         /* fuzz_stacktrace(); */
     } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
         calltrace_t last_call = our_stacktrace.back();
         our_stacktrace.pop_back();
-        handle_breakpoints_func_call(last_call.callee, new_rip);
+        handle_breakpoints_func_call(cpu, last_call.callee, new_rip);
         /* fuzz_stacktrace(); */
     }
 
     // if (what == BX_INSTR_IS_IRET)
-        add_edge(prev_rip, new_rip);
+        add_edge(cpu, prev_rip, new_rip);
 }
 
 void serialize_bx_address_set(tsl::robin_set<bx_address> &set, const char *filename) {

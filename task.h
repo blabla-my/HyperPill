@@ -56,11 +56,11 @@ public:
 };
 
 /* functions to read structures from bx VM */
-int read_task_struct(bx_address task_struct, void* buf, size_t len);
-int read_mm_struct(bx_address mm_struct, void* buf, size_t len);
-int read_pt_regs(bx_address pt_regs_addr, struct pt_regs* regs);
-int task_buf_to_task(const uint8_t* task_buf, Task* task);
-unsigned long pgd2cr3(unsigned long pgd);
+int read_task_struct(unsigned cpu, bx_address task_struct, void* buf, size_t len);
+int read_mm_struct(unsigned cpu, bx_address mm_struct, void* buf, size_t len);
+int read_pt_regs(unsigned cpu, bx_address pt_regs_addr, struct pt_regs* regs);
+int task_buf_to_task(unsigned cpu, const uint8_t* task_buf, Task* task);
+unsigned long pgd2cr3(unsigned cpu, unsigned long pgd);
 
 void iterate_tasks(bx_address task_struct_head);
 
@@ -164,10 +164,10 @@ public:
     
     Task* get_task(bx_address task_addr);
     Task* get_task_by_cr3(unsigned long CR3);
-    Task* get_current_task();
-    bx_address get_current_task_bx_addr();
+    Task* get_current_task(unsigned cpu);
+    bx_address get_current_task_bx_addr(unsigned cpu);
     Task* get_hypervisor_task(bx_address task_addr);
-    Task* add_task(bx_address task_addr);
+    Task* add_task(unsigned cpu, bx_address task_addr);
     Task* add_task(Task* task_addr); //we should never allocate a task out of TaskManager.
     Task* add_hypervisor_task(bx_address task_addr);
     bool has_task(bx_address task_addr);
@@ -183,7 +183,7 @@ private:
     tsl::robin_map<bx_address, Task*> hypervisor_task_map;
     bx_address current_task;
 
-    Task* alloca_task(bx_address task_addr);
+    Task* alloca_task(unsigned cpu, bx_address task_addr);
     // bool add_hypervisor_task(Task* task_addr);
     // bool has_task(Task* task_addr);
 };

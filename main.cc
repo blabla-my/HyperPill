@@ -67,27 +67,32 @@ static void dump_hex(const uint8_t *data, size_t len) {
 	printf("\n");
 }
 
-void dump_regs() {
+static void dump_regs_cpu(unsigned cpu_id) {
+	auto *cpu = hp::cpu(cpu_id);
 	static const char *general_64bit_regname[17] = {
 		"rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8",
 		"r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip"
 	};
 	for (int i = 0; i <= BX_GENERAL_REGISTERS; i++) {
 		printf("REG%d (%s) = %016lx\n", i, general_64bit_regname[i],
-		       hp::cur_cpu()->gen_reg[i].rrx);
+		       cpu->gen_reg[i].rrx);
 	}
-	printf("FLAGS: %x\n", hp::cur_cpu()->eflags);
+	printf("FLAGS: %x\n", cpu->eflags);
 	fflush(stdout);
 	fflush(stderr);
 }
 
-void dump_instr() {
-	auto cpu = hp::cur_cpu();
+void dump_regs() { dump_regs_cpu(0); }
+
+static void dump_instr_cpu(unsigned cpu_id) {
+	auto *cpu = hp::cpu(cpu_id);
 	auto s = addr_to_sym(cpu->get_rip());
 	printf("0x%lx<< %s %s\n", cpu->get_rip(), s.bin.c_str(),
 	       s.symbol.c_str());
 	cpu->debug_disasm_instruction(cpu->get_rip());
 }
+
+void dump_instr() { dump_instr_cpu(0); }
 
 static void hp_init_cpus(unsigned int cpu_count) {
 #if BX_SUPPORT_SMP
@@ -111,12 +116,10 @@ static void hp_init_cpus(unsigned int cpu_count) {
 
 static void init_cpu(void) {
 	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
-		hp::set_current_cpu(cpu);
 		hp::cpu(cpu)->initialize();
 		hp::cpu(cpu)->reset(BX_RESET_HARDWARE);
 		hp::cpu(cpu)->sanity_checks();
 	}
-	hp::set_current_cpu(0);
 }
 
 void start_cpu(bool enumerating) {
@@ -124,7 +127,6 @@ void start_cpu(bool enumerating) {
 		return;
 
 	srand(1); /* rdrand */
-	hp::set_current_cpu(0);
 	hp::vcpu()->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
 	icount = 0;
 	pio_icount = 0;
@@ -141,7 +143,6 @@ void start_cpu(bool enumerating) {
 		hp_gdbstub_debug_loop();
 	if (hp::num_cpus() == 1) {
 		while (hp::vcpu()->fuzz_executing_input) {
-			hp::set_current_cpu(0);
 			hp::vcpu()->cpu_loop();
 		}
 	} else {
@@ -161,7 +162,6 @@ void start_cpu(bool enumerating) {
 		}
 
 		while (hp::vcpu()->fuzz_executing_input) {
-			hp::set_current_cpu(processor);
 			if (run)
 				hp::cpu(processor)->cpu_run_trace();
 			else
@@ -182,10 +182,8 @@ void start_cpu(bool enumerating) {
 			hp::cpu(processor)->icount_last_sync =
 				hp::cpu(processor)->get_icount();
 		}
-		hp::set_current_cpu(0);
 #else
 		while (hp::vcpu()->fuzz_executing_input) {
-			hp::set_current_cpu(0);
 			hp::vcpu()->cpu_loop();
 		}
 	#endif
@@ -243,10 +241,9 @@ void fuzz_emu_stop_polling() {
 	fuzz_do_not_continue = 1;
 }
 
-void fuzz_emu_stop_crash(const char *type){
+void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 	// judege whether the crash is from a hypervisor thread
-	unsigned long cr3 = hp::cur_cpu()->cr3;
-	Task* task = task_manager.get_current_task();
+	Task* task = task_manager.get_current_task(cpu);
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
 			task->pid, task->kernel_task, task->hypervisor_task, task->comm,
@@ -264,8 +261,8 @@ void fuzz_emu_stop_crash(const char *type){
 		printf("Stacktrace hash: %lx\n", hash);
 		stacktrace_hash_add(hash);
 		print_stacktrace();
-		dump_regs();
-		dump_instr();
+		dump_regs_cpu(cpu);
+		dump_instr_cpu(cpu);
 		// construct a string type-hash, hash is hexadecimal
 		std::stringstream ss;
 		ss << type << "-" << std::hex << hash;
@@ -279,7 +276,8 @@ void fuzz_hook_exception(unsigned vector, unsigned error_code) {
 	exit(1);
 }
 
-void fuzz_hook_hlt() {
+void fuzz_hook_hlt(unsigned cpu) {
+	(void)cpu;
 	// fuzz_emu_stop_crash("hlt");
 	// fuzz_emu_stop_unhealthy();
 	return;
@@ -305,12 +303,11 @@ void reset_bx_vm() {
 	if (hp::vcpu()->vmcs_map)
 		hp::vcpu()->vmcs_map->set_access_rights_format(VMCS_AR_OTHER);
 	fuzz_reset_memory();
-	hp::set_current_cpu(0);
 }
 
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
 	if (vector == 3) {
-        fuzz_emu_stop_crash("debug-interrupt");
+        fuzz_emu_stop_crash(cpu, "debug-interrupt");
 	}
 }
 
@@ -345,9 +342,9 @@ void fuzz_instr_after_execution(bxInstruction_c *i) {
 	// }
 }
 
-void fuzz_instr_before_execution(bxInstruction_c *i) {
-	handle_breakpoints(i);
-	handle_syscall_hooks(i);
+void fuzz_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
+	handle_breakpoints(cpu, i);
+	handle_syscall_hooks(cpu, i);
 	if (!fuzzing && !fuzzenum)
 		return;
 
@@ -565,7 +562,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 			}
 				icp_init_regs_cpu(path.c_str(), cpu);
 			}
-			hp::set_current_cpu(0);
 		}
 
 		/* The current VMCS address is part of the CPU-state, but it is not part

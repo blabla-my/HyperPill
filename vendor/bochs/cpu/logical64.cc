@@ -253,7 +253,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EqIdM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR_64(i);
 
   op1_64 = read_RMW_linear_qword(i->seg(), get_laddr64(i->seg(), eaddr));
-  fuzz_hook_alignment(op1_64, op2_64, 8);
+  fuzz_hook_alignment(BX_CPU_ID, op1_64, op2_64, 8);
   op1_64 &= op2_64;
   write_RMW_linear_qword(op1_64);
 
@@ -267,7 +267,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EqIdR(bxInstruction_c *i)
   Bit64u op1_64, op2_64 = (Bit32s) i->Id();
 
   op1_64 = BX_READ_64BIT_REG(i->dst());
-  fuzz_hook_alignment(op1_64, op2_64, 8);
+  fuzz_hook_alignment(BX_CPU_ID, op1_64, op2_64, 8);
   op1_64 &= op2_64;
   BX_WRITE_64BIT_REG(i->dst(), op1_64);
 
@@ -310,7 +310,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EqIdR(bxInstruction_c *i)
 
   op1_64 = BX_READ_64BIT_REG(i->dst());
   op2_64 = (Bit32s) i->Id();
-  fuzz_hook_alignment(op1_64, op2_64, 8);
+  fuzz_hook_alignment(BX_CPU_ID, op1_64, op2_64, 8);
   op1_64 &= op2_64;
 
   SET_FLAGS_OSZAPC_LOGIC_64(op1_64);
@@ -326,7 +326,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EqIdM(bxInstruction_c *i)
 
   op1_64 = read_linear_qword(i->seg(), get_laddr64(i->seg(), eaddr));
   op2_64 = (Bit32s) i->Id();
-  fuzz_hook_alignment(op1_64, op2_64, 8);
+  fuzz_hook_alignment(BX_CPU_ID, op1_64, op2_64, 8);
   op1_64 &= op2_64;
 
   SET_FLAGS_OSZAPC_LOGIC_64(op1_64);

@@ -248,7 +248,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EdIdM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR(i);
 
   op1_32 = read_RMW_virtual_dword(i->seg(), eaddr);
-  fuzz_hook_alignment(op1_32, i->Id(), 4);
+  fuzz_hook_alignment(BX_CPU_ID, op1_32, i->Id(), 4);
   op1_32 &= i->Id();
   write_RMW_linear_dword(op1_32);
 
@@ -260,7 +260,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EdIdM(bxInstruction_c *i)
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::AND_EdIdR(bxInstruction_c *i)
 {
   Bit32u op1_32 = BX_READ_32BIT_REG(i->dst());
-  fuzz_hook_alignment(op1_32, i->Id(), 4);
+  fuzz_hook_alignment(BX_CPU_ID, op1_32, i->Id(), 4);
   op1_32 &= i->Id();
   BX_WRITE_32BIT_REGZ(i->dst(), op1_32);
 
@@ -301,7 +301,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EdIdR(bxInstruction_c *i)
 {
   Bit32u op1_32 = BX_READ_32BIT_REG(i->dst());
   op1_32 &= i->Id();
-  fuzz_hook_alignment(op1_32, i->Id(), 4);
+  fuzz_hook_alignment(BX_CPU_ID, op1_32, i->Id(), 4);
   SET_FLAGS_OSZAPC_LOGIC_32(op1_32);
 
   BX_NEXT_INSTR(i);
@@ -312,7 +312,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::TEST_EdIdM(bxInstruction_c *i)
   bx_address eaddr = BX_CPU_RESOLVE_ADDR(i);
 
   Bit32u op1_32 = read_virtual_dword(i->seg(), eaddr);
-  fuzz_hook_alignment(op1_32, i->Id(), 4);
+  fuzz_hook_alignment(BX_CPU_ID, op1_32, i->Id(), 4);
   op1_32 &= i->Id();
   SET_FLAGS_OSZAPC_LOGIC_32(op1_32);
 

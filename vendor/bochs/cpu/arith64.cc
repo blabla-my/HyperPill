@@ -260,7 +260,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EqGqM(bxInstruction_c *i)
   op1_64 = read_linear_qword(i->seg(), get_laddr64(i->seg(), eaddr));
   op2_64 = BX_READ_64BIT_REG(i->src());
   diff_64 = op1_64 - op2_64;
-  fuzz_hook_cmp(op1_64, op2_64, sizeof(op1_64));
+  fuzz_hook_cmp(BX_CPU_ID, op1_64, op2_64, sizeof(op1_64));
 
   SET_FLAGS_OSZAPC_SUB_64(op1_64, op2_64, diff_64);
 
@@ -274,7 +274,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_GqEqR(bxInstruction_c *i)
   op1_64 = BX_READ_64BIT_REG(i->dst());
   op2_64 = BX_READ_64BIT_REG(i->src());
   diff_64 = op1_64 - op2_64;
-  fuzz_hook_cmp(op1_64, op2_64, sizeof(op1_64));
+  fuzz_hook_cmp(BX_CPU_ID, op1_64, op2_64, sizeof(op1_64));
 
   SET_FLAGS_OSZAPC_SUB_64(op1_64, op2_64, diff_64);
 
@@ -290,7 +290,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_GqEqM(bxInstruction_c *i)
   op1_64 = BX_READ_64BIT_REG(i->dst());
   op2_64 = read_linear_qword(i->seg(), get_laddr64(i->seg(), eaddr));
   diff_64 = op1_64 - op2_64;
-  fuzz_hook_cmp(op1_64, op2_64, sizeof(op1_64));
+  fuzz_hook_cmp(BX_CPU_ID, op1_64, op2_64, sizeof(op1_64));
 
   SET_FLAGS_OSZAPC_SUB_64(op1_64, op2_64, diff_64);
 
@@ -462,8 +462,23 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::SUB_EqIdR(bxInstruction_c *i)
   BX_NEXT_INSTR(i);
 }
 
-__attribute__((weak)) void fuzz_hook_cmp(uint64_t op1, uint64_t op2, size_t size, bool constant){}
-__attribute__((weak)) void fuzz_hook_alignment(uint64_t op1, uint64_t op2, size_t size){}
+__attribute__((weak)) void fuzz_hook_cmp(unsigned cpu, uint64_t op1, uint64_t op2,
+                                         size_t size, bool constant)
+{
+  (void) cpu;
+  (void) op1;
+  (void) op2;
+  (void) size;
+  (void) constant;
+}
+__attribute__((weak)) void fuzz_hook_alignment(unsigned cpu, uint64_t op1, uint64_t op2,
+                                               size_t size)
+{
+  (void) cpu;
+  (void) op1;
+  (void) op2;
+  (void) size;
+}
 
 void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EqIdM(bxInstruction_c *i)
 {
@@ -474,7 +489,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EqIdM(bxInstruction_c *i)
   op1_64 = read_linear_qword(i->seg(), get_laddr64(i->seg(), eaddr));
   op2_64 = (Bit32s) i->Id();
   diff_64 = op1_64 - op2_64;
-  fuzz_hook_cmp(op1_64, op2_64, sizeof(op1_64), true);
+  fuzz_hook_cmp(BX_CPU_ID, op1_64, op2_64, sizeof(op1_64), true);
 
   SET_FLAGS_OSZAPC_SUB_64(op1_64, op2_64, diff_64);
 
@@ -488,7 +503,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CMP_EqIdR(bxInstruction_c *i)
   op1_64 = BX_READ_64BIT_REG(i->dst());
   op2_64 = (Bit32s) i->Id();
   diff_64 = op1_64 - op2_64;
-  fuzz_hook_cmp(op1_64, op2_64, sizeof(op1_64), true);
+  fuzz_hook_cmp(BX_CPU_ID, op1_64, op2_64, sizeof(op1_64), true);
 
   SET_FLAGS_OSZAPC_SUB_64(op1_64, op2_64, diff_64);
 

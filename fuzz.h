@@ -135,15 +135,15 @@ void icp_set_vmcs(uint64_t vmcs);
 void bx_init_pc_system();
 
 void clear_seen_dma();
-void fuzz_dma_read_cb(bx_phy_address addr, unsigned len, void* data);
+void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void* data);
 void fuzz_inject_mmio_write(uint64_t addr, uint64_t val);
 void fuzz_inject_pio_read(uint64_t addr, uint64_t val);
 void fuzz_inject_vmcall(uint64_t rcx, uint64_t r8, const void* xmm0, const void* xmm3 );
 
-void fuzz_hook_memory_access(bx_address phy, unsigned len, 
+void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
                              unsigned memtype, unsigned rw, void* data);
 void fuzz_hook_exception(unsigned vector, unsigned error_code);
-void fuzz_hook_hlt();
+void fuzz_hook_hlt(unsigned cpu);
 void fuzz_hook_cr3_change(bx_address old, bx_address val);
 void fuzz_reset_exception_counter();
 void clear_l2_bitmaps();
@@ -157,32 +157,32 @@ void fuzz_reset_memory();
 void fuzz_watch_memory_inc();
 void fuzz_clear_dirty();
 
-void fuzz_instr_cnear_branch_taken(bx_address branch_rip,
+void fuzz_instr_cnear_branch_taken(unsigned cpu, bx_address branch_rip,
                                  bx_address new_rip);
-void fuzz_instr_cnear_branch_not_taken(bx_address branch_rip);
-void fuzz_instr_ucnear_branch(unsigned what, bx_address branch_rip,
+void fuzz_instr_cnear_branch_not_taken(unsigned cpu, bx_address branch_rip);
+void fuzz_instr_ucnear_branch(unsigned cpu, unsigned what, bx_address branch_rip,
                             bx_address new_rip);
-void fuzz_instr_far_branch(unsigned what, Bit16u prev_cs,
+void fuzz_instr_far_branch(unsigned cpu, unsigned what, Bit16u prev_cs,
                          bx_address prev_rip, Bit16u new_cs,
                          bx_address new_rip);
-void fuzz_instr_before_execution(bxInstruction_c *i);
+void fuzz_instr_before_execution(unsigned cpu, bxInstruction_c *i);
 void fuzz_instr_after_execution(bxInstruction_c *i);
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector);
-void add_edge_not_taken(bx_address prev_rip);
-void add_edge(bx_address prev_rip, bx_address new_rip);
+void add_edge_not_taken(unsigned cpu, bx_address prev_rip);
+void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip);
 void print_stacktrace();
 uint64_t stacktrace_hash_get();
 bool stacktrace_hash_seen(uint64_t hash);
 void stacktrace_hash_add(uint64_t hash);
-bool ignore_pc(bx_address pc);
-bool task_filter(bool user_only=false);
+bool ignore_pc(unsigned cpu, bx_address pc);
+bool task_filter(unsigned cpu, bool user_only=false);
 bool found_pc(uint64_t pc);
 void add_pc_range(size_t base, size_t len);
 void add_opt_infer_range(size_t base, size_t len);
 
 	void fuzz_emu_stop_normal();
 	void fuzz_emu_stop_unhealthy();
-	void fuzz_emu_stop_crash(const char *type);
+	void fuzz_emu_stop_crash(unsigned cpu, const char *type);
 	void fuzz_emu_stop_polling();
 	void pause_cpu();
 
@@ -288,9 +288,9 @@ const char* get_bin_full_path(std::string bin);
 void load_link_map(char* map_path, char* obj_regex, size_t base);
 
 // breakpoints.cc
-void handle_breakpoints(bxInstruction_c *i);
-void handle_breakpoints_func_call(bx_address func, bx_address rip);
-void handle_syscall_hooks(bxInstruction_c *i);
+void handle_breakpoints(unsigned cpu, bxInstruction_c *i);
+void handle_breakpoints_func_call(unsigned cpu, bx_address func, bx_address rip);
+void handle_syscall_hooks(unsigned cpu, bxInstruction_c *i);
 void apply_breakpoints_linux();
 
 //stacktrace
@@ -309,9 +309,20 @@ void dump_instr();
 void hp_gdbstub_debug_loop();
 int hp_gdbstub_mem_check(unsigned cpu, uint64_t lin, unsigned len, unsigned rw);
 
-bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw);
-void bx_kernel_read(bx_address kaddr, void* buf, size_t sz);
-void bx_kernel_write(bx_address kaddr, void* buf, size_t sz);
+bx_phy_address bx_kernel_translate_linear(unsigned cpu, bx_address laddr, int rw);
+inline bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw) {
+	return bx_kernel_translate_linear(0, laddr, rw);
+}
+
+void bx_kernel_read(unsigned cpu, bx_address kaddr, void* buf, size_t sz);
+inline void bx_kernel_read(bx_address kaddr, void* buf, size_t sz) {
+	bx_kernel_read(0, kaddr, buf, sz);
+}
+
+void bx_kernel_write(unsigned cpu, bx_address kaddr, void* buf, size_t sz);
+inline void bx_kernel_write(bx_address kaddr, void* buf, size_t sz) {
+	bx_kernel_write(0, kaddr, buf, sz);
+}
 
 #define bx_kernel_deref_ptr(kaddr,obj) \
     do { \
