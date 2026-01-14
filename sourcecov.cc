@@ -384,14 +384,16 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
         return;
     }
 
+    const unsigned cpu = bx_kernel_cpu();
+
     // iterate the gcov_info_head to get the gcov_info_addr
     bx_address cur_info_ptr;
-    bx_kernel_deref_ptr(gcov_info_head_addr, cur_info_ptr);
+    bx_kernel_deref_ptr(cpu, gcov_info_head_addr, cur_info_ptr);
     struct gcov_info cur_info;
     char filename[0x40];
     while (cur_info_ptr) {
-        bx_kernel_deref_ptr(cur_info_ptr, cur_info);
-        bx_kernel_read((bx_address)cur_info.filename, filename, sizeof(filename));
+        bx_kernel_deref_ptr(cpu, cur_info_ptr, cur_info);
+        bx_kernel_read(cpu, (bx_address)cur_info.filename, filename, sizeof(filename));
         if (strstr(filename, source_file.c_str())) {
             ginfo = cur_info;
             assert(strlen(filename) < sizeof(ginfo_filename));
@@ -420,14 +422,14 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
     add_addr_map(ginfo.functions, functions);
     for (int i = 0; i < ginfo.n_functions; i++) {
         bx_address bx_fn_info_p;
-        bx_kernel_deref_ptr(functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
+        bx_kernel_deref_ptr(cpu, functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
         struct gcov_fn_info* fn_info_p = (struct gcov_fn_info*)malloc(fn_info_size);
         if (!fn_info_p) {
             perror("malloc gcov_fn_info failed");
             exit(1);
         }
         add_addr_map(fn_info_p, bx_fn_info_p);
-        bx_kernel_read(bx_fn_info_p, fn_info_p, fn_info_size);
+        bx_kernel_read(cpu, bx_fn_info_p, fn_info_p, fn_info_size);
         add_persistent_kernel_memory_range(bx_fn_info_p, fn_info_size);
         ginfo.functions[i] = fn_info_p;
         for (int j = 0; j < GCOV_COUNTERS; j++) {
@@ -442,7 +444,7 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
             }
             add_addr_map(fn_info_p->ctrs[j].values, values);
             assert(values != 0);
-            bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+            bx_kernel_read(cpu, values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
             add_persistent_kernel_memory_range(values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
     }
@@ -460,14 +462,15 @@ KernelSourceCov::KernelSourceCov(const std::string& module_name, const std::stri
 }
 
 void KernelSourceCov::fetch_latest_gcov_info() const {
+    const unsigned cpu = bx_kernel_cpu();
     bx_address functions = get_bx_addr(ginfo.functions);
     size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * GCOV_COUNTERS);
     for (int i = 0; i < ginfo.n_functions; i++) {
         bx_address bx_fn_info_p;
         struct gcov_fn_info* fn_info_p = ginfo.functions[i];
-        bx_kernel_deref_ptr(functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
+        bx_kernel_deref_ptr(cpu, functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
         // only copy header first
-        bx_kernel_read(bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
+        bx_kernel_read(cpu, bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
         // copy ctr values
         for (int j = 0; j < GCOV_COUNTERS; j++) {
             if (counter_active(&ginfo, j) == 0) {
@@ -475,20 +478,21 @@ void KernelSourceCov::fetch_latest_gcov_info() const {
             }
             bx_address values = get_bx_addr(fn_info_p->ctrs[j].values);
             assert(values != 0);
-            bx_kernel_read(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+            bx_kernel_read(cpu, values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
     }
 }
 
 void KernelSourceCov::write_back_gcov_info() const {
+    const unsigned cpu = bx_kernel_cpu();
     bx_address functions = get_bx_addr(ginfo.functions);
     size_t fn_info_size = sizeof(struct gcov_fn_info) + (sizeof(struct gcov_ctr_info) * GCOV_COUNTERS);
     for (int i = 0; i < ginfo.n_functions; i++) {
         bx_address bx_fn_info_p;
         struct gcov_fn_info* fn_info_p = ginfo.functions[i];
-        bx_kernel_deref_ptr(functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
+        bx_kernel_deref_ptr(cpu, functions + i * sizeof(struct gcov_fn_info*), bx_fn_info_p); 
         // only copy header first
-        bx_kernel_write(bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
+        bx_kernel_write(0, bx_fn_info_p, fn_info_p, sizeof(struct gcov_fn_info));
         // copy ctr values
         for (int j = 0; j < GCOV_COUNTERS; j++) {
             if (counter_active(&ginfo, j) == 0) {
@@ -496,7 +500,7 @@ void KernelSourceCov::write_back_gcov_info() const {
             }
             bx_address values = get_bx_addr(fn_info_p->ctrs[j].values);
             assert(values != 0);
-            bx_kernel_write(values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
+            bx_kernel_write(0, values, fn_info_p->ctrs[j].values, sizeof(gcov_type) * fn_info_p->ctrs[j].num);
         }
     }
 }
@@ -514,13 +518,14 @@ void KernelSourceCov::write_source_cov() const {
 }
 
 void iterate_gcov_info_chain(uint64_t gcov_info_head_addr) {
+    const unsigned cpu = bx_kernel_cpu();
     bx_address cur_info_ptr;
-    bx_kernel_deref_ptr(gcov_info_head_addr, cur_info_ptr);
+    bx_kernel_deref_ptr(cpu, gcov_info_head_addr, cur_info_ptr);
     struct gcov_info cur_info;
     char filename[0x40];
     while (cur_info_ptr) {
-        bx_kernel_deref_ptr(cur_info_ptr, cur_info);
-        bx_kernel_read((bx_address)cur_info.filename, filename, sizeof(filename));
+        bx_kernel_deref_ptr(cpu, cur_info_ptr, cur_info);
+        bx_kernel_read(cpu, (bx_address)cur_info.filename, filename, sizeof(filename));
         printf("gcov_info: version: %u, next: %p\n, filename: %s, n_functions: %x\n",
                cur_info.version, cur_info.next, filename, cur_info.n_functions);
         cur_info_ptr = (bx_address)cur_info.next;

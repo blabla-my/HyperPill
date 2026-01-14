@@ -16,7 +16,6 @@
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include "memory/memory-bochs.h"
-#include "hp_cpu.h"
 
 #define PG_PRESENT_BIT  0
 #define PG_RW_BIT       1
@@ -317,18 +316,12 @@ inline bx_phy_address bx_kernel_translate_linear(bx_address laddr, int rw) {
 }
 
 void bx_kernel_read(unsigned cpu, bx_address kaddr, void* buf, size_t sz);
-inline void bx_kernel_read(bx_address kaddr, void* buf, size_t sz) {
-	bx_kernel_read(bx_kernel_cpu(), kaddr, buf, sz);
-}
 
 void bx_kernel_write(unsigned cpu, bx_address kaddr, void* buf, size_t sz);
-inline void bx_kernel_write(bx_address kaddr, void* buf, size_t sz) {
-	bx_kernel_write(bx_kernel_cpu(), kaddr, buf, sz);
-}
 
-#define bx_kernel_deref_ptr(kaddr,obj) \
+#define bx_kernel_deref_ptr(cpu,kaddr,obj) \
     do { \
-        bx_kernel_read(kaddr, &obj, sizeof(obj)); \
+        bx_kernel_read(cpu, kaddr, &obj, sizeof(obj)); \
     } while(0)
 
 #endif

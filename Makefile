@@ -47,7 +47,6 @@ SANITIZE_FLAGS =
 # --- Source Files and Libraries ---
 # List of object files to be created
 OBJS       = main.o \
-             hp_cpu.o \
              regs.o \
              breakpoints.o \
              db.o \

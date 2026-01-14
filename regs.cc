@@ -15,7 +15,6 @@
 #include "cpu/cpu.h"
 #include "cpu/vmx.h"
 #include "pc_system.h"
-#include "hp_cpu.h"
 
 
 //std::cout << "  submatch " << i << ": " << piece << '\n';
@@ -592,7 +591,7 @@ void icp_init_regs_cpu(const char* filename, unsigned cpu) {
 #if BX_SUPPORT_SMP
     // Bochs resets application processors (APs) into WAIT_FOR_SIPI. When we
     // restore a running snapshot, ensure we don't keep CPUs parked there.
-    if (hp::num_cpus() > 1 &&
+    if (bx_cpu_count > 1 &&
         BX_CPU(cpu)->activity_state == BX_CPU_C::BX_ACTIVITY_STATE_WAIT_FOR_SIPI) {
         BX_CPU(cpu)->activity_state = BX_CPU_C::BX_ACTIVITY_STATE_ACTIVE;
         BX_CPU(cpu)->unmask_event(BX_EVENT_INIT | BX_EVENT_SMI | BX_EVENT_NMI);

@@ -1,5 +1,6 @@
 #include "bochs.h"
 #include "config.h"
+#include "cpu/cpu.h"
 #include "fuzz.h"
 #include "pc_system.h"
 #include "sourcecov.h"
@@ -40,7 +41,6 @@ BOCHSAPI bx_pc_system_c bx_pc_system;
 #if BX_SUPPORT_SMP
 BOCHSAPI BX_CPU_C **bx_cpu_array = nullptr;
 BOCHSAPI Bit8u bx_cpu_count = 0;
-static std::vector<std::unique_ptr<BX_CPU_C>> hp_cpu_storage;
 static std::vector<BX_CPU_C> shadow_bx_cpus;
 #else
 BOCHSAPI BX_CPU_C bx_cpu = BX_CPU_C(0);
@@ -102,11 +102,9 @@ static void hp_init_cpus(unsigned int cpu_count) {
 		cpu_count = 1;
 
 	bx_cpu_count = static_cast<Bit8u>(cpu_count);
-	hp_cpu_storage.reserve(cpu_count);
-	bx_cpu_array = new BX_CPU_C *[cpu_count];
-	for (unsigned int cpu = 0; cpu < cpu_count; cpu++) {
-		hp_cpu_storage.emplace_back(std::make_unique<BX_CPU_C>(cpu));
-		bx_cpu_array[cpu] = hp_cpu_storage[cpu].get();
+	bx_cpu_array = new BX_CPU_C*[cpu_count];
+	for (unsigned int i = 0; i < bx_cpu_count; i++) {
+		bx_cpu_array[i] = new BX_CPU_C(i);
 	}
 	shadow_bx_cpus.resize(cpu_count);
 #else
@@ -115,7 +113,7 @@ static void hp_init_cpus(unsigned int cpu_count) {
 }
 
 static void init_cpu(void) {
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 		BX_CPU(cpu)->initialize();
 		BX_CPU(cpu)->reset(BX_RESET_HARDWARE);
 		BX_CPU(cpu)->sanity_checks();
@@ -136,12 +134,12 @@ void start_cpu(bool enumerating) {
 	}
 	reset_op_cov();
 
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 		BX_CPU(cpu)->fuzz_executing_input = true;
 	}
 	if (BX_CPU(0)->fuzzdebug_gdb && !enumerating)
 		hp_gdbstub_debug_loop();
-	if (hp::num_cpus() == 1) {
+	if (bx_cpu_count == 1) {
 		while (BX_CPU(0)->fuzz_executing_input) {
 			BX_CPU(0)->cpu_loop();
 		}
@@ -152,7 +150,7 @@ void start_cpu(bool enumerating) {
 		bool run = true;
 		const Bit32u quantum = SIM->get_param_num(BXPN_SMP_QUANTUM)->get();
 
-		for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+		for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 			BX_CPU(cpu)->icount_last_sync = BX_CPU(cpu)->get_icount();
 		}
 
@@ -173,10 +171,10 @@ void start_cpu(bool enumerating) {
 				n = quantum;
 			executed += n;
 
-			if (++processor == hp::num_cpus()) {
+			if (++processor == bx_cpu_count) {
 				processor = 0;
-				BX_TICKN(executed / hp::num_cpus());
-				executed %= hp::num_cpus();
+				BX_TICKN(executed / bx_cpu_count);
+				executed %= bx_cpu_count;
 			}
 
 			BX_CPU(processor)->icount_last_sync =
@@ -217,7 +215,7 @@ void start_cpu(bool enumerating) {
  */
 
 static void fuzz_emu_stop() {
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 		BX_CPU(cpu)->fuzz_executing_input = false;
 	}
 }
@@ -291,7 +289,7 @@ unsigned long int get_pio_icount() {
 
 void reset_bx_vm() {
 #if BX_SUPPORT_SMP
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 		*BX_CPU(cpu) = shadow_bx_cpus[cpu];
 	}
 #else
@@ -537,7 +535,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	init_cpu();
 	bx_init_pc_system();
 
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 		BX_CPU(cpu)->fuzzdebug_gdb = getenv("GDB");
 		BX_CPU(cpu)->fuzztrace = (getenv("FUZZ_DEBUG_DISASM") != 0);
 	}
@@ -551,7 +549,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	printf(".loading register snapshot from %s\n", regs_path);
 		{
 			std::error_code ec;
-			for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+			for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 				std::string path;
 			if (std::filesystem::exists(regs_path, ec)) {
 				if (cpu != 0)
@@ -645,7 +643,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		}
 	}
 
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++)
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++)
 		BX_CPU(cpu)->TLB_flush();
 	fuzz_walk_ept();
 	vmcs_fixup();
@@ -682,7 +680,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	 * state after each fuzzer input
 	 */
 #if BX_SUPPORT_SMP
-	for (unsigned int cpu = 0; cpu < hp::num_cpus(); cpu++) {
+	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
 		shadow_bx_cpus[cpu] = *BX_CPU(cpu);
 	}
 #else
