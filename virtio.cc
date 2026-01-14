@@ -1450,6 +1450,7 @@ static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void
 	size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
 	bool is_out = desc_with_info->desc_info.is_out;
 	bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0);
+	possible_switch = false;
 			
 	if (offset > 0x100) 
 		return 0;
@@ -1471,6 +1472,10 @@ static int ingest_vring_buffer(bx_address addr, bx_address gpa, size_t len, void
 			}
 		} else if (queue->type == VQueue::QUEUE_CTRL) {
 			// lun should be [8, 16) or [4, 12)
+			if (offset == 8)
+				buf[0] = 1;
+			else if (offset == 4)
+				buf[0] = 1;	
 		}
 	}
 			
