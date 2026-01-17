@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <stddef.h>
 #include <linux/virtio_config.h>
@@ -83,6 +84,7 @@ struct vring_desc_with_info;
 struct ConfigSpace;
 struct VQueue;
 struct vring_desc_with_info;
+class SyntaxModel;
 /* desc chaining FSM */
 #define DESC_CHAIN_MAX_LEN 8
 class DescChainFSM {
@@ -373,6 +375,10 @@ struct VirtioDev {
     bool is_scsi;
     bool packed;
     bool indirect_desc;
+
+	SyntaxModel* get_syntax_model();
+	void reset_syntax_model();
+
     void enumerate_queues_from_common_cfg();
     bool inited();
     void set_status(uint8_t status);
@@ -384,6 +390,10 @@ struct VirtioDev {
     bool set_packed_queue(bool enable);
     bool disable_packed_queue();
     bool renegotiate_features(uint64_t new_guest_features);
+
+private:
+	std::unique_ptr<SyntaxModel> syntax_model_;
+	bool syntax_model_packed_ = false;
     
 };
 

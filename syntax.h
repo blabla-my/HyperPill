@@ -20,7 +20,7 @@ public:
 	uint16_t submit_request();
 	uint16_t submit_request(uint16_t queue_sel);
 
-	static std::unique_ptr<SyntaxModel> Create(VirtioDev& vdev);
+	static SyntaxModel* Create(VirtioDev& vdev);
 
 protected:
 	virtual uint16_t allocate_descriptors(DescChainFSM& fsm) = 0;
