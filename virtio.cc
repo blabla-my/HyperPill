@@ -455,9 +455,6 @@ void VQueue::complete_request(uint16_t head) {
 }
 
 bool VQueue::all_request_completed() {
-	if (request_cnt < MAX_REQUEST_NUMBER) {
-		return false;
-	}
 	for (size_t i = 0; i < request_cnt; i++) {
 		auto req_status = &request_status[i];
 		if (req_status->status == RequestStatus::SUBMITTED) {

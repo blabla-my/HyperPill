@@ -20,6 +20,8 @@ public:
 	uint16_t submit_request();
 	uint16_t submit_request(uint16_t queue_sel);
 
+	bool completed();
+
 	static SyntaxModel* Create(VirtioDev& vdev);
 
 protected:

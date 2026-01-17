@@ -17,6 +17,16 @@ SyntaxModel* SyntaxModel::Create(VirtioDev& vdev) {
 	return vdev.get_syntax_model();
 }
 
+bool SyntaxModel::completed() {
+	for (size_t i = 0; i < vdev_.queue_num && i < VIRTIO_QUEUE_MAX; i++) {
+		auto* q = vdev_.queues[i];
+		if (!q || !q->all_request_completed()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 uint16_t SyntaxModel::queue_notify_off(uint16_t queue_sel) {
 	auto it = notify_off_cache_.find(queue_sel);
 	if (it != notify_off_cache_.end()) {

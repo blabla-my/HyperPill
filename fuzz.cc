@@ -1139,13 +1139,13 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	static void *fuzz_legacy, *fuzz_hypercalls;
 	static void *virtio_core;
 	static int inited;
-		if (!inited) {
-			inited = 1;
-			fuzz_legacy = getenv("FUZZ_LEGACY");
-			fuzz_hypercalls = getenv("FUZZ_HYPERCALLS");
-			log_ops = getenv("LOG_OPS") || BX_CPU(0)->fuzztrace;
-			virtio_core = getenv("VIRTIO_CORE");
-		}
+	if (!inited) {
+		inited = 1;
+		fuzz_legacy = getenv("FUZZ_LEGACY");
+		fuzz_hypercalls = getenv("FUZZ_HYPERCALLS");
+		log_ops = getenv("LOG_OPS") || BX_CPU(0)->fuzztrace;
+		virtio_core = getenv("VIRTIO_CORE");
+	}
 
 	if (virtio_core) {
 		reset_input_output();
@@ -1196,6 +1196,16 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		// 	   dma_len) >= 8)
 		// 	break;
 	} while (ic_advance_until_token(SEPARATOR, 4));
+
+	if (virtio_core && !fuzz_unhealthy_input) {
+		VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+		if (vdev) {
+			auto* model = vdev->get_syntax_model();
+			while (!fuzz_unhealthy_input && !model->completed()) {
+				start_cpu();
+			}
+		}
+	}
 }
 
 void add_pio_region(uint16_t addr, uint16_t size) {

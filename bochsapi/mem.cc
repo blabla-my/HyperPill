@@ -120,15 +120,11 @@ void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
     
         prioraccess = -1;
     } 
-    if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_page_table.contains(phy>>12) && data && len >= sizeof(uint16_t)) {
+    if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_page_table.contains(phy>>12)) {
         auto gpa = lookup_gpa_by_hpa(phy);
         auto vring = get_vqueue_manager().get_belonging_vring(gpa);
-        if (vring && vring->queue->vdev->to_fuzz && vring->type == VRing::VRING_USED) {
-            if (vring->filed_type(gpa) == VRing::FILED_TYPE::VRING_ELEM) {
-                // get the index
-                uint16_t head = *(uint16_t*)data;
-                vring->queue->complete_request(head);
-            }
+        if (vring && vring->queue->vdev->to_fuzz) {
+            vring->queue->complete_request(0);
         }
     }
 }
