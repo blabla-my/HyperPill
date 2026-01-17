@@ -141,7 +141,7 @@ void apply_breakpoints_linux() {
     //         });
 	    add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](unsigned cpu, bxInstruction_c *i) {
 	            printf("Skipping __asan::CheckUnwind");
-	            print_stacktrace();
+	            print_stacktrace(cpu);
 	            i->execute1 = &BX_CPU_C::RETnear64_Iw;
 	            i->modRMForm.Iw[0] = 0;
 	            i->modRMForm.Iw[1] = 0;
@@ -151,7 +151,7 @@ void apply_breakpoints_linux() {
             (void)cpu;
             // every error through asan should reach this
             printf("ASAN error report\n");
-            fuzz_stacktrace();
+            fuzz_stacktrace(cpu);
             fuzz_emu_stop_crash(cpu, "asan-scoped-error");
             }, false);
     add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {

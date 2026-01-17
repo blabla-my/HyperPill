@@ -169,8 +169,8 @@ void fuzz_instr_after_execution(bxInstruction_c *i);
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector);
 void add_edge_not_taken(unsigned cpu, bx_address prev_rip);
 void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip);
-void print_stacktrace();
-uint64_t stacktrace_hash_get();
+void print_stacktrace(unsigned cpu);
+uint64_t stacktrace_hash_get(unsigned cpu);
 bool stacktrace_hash_seen(uint64_t hash);
 void stacktrace_hash_add(uint64_t hash);
 bool ignore_pc(unsigned cpu, bx_address pc);
@@ -293,8 +293,8 @@ void handle_syscall_hooks(unsigned cpu, bxInstruction_c *i);
 void apply_breakpoints_linux();
 
 //stacktrace
-void fuzz_stacktrace();
-std::string stacktrace_to_string();
+void fuzz_stacktrace(unsigned cpu);
+std::string stacktrace_to_string(unsigned cpu);
 
 //signal
 void signal_handler(int signum);

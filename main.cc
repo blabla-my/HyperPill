@@ -254,11 +254,11 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 	} else {
 		printf(".crash\n");
 	}
-	auto hash = stacktrace_hash_get();
+	auto hash = stacktrace_hash_get(cpu);
 	if (not stacktrace_hash_seen(hash)) {
 		printf("Stacktrace hash: %lx\n", hash);
 		stacktrace_hash_add(hash);
-		print_stacktrace();
+		print_stacktrace(cpu);
 		dump_regs_cpu(cpu);
 		dump_instr_cpu(cpu);
 		// construct a string type-hash, hash is hexadecimal

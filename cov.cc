@@ -31,7 +31,7 @@ struct calltrace_t {
     bx_address callee;
     bx_address CR3;
 };
-std::vector<calltrace_t> our_stacktrace;
+std::vector<std::vector<calltrace_t>> our_stacktrace;
 tsl::robin_set<uint64_t> seen_stacktraces;
 
 #define EDGE_COUNTER_SIZE (32 << 12)
@@ -63,6 +63,12 @@ void update_virtio_req_counter(size_t queue_id, size_t desc_idx, bool is_out) {
 }
 
 uint32_t status = 0;
+
+static std::vector<calltrace_t>& stacktrace_for_cpu(unsigned cpu) {
+    if (cpu >= our_stacktrace.size())
+        our_stacktrace.resize(cpu + 1);
+    return our_stacktrace[cpu];
+}
 
 void add_pc_range(size_t base, size_t len) {
     printf("Will treat: %lx +%lx as coverage\n", base, len);
@@ -108,12 +114,13 @@ bool task_filter(unsigned cpu, bool user_only) {
 
 static size_t last_new = 0;
 
-void print_stacktrace(){
+void print_stacktrace(unsigned cpu){
+    auto &trace = stacktrace_for_cpu(cpu);
     printf("#stacktrace\n");
-    if(our_stacktrace.empty())
+    if(trace.empty())
         return;
     tsl::robin_set<bx_address> seen_cr3;
-    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
+    for (auto r = trace.rbegin(); r != trace.rend() ; ++r )
     {
         auto CR3 = r->CR3;
         auto task = task_manager.get_task_by_cr3(CR3);
@@ -146,9 +153,10 @@ void print_stacktrace(){
     fflush(stderr);
 }
 
-std::string stacktrace_to_string(){
+std::string stacktrace_to_string(unsigned cpu){
+    auto &trace = stacktrace_for_cpu(cpu);
     std::stringstream ss;
-    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() ; ++r )
+    for (auto r = trace.rbegin(); r != trace.rend() ; ++r )
     {
         auto CR3 = r->CR3;
         auto pid = task_manager.get_pid(CR3);
@@ -178,10 +186,11 @@ uint64_t edge_hash(uint64_t a, uint64_t b){
     return hash;
 }
 
-uint64_t stacktrace_hash_get() {
+uint64_t stacktrace_hash_get(unsigned cpu) {
+    auto &trace = stacktrace_for_cpu(cpu);
     uint64_t hash = 0;
     int cnt = 0;
-    for (auto r = our_stacktrace.rbegin(); r != our_stacktrace.rend() && cnt<15 ; ++r,++cnt )
+    for (auto r = trace.rbegin(); r != trace.rend() && cnt<15 ; ++r,++cnt )
     {
         hash ^= r->callee;
         hash = pivot_hash(hash);
@@ -224,7 +233,7 @@ void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip) {
         }
         if(last_new > 3000000 && master_fuzzer ){
             printf("No new edges for over %lu..\n", last_new);
-            fuzz_stacktrace();
+            fuzz_stacktrace(cpu);
             fuzz_emu_stop_unhealthy();
         }
     }
@@ -264,14 +273,14 @@ uint32_t get_sysret_status() { return status; }
 void reset_sysret_status() { status = 0; }
 
 
-void fuzz_stacktrace(){
+void fuzz_stacktrace(unsigned cpu){
     /* if(master_fuzzer) */
     if(fuzzing)
         ic_dump();
     static void *log_crashes = getenv("LOG_CRASHES");
     if(!log_crashes)
         return;
-    print_stacktrace();
+    print_stacktrace(cpu);
 
 }
 
@@ -307,14 +316,15 @@ void print_page_fault_pt_regs(){
 
 void fuzz_instr_ucnear_branch(unsigned cpu, unsigned what, bx_address branch_rip,
                               bx_address new_rip) {
+    auto &trace = stacktrace_for_cpu(cpu);
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
     if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
-        our_stacktrace.push_back({branch_rip, new_rip, BX_CPU(cpu)->cr3});
+        trace.push_back({branch_rip, new_rip, BX_CPU(cpu)->cr3});
         /* fuzz_stacktrace(); */
-    } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
-        calltrace_t last_call = our_stacktrace.back();
-        our_stacktrace.pop_back();
+    } else if (what == BX_INSTR_IS_RET && !trace.empty()) {
+        calltrace_t last_call = trace.back();
+        trace.pop_back();
         handle_breakpoints_func_call(cpu, last_call.callee, new_rip);
         /* fuzz_stacktrace(); */
     }
@@ -323,15 +333,16 @@ void fuzz_instr_ucnear_branch(unsigned cpu, unsigned what, bx_address branch_rip
 
 void fuzz_instr_far_branch(unsigned cpu, unsigned what, Bit16u prev_cs, bx_address prev_rip,
                            Bit16u new_cs, bx_address new_rip) {
+    auto &trace = stacktrace_for_cpu(cpu);
     if (what == BX_INSTR_IS_SYSRET)
         status |= 1; // sysret
 
     if((what == BX_INSTR_IS_CALL || what == BX_INSTR_IS_CALL_INDIRECT)) {
-        our_stacktrace.push_back({prev_rip, new_rip, BX_CPU(cpu)->cr3});
+        trace.push_back({prev_rip, new_rip, BX_CPU(cpu)->cr3});
         /* fuzz_stacktrace(); */
-    } else if (what == BX_INSTR_IS_RET && !our_stacktrace.empty()) {
-        calltrace_t last_call = our_stacktrace.back();
-        our_stacktrace.pop_back();
+    } else if (what == BX_INSTR_IS_RET && !trace.empty()) {
+        calltrace_t last_call = trace.back();
+        trace.pop_back();
         handle_breakpoints_func_call(cpu, last_call.callee, new_rip);
         /* fuzz_stacktrace(); */
     }
