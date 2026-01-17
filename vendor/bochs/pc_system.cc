@@ -341,21 +341,28 @@ void bx_pc_system_c::countdownEvent(void)
     if (timer[i].active) {
 #if BX_TIMER_DEBUG
       if (ticksTotal > timer[i].timeToFire)
-        BX_PANIC(("countdownEvent: ticksTotal > timeToFire[%u], D " FMT_LL "u", i,
-                  timer[i].timeToFire-ticksTotal));
+        BX_DEBUG(("countdownEvent: timer[%u] overdue by " FMT_LL "u", i,
+                  ticksTotal - timer[i].timeToFire));
 #endif
-      if (ticksTotal == timer[i].timeToFire) {
-        // This timer is ready to fire.
+      if (ticksTotal >= timer[i].timeToFire) {
+        // This timer is ready (or overdue) to fire.
         triggered[i] = 1;
 
         if (timer[i].continuous==0) {
           // If triggered timer is one-shot, deactive.
           timer[i].active = 0;
         } else {
-          // Continuous timer, increment time-to-fire by period.
-          timer[i].timeToFire += timer[i].period;
-          if (timer[i].timeToFire < minTimeToFire)
-            minTimeToFire = timer[i].timeToFire;
+          // Continuous timer, advance to the first fire time after now.
+          Bit64u period = timer[i].period;
+          if (period == 0) {
+            timer[i].active = 0;
+          } else {
+            Bit64u delta = ticksTotal - timer[i].timeToFire;
+            Bit64u steps = delta / period + 1;
+            timer[i].timeToFire += steps * period;
+            if (timer[i].timeToFire < minTimeToFire)
+              minTimeToFire = timer[i].timeToFire;
+          }
         }
         if (i < first) first = i;
         last = i;
@@ -370,6 +377,8 @@ void bx_pc_system_c::countdownEvent(void)
   // Calculate next countdown period.  We need to do this before calling
   // any of the callbacks, as they may call timer features, which need
   // to be advanced to the next countdown cycle.
+  if (minTimeToFire <= ticksTotal)
+    minTimeToFire = ticksTotal + 1;
   currCountdown = currCountdownPeriod =
       Bit32u(minTimeToFire - ticksTotal);
 

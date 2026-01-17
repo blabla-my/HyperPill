@@ -56,7 +56,7 @@ static void *log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-uint64_t icount_limit = 5000000;
+uint64_t icount_limit = UINT64_MAX;
 uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;
@@ -302,9 +302,9 @@ void reset_bx_vm() {
 }
 
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
-	if (vector == 3) {
-        fuzz_emu_stop_crash(cpu, "debug-interrupt");
-	}
+	// if (vector == 3) {
+    //     fuzz_emu_stop_crash(cpu, "debug-interrupt");
+	// }
 }
 
 void fuzz_instr_after_execution(bxInstruction_c *i) {
