@@ -13,11 +13,8 @@
 
 SyntaxModel::SyntaxModel(VirtioDev& vdev) : vdev_(vdev) {}
 
-std::unique_ptr<SyntaxModel> SyntaxModel::Create(VirtioDev& vdev) {
-	if (vdev.packed) {
-		return std::make_unique<PackedRingModel>(vdev);
-	}
-	return std::make_unique<SplitRingModel>(vdev);
+SyntaxModel* SyntaxModel::Create(VirtioDev& vdev) {
+	return vdev.get_syntax_model();
 }
 
 uint16_t SyntaxModel::queue_notify_off(uint16_t queue_sel) {

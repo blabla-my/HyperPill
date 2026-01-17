@@ -1,4 +1,5 @@
 #include "virtio.h"
+#include "syntax.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include "bochs.h"
 #include "iodev/iodev.h"
@@ -723,11 +724,39 @@ bool ConfigSpace::contains(unsigned long addr) const {
 
 /* VirtioDev */
 VirtioDev::VirtioDev() {
-	memset(this, 0, sizeof(VirtioDev));
-	this->multiplier = 4;
-	this->to_fuzz = false;
-	this->packed = false;
-	this->indirect_desc = false;
+	memset(name, 0, sizeof(name));
+	std::fill_n(queues, VIRTIO_QUEUE_MAX, nullptr);
+	queue_num = 0;
+	features = 0;
+	multiplier = 4;
+	common_cfg = {};
+	isr_cfg = {};
+	device_cfg = {};
+	notify_cfg = {};
+	to_fuzz = false;
+	is_net = false;
+	is_scsi = false;
+	packed = false;
+	indirect_desc = false;
+	reset_syntax_model();
+}
+
+SyntaxModel* VirtioDev::get_syntax_model() {
+	if (syntax_model_ && syntax_model_packed_ == packed) {
+		return syntax_model_.get();
+	}
+	syntax_model_packed_ = packed;
+	if (packed) {
+		syntax_model_ = std::make_unique<PackedRingModel>(*this);
+	} else {
+		syntax_model_ = std::make_unique<SplitRingModel>(*this);
+	}
+	return syntax_model_.get();
+}
+
+void VirtioDev::reset_syntax_model() {
+	syntax_model_.reset();
+	syntax_model_packed_ = packed;
 }
 
 void VirtioDev::set_status(uint8_t status) {
@@ -1081,7 +1110,13 @@ const VRing* VQueueManager::get_belonging_vring(bx_address address){
 
 void VQueueManager::reset_all_queue(){
 	for (auto& it : virtio_devs) {
-		auto& vdev = it.second;
+		auto* vdev = it.second;
+		if (!vdev) {
+			continue;
+		}
+		if (vdev->to_fuzz) {
+			vdev->reset_syntax_model();
+		}
 		for (size_t i = 0; i < vdev->queue_num; i++ ) {
 			auto* queue = vdev->queues[i];
 			if (queue && queue->vdev && queue->vdev->to_fuzz)

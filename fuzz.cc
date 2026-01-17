@@ -829,12 +829,12 @@ bool op_notify() {
 	if (ic_ingest16(&queue_sel, 0, (uint16_t)(vdev->queue_num - 1)) < 0) {
 		return false;
 	}
-
-	auto model = SyntaxModel::Create(*vdev);
+	auto* model = SyntaxModel::Create(*vdev);
 	if (!model) {
 		return false;
 	}
-	return model->submit_request(queue_sel) != UINT16_MAX;
+	bool ok = model->submit_request(queue_sel) != UINT16_MAX;
+	return ok;
 }
 
 bool op_trigger_aio() {
