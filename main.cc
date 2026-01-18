@@ -36,6 +36,32 @@ bool fuzz_should_abort = false;    /* We got a crash. */
 bool fuzzing;
 static bool executing_input;
 
+static constexpr unsigned long int kDrainIcountBudget = 5000000;
+
+static struct {
+	bool active;
+	drain_predicate_t pred;
+	void* ctx;
+	bool budget_hit;
+} drain_state = {};
+
+void drain_begin(drain_predicate_t pred, void* ctx) {
+	drain_state.active = true;
+	drain_state.pred = pred;
+	drain_state.ctx = ctx;
+	drain_state.budget_hit = false;
+}
+
+DrainStats drain_end() {
+	DrainStats stats = {
+		.budget_hit = drain_state.budget_hit,
+	};
+	drain_state.active = false;
+	drain_state.pred = nullptr;
+	drain_state.ctx = nullptr;
+	return stats;
+}
+
 // Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
 BOCHSAPI bx_pc_system_c bx_pc_system;
 #if BX_SUPPORT_SMP
@@ -56,7 +82,7 @@ static void *log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-uint64_t icount_limit = UINT64_MAX;
+uint64_t icount_limit = 50000000;
 uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;
@@ -125,7 +151,8 @@ void start_cpu(bool enumerating) {
 		return;
 
 	srand(1); /* rdrand */
-	BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
+	if (!drain_state.active)
+		BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip;
 	icount = 0;
 	pio_icount = 0;
 	clear_seen_dma();
@@ -135,7 +162,10 @@ void start_cpu(bool enumerating) {
 	reset_op_cov();
 
 	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-		BX_CPU(cpu)->fuzz_executing_input = true;
+		if (drain_state.active && cpu == 0)
+			BX_CPU(cpu)->fuzz_executing_input = false;
+		else
+			BX_CPU(cpu)->fuzz_executing_input = true;
 	}
 	if (BX_CPU(0)->fuzzdebug_gdb && !enumerating)
 		hp_gdbstub_debug_loop();
@@ -159,7 +189,27 @@ void start_cpu(bool enumerating) {
 			run = false;
 		}
 
-		while (BX_CPU(0)->fuzz_executing_input) {
+		auto smp_running = [&]() -> bool {
+			if (BX_CPU(0)->fuzz_executing_input)
+				return true;
+			if (!drain_state.active)
+				return false;
+			for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
+				if (BX_CPU(cpu)->fuzz_executing_input)
+					return true;
+			}
+			return false;
+		};
+
+		while (smp_running()) {
+			if (drain_state.active) {
+				if (icount > kDrainIcountBudget) {
+					drain_state.budget_hit = true;
+					fuzz_emu_stop_unhealthy();
+					break;
+				}
+			}
+
 			if (run)
 				BX_CPU(processor)->cpu_run_trace();
 			else
@@ -175,6 +225,10 @@ void start_cpu(bool enumerating) {
 				processor = 0;
 				BX_TICKN(executed / bx_cpu_count);
 				executed %= bx_cpu_count;
+				if (drain_state.active) {
+					if (drain_state.pred && drain_state.pred(drain_state.ctx))
+						pause_cpu();
+				}
 			}
 
 			BX_CPU(processor)->icount_last_sync =
@@ -188,6 +242,8 @@ void start_cpu(bool enumerating) {
 		}
 		pause_cpu();
 		if (fuzz_unhealthy_input || fuzz_do_not_continue)
+			return;
+		if (drain_state.active)
 			return;
 		BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
 
@@ -269,14 +325,9 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 }
 
 void fuzz_hook_exception(unsigned cpu, unsigned vector, unsigned error_code) {
-	printf("Exception: 0x%x 0x%x\n", vector, error_code);
 }
 
 void fuzz_hook_hlt(unsigned cpu) {
-	(void)cpu;
-	// fuzz_emu_stop_crash("hlt");
-	// fuzz_emu_stop_unhealthy();
-	return;
 }
 
 unsigned long int get_icount() {

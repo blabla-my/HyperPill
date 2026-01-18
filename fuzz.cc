@@ -20,6 +20,10 @@ namespace fuzzer {
 	extern Fuzzer* F;
 };
 
+static bool syntax_model_completed_pred(void* ctx) {
+	return ((SyntaxModel*)ctx)->completed();
+}
+
 enum cmds {
 	OP_READ,
 	OP_WRITE,
@@ -1201,7 +1205,19 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
 		if (vdev) {
 			auto* model = vdev->get_syntax_model();
+			if (!model)
+				return;
+#if BX_SUPPORT_SMP
+			if (bx_cpu_count > 1 && !model->completed()) {
+				drain_begin(syntax_model_completed_pred, model);
+				start_cpu();
+				DrainStats stats = drain_end();
+				return;
+			}
+#endif
+			size_t cnt = 0;
 			while (!fuzz_unhealthy_input && !model->completed()) {
+				cnt++;
 				start_cpu();
 			}
 		}
