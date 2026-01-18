@@ -356,7 +356,7 @@ void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void *dat
 	// }
 
 	if (bypass_virtio_core) {
-		int rc = ingest_vring_split(cpu, addr, len, data);
+		int rc = ingest_vring(cpu, addr, len, data);
 		if (rc <= 0) 
 			return;
 	}
@@ -1177,7 +1177,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 				continue;
 			}
 		} else if (virtio_core) {
-			if (ic_ingest8(&op, OP_NOTIFY, OP_NOTIFY, true)) {
+			if (ic_ingest8(&op, 0, OP_NOTIFY, true)) {
 				ic_erase_backwards_until_token();
 				ic_subtract(4);
 				continue;

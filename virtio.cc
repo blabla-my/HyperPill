@@ -1668,58 +1668,9 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 }
 
 int ingest_vring(unsigned cpu, bx_address addr, size_t len, void* data) {
-	static char* vring_log = getenv("VIRTIO_VRING_LOG");
-	static tsl::robin_map<uint64_t, bool> logged_dispatch;
 	auto gpa = lookup_gpa_by_hpa(addr);
 	if (const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa)) {
-		bool packed = vring->queue && vring->queue->vdev && vring->queue->vdev->packed;
-		bool log_enabled = vring_log && vring_log[0] != '0';
-		bool log_all = log_enabled && (vring_log[0] == 'a' || vring_log[0] == 'A');
-		bool verbose = log_enabled && (vring_log[0] == '2' || vring_log[0] == 'v' || vring_log[0] == 'V');
-		if (log_enabled && (packed || log_all)) {
-			size_t qid = vring->queue ? vring->queue->idx : 0;
-			uint64_t key = (((uint64_t)qid) << 8) | (((uint64_t)vring->type) << 1) | (packed ? 1 : 0);
-			bool should_log = verbose;
-			if (!verbose) {
-				auto it = logged_dispatch.find(key);
-				if (it == logged_dispatch.end()) {
-					logged_dispatch[key] = true;
-					should_log = true;
-				}
-			}
-			if (should_log) {
-				printf("!virtio: ingest_vring dispatch=%s dev=%s packed=%d qid=%zu sel=%u ring=%s filed=%d\n",
-					   packed ? "packed" : "split",
-					   vring->queue && vring->queue->vdev ? vring->queue->vdev->name : "<null>",
-					   packed ? 1 : 0,
-					   qid,
-					   vring->queue ? vring->queue->queue_sel : 0,
-					   vring->type_str(),
-					   (int)vring->filed_type(gpa));
-			}
-		}
-		if (packed) {
-			return ingest_vring_packed(cpu, addr, len, data);
-		}
-		return ingest_vring_split(cpu, addr, len, data);
-	}
-	{
-		bx_address base_gpa = 0;
-		const auto* bytes = get_vqueue_manager().find_indirect_table(gpa, &base_gpa);
-		if (bytes) {
-			size_t off = (size_t)(gpa - base_gpa);
-			size_t remaining = bytes->size() > off ? bytes->size() - off : 0;
-			size_t to_copy = std::min(len, remaining);
-			if (to_copy) {
-				BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, to_copy,
-				                             (void*)(bytes->data() + off));
-				memcpy(data, bytes->data() + off, to_copy);
-			}
-			if (to_copy < len) {
-				memset((uint8_t*)data + to_copy, 0, len - to_copy);
-			}
-			return 0;
-		}
+		return 0;
 	}
 	return ingest_vring_buffer(cpu, addr, gpa, len, data);
 }
