@@ -6,67 +6,104 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 class SyntaxModel {
-public:
-	explicit SyntaxModel(VirtioDev& vdev);
+    public:
+	explicit SyntaxModel(VirtioDev &vdev);
 	virtual ~SyntaxModel() = default;
 
-	SyntaxModel(const SyntaxModel&) = delete;
-	SyntaxModel& operator=(const SyntaxModel&) = delete;
+	SyntaxModel(const SyntaxModel &) = delete;
+	SyntaxModel &operator=(const SyntaxModel &) = delete;
 
-	// Submits one request to the selected queue and returns the head descriptor
-	// index, or UINT16_MAX on failure.
+	// Submits one request to the selected queue and returns the head
+	// descriptor index, or UINT16_MAX on failure.
 	uint16_t submit_request();
 	uint16_t submit_request(uint16_t queue_sel);
 
-	static SyntaxModel* Create(VirtioDev& vdev);
+	static SyntaxModel *Create(VirtioDev &vdev);
 
-protected:
-	virtual uint16_t allocate_descriptors(DescChainFSM& fsm) = 0;
+	virtual void init() = 0;
+	virtual bool completed(uint16_t head) = 0;
+	bool all_completed();
+
+    protected:
+	void reset_completion_tracking();
+	void mark_completed(uint16_t queue_sel, uint16_t head);
+	bool has_completed(uint16_t queue_sel, uint16_t head) const;
+
+	virtual uint16_t allocate_descriptors(DescChainFSM &fsm) = 0;
 	virtual void notify(uint16_t head) = 0;
 
-	VQueue* queue() const { return queue_; }
-	VirtioDev& vdev() const { return vdev_; }
+	VQueue *queue() const {
+		return queue_;
+	}
+	VirtioDev &vdev() const {
+		return vdev_;
+	}
 
 	uint16_t queue_notify_off(uint16_t queue_sel);
 
-protected:
-	VirtioDev& vdev_;
-	VQueue* queue_ = nullptr;
+    protected:
+	VirtioDev &vdev_;
+	VQueue *queue_ = nullptr;
 	uint16_t queue_sel_ = 0;
 
-private:
+    private:
+	bool select_queue(uint16_t queue_sel);
+	void remember_pending(uint16_t queue_sel, uint16_t head);
+	void clear_pending(uint16_t queue_sel, uint16_t head);
+
 	std::unordered_map<uint16_t, uint16_t> notify_off_cache_;
+	std::unordered_map<uint16_t, std::unordered_set<uint16_t> >
+		pending_heads_;
+	std::unordered_map<uint16_t, std::unordered_set<uint16_t> >
+		completed_heads_;
 };
 
 class SplitRingModel final : public SyntaxModel {
-public:
-	explicit SplitRingModel(VirtioDev& vdev);
+    public:
+	explicit SplitRingModel(VirtioDev &vdev);
 	~SplitRingModel() override = default;
 
-protected:
-	uint16_t allocate_descriptors(DescChainFSM& fsm) override;
+	void init() override;
+	bool completed(uint16_t head) override;
+
+    protected:
+	uint16_t allocate_descriptors(DescChainFSM &fsm) override;
 	void notify(uint16_t head) override;
+
+    private:
+	struct SplitQueueState {
+		uint16_t next_used_idx = 0;
+	};
+
+	SplitQueueState &state_for_queue(uint16_t queue_sel);
+	std::unordered_map<uint16_t, SplitQueueState> queue_state_;
 };
 
 class PackedRingModel final : public SyntaxModel {
-public:
-	explicit PackedRingModel(VirtioDev& vdev);
+    public:
+	explicit PackedRingModel(VirtioDev &vdev);
 	~PackedRingModel() override = default;
 
-protected:
-	uint16_t allocate_descriptors(DescChainFSM& fsm) override;
+	void init() override;
+	bool completed(uint16_t head) override;
+
+    protected:
+	uint16_t allocate_descriptors(DescChainFSM &fsm) override;
 	void notify(uint16_t head) override;
 
-private:
+    private:
 	struct PackedQueueState {
 		bool inited = false;
 		uint16_t next_desc_idx = 0;
 		bool wrap = true;
+		uint16_t next_scan_idx = 0;
+		bool scan_wrap = true;
 	};
 
-	PackedQueueState& state_for_queue(uint16_t queue_sel);
+	PackedQueueState &state_for_queue(uint16_t queue_sel);
 	std::unordered_map<uint16_t, PackedQueueState> queue_state_;
 };
 
