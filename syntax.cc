@@ -11,20 +11,12 @@
 #include <cstdio>
 #include <sys/types.h>
 
-SyntaxModel::SyntaxModel(VirtioDev& vdev) : vdev_(vdev) {}
-
-SyntaxModel* SyntaxModel::Create(VirtioDev& vdev) {
-	return vdev.get_syntax_model();
+SyntaxModel::SyntaxModel(VirtioDev &vdev)
+	: vdev_(vdev) {
 }
 
-bool SyntaxModel::completed() {
-	for (size_t i = 0; i < vdev_.queue_num && i < VIRTIO_QUEUE_MAX; i++) {
-		auto* q = vdev_.queues[i];
-		if (!q || !q->all_request_completed()) {
-			return false;
-		}
-	}
-	return true;
+SyntaxModel *SyntaxModel::Create(VirtioDev &vdev) {
+	return vdev.get_syntax_model();
 }
 
 uint16_t SyntaxModel::queue_notify_off(uint16_t queue_sel) {
@@ -38,7 +30,8 @@ uint16_t SyntaxModel::queue_notify_off(uint16_t queue_sel) {
 	}
 	size_t old_sel = vdev_.common_cfg.get_queue_sel();
 	vdev_.common_cfg.set_queue_sel(queue_sel);
-	uint16_t noff = (uint16_t)vdev_.common_cfg.read(VIRTIO_PCI_COMMON_Q_NOFF, sizeof(uint16_t));
+	uint16_t noff = (uint16_t)vdev_.common_cfg.read(
+		VIRTIO_PCI_COMMON_Q_NOFF, sizeof(uint16_t));
 	vdev_.common_cfg.set_queue_sel(old_sel);
 	notify_off_cache_[queue_sel] = noff;
 	return noff;
@@ -48,25 +41,92 @@ uint16_t SyntaxModel::submit_request() {
 	return submit_request(0);
 }
 
-uint16_t SyntaxModel::submit_request(uint16_t queue_sel) {
+void SyntaxModel::reset_completion_tracking() {
+	pending_heads_.clear();
+	completed_heads_.clear();
+}
+
+void SyntaxModel::mark_completed(uint16_t queue_sel, uint16_t head) {
+	completed_heads_[queue_sel].insert(head);
+}
+
+bool SyntaxModel::has_completed(uint16_t queue_sel, uint16_t head) const {
+	auto it = completed_heads_.find(queue_sel);
+	if (it == completed_heads_.end()) {
+		return false;
+	}
+	return it->second.find(head) != it->second.end();
+}
+
+void SyntaxModel::remember_pending(uint16_t queue_sel, uint16_t head) {
+	pending_heads_[queue_sel].insert(head);
+}
+
+void SyntaxModel::clear_pending(uint16_t queue_sel, uint16_t head) {
+	auto it = pending_heads_.find(queue_sel);
+	if (it == pending_heads_.end()) {
+		return;
+	}
+	it->second.erase(head);
+	if (it->second.empty()) {
+		pending_heads_.erase(it);
+	}
+}
+
+bool SyntaxModel::select_queue(uint16_t queue_sel) {
 	if (queue_sel >= vdev_.queue_num) {
-		return UINT16_MAX;
+		return false;
 	}
 	queue_sel_ = queue_sel;
 	queue_ = vdev_.queues[queue_sel];
 	if (!queue_ || !queue_->desc_ring) {
-		return UINT16_MAX;
+		return false;
 	}
 	if (!queue_->desc_ring->addr_hpa || !queue_->desc_ring->addr_gpa) {
-		return UINT16_MAX;
+		return false;
 	}
 	if (!vdev_.packed) {
 		if (!queue_->avail_ring || !queue_->avail_ring->addr_hpa) {
-			return UINT16_MAX;
+			return false;
 		}
 	}
+	return true;
+}
 
-	auto& fsm = queue_->desc_chain_fsm;
+bool SyntaxModel::all_completed() {
+	for (auto it = pending_heads_.begin(); it != pending_heads_.end();) {
+		uint16_t queue_sel = it->first;
+		auto &heads = it->second;
+
+		if (!select_queue(queue_sel)) {
+			++it;
+			continue;
+		}
+
+		for (auto head_it = heads.begin(); head_it != heads.end();) {
+			uint16_t head = *head_it;
+			if (completed(head)) {
+				head_it = heads.erase(head_it);
+			} else {
+				++head_it;
+			}
+		}
+
+		if (heads.empty()) {
+			it = pending_heads_.erase(it);
+		} else {
+			++it;
+		}
+	}
+	return pending_heads_.empty();
+}
+
+uint16_t SyntaxModel::submit_request(uint16_t queue_sel) {
+	if (!select_queue(queue_sel)) {
+		return UINT16_MAX;
+	}
+
+	auto &fsm = queue_->desc_chain_fsm;
 	fsm.reset();
 	/* initialize the request meta information */
 	fsm.init(queue_->desc_ring->size, queue_->type);
@@ -76,24 +136,79 @@ uint16_t SyntaxModel::submit_request(uint16_t queue_sel) {
 		return UINT16_MAX;
 	}
 	queue_->submit_request(head);
+	remember_pending(queue_sel, head);
+	completed_heads_[queue_sel].erase(head);
 	notify(head);
 	return head;
 }
 
-SplitRingModel::SplitRingModel(VirtioDev& vdev) : SyntaxModel(vdev) {}
+SplitRingModel::SplitRingModel(VirtioDev &vdev)
+	: SyntaxModel(vdev) {
+}
 
-uint16_t SplitRingModel::allocate_descriptors(DescChainFSM& fsm) {
+SplitRingModel::SplitQueueState &
+SplitRingModel::state_for_queue(uint16_t queue_sel) {
+	auto &state = queue_state_[queue_sel];
+	return state;
+}
+
+void SplitRingModel::init() {
+	reset_completion_tracking();
+	queue_state_.clear();
+	for (uint16_t i = 0; i < vdev().queue_num; i++) {
+		auto *q = vdev().queues[i];
+		if (!q || !q->used_ring) {
+			continue;
+		}
+		if (!q->used_ring->addr_hpa) {
+			continue;
+		}
+		uint16_t used_idx = 0;
+		BX_MEM(0)->readPhysicalPage(
+			BX_CPU(id), q->used_ring->addr_hpa + sizeof(uint16_t),
+			sizeof(used_idx), &used_idx);
+		state_for_queue(i).next_used_idx = used_idx;
+	}
+}
+
+bool SplitRingModel::completed(uint16_t head) {
+	auto *q = queue();
+	if (!q || !q->used_ring || !q->used_ring->addr_hpa) {
+		return false;
+	}
+	if (has_completed(queue_sel_, head)) {
+		return true;
+	}
+
+	auto &state = state_for_queue(queue_sel_);
+	uint16_t used_idx = 0;
+	BX_MEM(0)->readPhysicalPage(BX_CPU(id),
+				    q->used_ring->addr_hpa + sizeof(uint16_t),
+				    sizeof(used_idx), &used_idx);
+
+	while (state.next_used_idx != used_idx) {
+		uint16_t pos =
+			(uint16_t)(state.next_used_idx % q->used_ring->size);
+		vring_used_elem elem = {};
+		q->used_ring->read_elem(pos, &elem);
+		mark_completed(queue_sel_, (uint16_t)elem.id);
+		state.next_used_idx++;
+	}
+
+	return has_completed(queue_sel_, head);
+}
+
+uint16_t SplitRingModel::allocate_descriptors(DescChainFSM &fsm) {
 	uint16_t head = 0;
-	if (ic_ingest16(&head, 0, (uint16_t)(queue()->desc_ring->size - 1)) < 0) {
+	if (ic_ingest16(&head, 0, (uint16_t)(queue()->desc_ring->size - 1)) <
+	    0) {
 		return UINT16_MAX;
 	}
 	uint16_t total = (uint16_t)(fsm.sg_num_out + fsm.sg_num_in);
 	for (uint16_t i = 0; i < total; i++) {
-		fuzzer::DescInfo desc_info {
-			.queue_id = (uint16_t)queue()->idx,
-			.desc_idx = (uint16_t)i,
-			.is_out = i < fsm.sg_num_out
-		};
+		fuzzer::DescInfo desc_info{ .queue_id = (uint16_t)queue()->idx,
+					    .desc_idx = (uint16_t)i,
+					    .is_out = i < fsm.sg_num_out };
 		auto desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 		if (!desc_with_info) {
 			return UINT16_MAX;
@@ -102,15 +217,19 @@ uint16_t SplitRingModel::allocate_descriptors(DescChainFSM& fsm) {
 		vring_desc desc = {};
 		memcpy(&desc, desc_with_info->desc, sizeof(desc));
 		uint64_t addr = desc.addr;
-		conveyor_round(&addr, get_guest_ram_start(), get_guest_ram_start() + get_guest_ram_size());
+		conveyor_round(&addr, get_guest_ram_start(),
+			       get_guest_ram_start() + get_guest_ram_size());
 		desc.addr = addr;
 		desc.len %= 0x10000;
-		desc.flags = (uint16_t)(desc_info.is_out ? 0 : VRING_DESC_F_WRITE);
+		desc.flags =
+			(uint16_t)(desc_info.is_out ? 0 : VRING_DESC_F_WRITE);
 
-		uint16_t index = (head + i) % (uint16_t)(queue()->desc_ring->size);
+		uint16_t index =
+			(head + i) % (uint16_t)(queue()->desc_ring->size);
 		if ((i + 1) < total) {
 			desc.flags |= VRING_DESC_F_NEXT;
-			desc.next = (head + i + 1) % (uint16_t)(queue()->desc_ring->size);
+			desc.next = (head + i + 1) %
+				    (uint16_t)(queue()->desc_ring->size);
 		} else {
 			desc.next = 0;
 		}
@@ -125,15 +244,16 @@ uint16_t SplitRingModel::allocate_descriptors(DescChainFSM& fsm) {
 }
 
 void SplitRingModel::notify(uint16_t head) {
-	auto* q = queue();
+	auto *q = queue();
 	if (!q || !q->desc_ring || !q->avail_ring) {
 		return;
 	}
 
 	uint16_t avail_idx = 0;
 	if (q->avail_ring->addr_hpa) {
-		BX_MEM(0)->readPhysicalPage(BX_CPU(0), q->avail_ring->addr_hpa + sizeof(uint16_t),
-									sizeof(avail_idx), &avail_idx);
+		BX_MEM(0)->readPhysicalPage(
+			BX_CPU(id), q->avail_ring->addr_hpa + sizeof(uint16_t),
+			sizeof(avail_idx), &avail_idx);
 	}
 	uint16_t avail_pos = (uint16_t)(avail_idx % q->avail_ring->size);
 	vring_avail_elem elem = head;
@@ -141,32 +261,89 @@ void SplitRingModel::notify(uint16_t head) {
 	q->avail_ring->set_idx(0, (uint16_t)(avail_idx + 1));
 
 	vdev().common_cfg.set_queue_enable(q->queue_sel);
-	bx_address addr = vdev().notify_cfg.address + vdev().multiplier * queue_notify_off(q->queue_sel);
+	bx_address addr = vdev().notify_cfg.address +
+			  vdev().multiplier * queue_notify_off(q->queue_sel);
 	if (inject_write(addr, 2, q->queue_sel)) {
 		start_cpu();
 	}
 }
 
-PackedRingModel::PackedRingModel(VirtioDev& vdev) : SyntaxModel(vdev) {}
+PackedRingModel::PackedRingModel(VirtioDev &vdev)
+	: SyntaxModel(vdev) {
+}
 
-PackedRingModel::PackedQueueState& PackedRingModel::state_for_queue(uint16_t queue_sel) {
-	auto& state = queue_state_[queue_sel];
+void PackedRingModel::init() {
+	reset_completion_tracking();
+	queue_state_.clear();
+	for (uint16_t i = 0; i < vdev().queue_num; i++) {
+		auto *q = vdev().queues[i];
+		if (!q || !q->desc_ring) {
+			continue;
+		}
+		if (!q->desc_ring->addr_hpa) {
+			continue;
+		}
+		auto &state = state_for_queue(i);
+		state.next_scan_idx = 0;
+		state.scan_wrap = true;
+	}
+}
+
+bool PackedRingModel::completed(uint16_t head) {
+	auto *q = queue();
+	if (!q || !q->desc_ring || !q->desc_ring->addr_hpa) {
+		return false;
+	}
+	if (has_completed(queue_sel_, head)) {
+		return true;
+	}
+
+	vring_packed_desc desc = {};
+	q->desc_ring->read_elem(head % q->desc_ring->size, &desc);
+
+	bool has_avail = (desc.flags & VIRTQ_DESC_F_AVAIL) != 0;
+	bool has_used = (desc.flags & VIRTQ_DESC_F_USED) != 0;
+	if (has_avail && has_used) {
+		mark_completed(queue_sel_, head);
+		return true;
+	}
+
+	uint16_t expect = 0;
+	if (has_avail && !has_used) {
+		expect = VIRTQ_DESC_F_USED;
+	} else if (has_used && !has_avail) {
+		expect = VIRTQ_DESC_F_AVAIL;
+	} else {
+		return false;
+	}
+
+	if ((desc.flags & expect) != 0) {
+		mark_completed(queue_sel_, head);
+		return true;
+	}
+	return false;
+}
+
+PackedRingModel::PackedQueueState &
+PackedRingModel::state_for_queue(uint16_t queue_sel) {
+	auto &state = queue_state_[queue_sel];
 	if (!state.inited) {
 		state.inited = true;
 		state.next_desc_idx = 0;
 		state.wrap = true;
+		state.next_scan_idx = 0;
+		state.scan_wrap = true;
 	}
 	return state;
 }
 
-uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
-	auto* q = queue();
+uint16_t PackedRingModel::allocate_descriptors(DescChainFSM &fsm) {
+	auto *q = queue();
 	if (!q || !q->desc_ring) {
 		return UINT16_MAX;
 	}
 
-	static void* dbg_packed_desc = getenv("DBG_PACKED_DESC");
-	auto& state = state_for_queue(q->queue_sel);
+	auto &state = state_for_queue(q->queue_sel);
 	uint16_t total = (uint16_t)(fsm.sg_num_out + fsm.sg_num_in);
 	if (total == 0) {
 		return UINT16_MAX;
@@ -178,11 +355,9 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 		       q->queue_sel, q->idx, head, total, state.wrap ? 1 : 0);
 	}
 	for (uint16_t i = 0; i < total; i++) {
-		fuzzer::DescInfo desc_info {
-			.queue_id = (uint16_t)q->idx,
-			.desc_idx = (uint16_t)i,
-			.is_out = i < fsm.sg_num_out
-		};
+		fuzzer::DescInfo desc_info{ .queue_id = (uint16_t)q->idx,
+					    .desc_idx = (uint16_t)i,
+					    .is_out = i < fsm.sg_num_out };
 		auto desc_with_info = desc_pool_get()->ingest_desc(&desc_info);
 		if (!desc_with_info) {
 			return UINT16_MAX;
@@ -191,7 +366,8 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 		vring_desc canonical = {};
 		memcpy(&canonical, desc_with_info->desc, sizeof(canonical));
 		uint64_t addr = canonical.addr;
-		conveyor_round(&addr, get_guest_ram_start(), get_guest_ram_start() + get_guest_ram_size());
+		conveyor_round(&addr, get_guest_ram_start(),
+			       get_guest_ram_start() + get_guest_ram_size());
 		canonical.addr = addr;
 		canonical.len %= 0x10000;
 
@@ -200,7 +376,8 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 		desc.addr = canonical.addr;
 		desc.len = canonical.len;
 		desc.id = index;
-		desc.flags = (uint16_t)(desc_info.is_out ? 0 : VRING_DESC_F_WRITE);
+		desc.flags =
+			(uint16_t)(desc_info.is_out ? 0 : VRING_DESC_F_WRITE);
 		if ((i + 1) < total) {
 			desc.flags |= VRING_DESC_F_NEXT;
 		}
@@ -225,12 +402,13 @@ uint16_t PackedRingModel::allocate_descriptors(DescChainFSM& fsm) {
 }
 
 void PackedRingModel::notify(uint16_t head) {
-	auto* q = queue();
+	auto *q = queue();
 	if (!q || !q->desc_ring) {
 		return;
 	}
 	vdev().common_cfg.set_queue_enable(q->queue_sel);
-	bx_address addr = vdev().notify_cfg.address + vdev().multiplier * queue_notify_off(q->queue_sel);
+	bx_address addr = vdev().notify_cfg.address +
+			  vdev().multiplier * queue_notify_off(q->queue_sel);
 	if (inject_write(addr, 2, q->queue_sel)) {
 		start_cpu();
 	}
