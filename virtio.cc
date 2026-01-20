@@ -707,7 +707,8 @@ SyntaxModel* VirtioDev::get_syntax_model() {
 }
 
 void VirtioDev::reset_syntax_model() {
-	syntax_model_.reset();
+	if (syntax_model_.get())
+		syntax_model_->reset();
 	syntax_model_packed_ = packed;
 }
 
@@ -996,9 +997,12 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 				uint64_t dev_features = dev->get_device_features();
 				uint64_t guest_features = dev->get_guest_features();
 				uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
-				dev->packed = (dev_features & packed_bit) && (guest_features & packed_bit);
+				dev->packed = (dev_features & packed_bit) &&
+					      (guest_features & packed_bit);
 				uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
-				dev->indirect_desc = (dev_features & indirect_bit) && (guest_features & indirect_bit);
+				dev->indirect_desc =
+					(dev_features & indirect_bit) &&
+					(guest_features & indirect_bit);
 			}
 			dev->enumerate_queues_from_common_cfg();
 			break;

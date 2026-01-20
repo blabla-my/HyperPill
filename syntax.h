@@ -24,6 +24,7 @@ class SyntaxModel {
 	static SyntaxModel *Create(VirtioDev &vdev);
 
 	virtual void init() = 0;
+	virtual void reset() = 0;
 	virtual bool completed(uint16_t head) = 0;
 	bool all_completed();
 
@@ -31,6 +32,7 @@ class SyntaxModel {
 	void reset_completion_tracking();
 	void mark_completed(uint16_t queue_sel, uint16_t head);
 	bool has_completed(uint16_t queue_sel, uint16_t head) const;
+	uint16_t desc_seq(uint16_t i, uint16_t out_num, uint16_t in_num) const;
 
 	virtual uint16_t allocate_descriptors(DescChainFSM &fsm) = 0;
 	virtual void notify(uint16_t head) = 0;
@@ -67,6 +69,7 @@ class SplitRingModel final : public SyntaxModel {
 	~SplitRingModel() override = default;
 
 	void init() override;
+	void reset() override;
 	bool completed(uint16_t head) override;
 
     protected:
@@ -88,6 +91,7 @@ class PackedRingModel final : public SyntaxModel {
 	~PackedRingModel() override = default;
 
 	void init() override;
+	void reset() override;
 	bool completed(uint16_t head) override;
 
     protected:
@@ -97,14 +101,16 @@ class PackedRingModel final : public SyntaxModel {
     private:
 	struct PackedQueueState {
 		bool inited = false;
-		uint16_t next_desc_idx = 0;
-		bool wrap = true;
+		uint16_t next_desc_idx = 3;
+		bool wrap = false;
 		uint16_t next_scan_idx = 0;
 		bool scan_wrap = true;
 	};
 
 	PackedQueueState &state_for_queue(uint16_t queue_sel);
+	PackedQueueState &shadow_state_for_queue(uint16_t queue_sel);
 	std::unordered_map<uint16_t, PackedQueueState> queue_state_;
+	std::unordered_map<uint16_t, PackedQueueState> shadow_queue_state_;
 };
 
 #endif

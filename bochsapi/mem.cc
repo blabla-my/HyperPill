@@ -120,13 +120,6 @@ void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
     
         prioraccess = -1;
     } 
-    if (rw == BX_WRITE && is_l2_page_bitmap[phy >> 12] && !guest_page_table.contains(phy>>12)) {
-        auto gpa = lookup_gpa_by_hpa(phy);
-        auto vring = get_vqueue_manager().get_belonging_vring(gpa);
-        if (vring && vring->queue->vdev->to_fuzz) {
-            vring->queue->complete_request(0);
-        }
-    }
 }
 
 void fuzz_clear_dirty() {

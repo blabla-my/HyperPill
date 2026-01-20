@@ -21,7 +21,7 @@ namespace fuzzer {
 };
 
 static bool syntax_model_completed_pred(void* ctx) {
-	return ((SyntaxModel*)ctx)->completed();
+	return ((SyntaxModel*)ctx)->all_completed();
 }
 
 enum cmds {
@@ -1208,7 +1208,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			if (!model)
 				return;
 #if BX_SUPPORT_SMP
-			if (bx_cpu_count > 1 && !model->completed()) {
+			if (bx_cpu_count > 1 && !model->all_completed()) {
 				drain_begin(syntax_model_completed_pred, model);
 				start_cpu();
 				DrainStats stats = drain_end();
@@ -1216,7 +1216,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			}
 #endif
 			size_t cnt = 0;
-			while (!fuzz_unhealthy_input && !model->completed()) {
+			while (!fuzz_unhealthy_input && !model->all_completed()) {
 				cnt++;
 				start_cpu();
 			}
