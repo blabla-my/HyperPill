@@ -18,8 +18,29 @@ SyntaxModel::SyntaxModel(VirtioDev &vdev)
 	: vdev_(vdev) {
 }
 
-SyntaxModel *SyntaxModel::Create(VirtioDev &vdev) {
+SyntaxModel *SyntaxModel::CreateOrGet(VirtioDev &vdev) {
 	return vdev.get_syntax_model();
+}
+
+void SyntaxModel::init() {
+	assert(!inited_);
+	reset_completion_tracking();
+	model_features_inited_ = false;
+	inited_ = true;
+	init_impl();
+	assert(model_features_inited_);
+}
+
+uint64_t SyntaxModel::model_features() const {
+	assert(inited_);
+	assert(model_features_inited_);
+	return model_features_;
+}
+
+void SyntaxModel::set_model_features(uint64_t features) {
+	assert(!model_features_inited_);
+	model_features_ = features;
+	model_features_inited_ = true;
 }
 
 uint16_t SyntaxModel::queue_notify_off(uint16_t queue_sel) {
@@ -163,11 +184,19 @@ SplitRingModel::SplitRingModel(VirtioDev &vdev)
 SplitRingModel::SplitQueueState &
 SplitRingModel::state_for_queue(uint16_t queue_sel) {
 	auto &state = queue_state_[queue_sel];
+	if (!state.inited) {
+		auto it = shadow_queue_state_.find(queue_sel);
+		if (it != shadow_queue_state_.end()) {
+			state = it->second;
+		}
+		state.inited = true;
+	}
 	return state;
 }
 
-void SplitRingModel::init() {
-	queue_state_.clear();
+void SplitRingModel::init_impl() {
+	set_model_features(0);
+	shadow_queue_state_.clear();
 	for (uint16_t i = 0; i < vdev().queue_num; i++) {
 		auto *q = vdev().queues[i];
 		if (!q || !q->used_ring) {
@@ -177,11 +206,22 @@ void SplitRingModel::init() {
 			continue;
 		}
 		uint16_t used_idx = 0;
+		uint16_t avail_idx = 0;
 		BX_MEM(0)->readPhysicalPage(
 			nullptr, q->used_ring->addr_hpa + sizeof(uint16_t),
 			sizeof(used_idx), &used_idx);
-		state_for_queue(i).next_used_idx = used_idx;
+		BX_MEM(0)->readPhysicalPage(
+			nullptr, q->avail_ring->addr_hpa + sizeof(uint16_t),
+			sizeof(avail_idx), &avail_idx);
+		auto &state = shadow_queue_state_[i];
+		state.inited = true;
+		state.used_idx = used_idx;
+		state.avail_idx = avail_idx;
 	}
+}
+
+bool SplitRingModel::matched(uint64_t features) const {
+	return (features & (1ULL << VIRTIO_F_RING_PACKED)) == 0;
 }
 
 bool SplitRingModel::completed(uint16_t head) {
@@ -199,13 +239,13 @@ bool SplitRingModel::completed(uint16_t head) {
 				    q->used_ring->addr_hpa + sizeof(uint16_t),
 				    sizeof(used_idx), &used_idx);
 
-	while (state.next_used_idx != used_idx) {
+	while (state.used_idx != used_idx) {
 		uint16_t pos =
-			(uint16_t)(state.next_used_idx % q->used_ring->size);
+			(uint16_t)(state.used_idx % q->used_ring->size);
 		vring_used_elem elem = {};
 		q->used_ring->read_elem(0, pos, &elem);
 		mark_completed(queue_sel_, (uint16_t)elem.id);
-		state.next_used_idx++;
+		state.used_idx++;
 	}
 
 	return has_completed(queue_sel_, head);
@@ -213,8 +253,7 @@ bool SplitRingModel::completed(uint16_t head) {
 
 uint16_t SplitRingModel::allocate_descriptors(DescChainFSM &fsm) {
 	uint16_t head = 0;
-	if (ic_ingest16(&head, 0, (uint16_t)(queue()->desc_ring->size - 1)) <
-	    0) {
+	if (ic_ingest16(&head, 0, (uint16_t)(queue()->desc_ring->size - 1)) < 0) {
 		return UINT16_MAX;
 	}
 	uint16_t total = (uint16_t)(fsm.sg_num_out + fsm.sg_num_in);
@@ -252,6 +291,7 @@ uint16_t SplitRingModel::allocate_descriptors(DescChainFSM &fsm) {
 
 		get_vqueue_manager().add_desc(desc_with_info);
 		fsm.add_desc(desc_with_info);
+		AddDescSize(queue()->idx, desc_info.desc_idx, desc_info.is_out, desc.len);
 	}
 	return head;
 }
@@ -288,11 +328,11 @@ void SplitRingModel::reset() {
 
 PackedRingModel::PackedRingModel(VirtioDev &vdev)
 	: SyntaxModel(vdev) {
-	init();
 }
 
-void PackedRingModel::init() {
-	queue_state_.clear();
+void PackedRingModel::init_impl() {
+	set_model_features(1ULL << VIRTIO_F_RING_PACKED);
+	shadow_queue_state_.clear();
 	for (uint16_t i = 0; i < vdev().queue_num; i++) {
 		auto *q = vdev().queues[i];
 		if (!q || !q->desc_ring || !q->desc_ring->addr_hpa) {
@@ -309,11 +349,19 @@ void PackedRingModel::init() {
 			q->desc_ring->read_elem(0, (uint16_t)((idx + q->desc_ring->size - 1) % q->desc_ring->size), &last_desc);
 			bool has_avail = (desc.flags & VIRTQ_DESC_F_AVAIL) != 0;
 			bool has_used = (desc.flags & VIRTQ_DESC_F_USED) != 0;
-			assert(has_avail == has_used);
+			// printf("Desc %u: flags=0x%x, has_avail=%d, has_used=%d\n", idx, desc.flags, has_avail, has_used);
 			bool last_has_avail = (last_desc.flags & VIRTQ_DESC_F_AVAIL) != 0;
 			bool last_has_used = (last_desc.flags & VIRTQ_DESC_F_USED) != 0;
-			assert(last_has_avail == last_has_used);
-			if (has_avail != last_has_avail) {
+
+			/* case-1: has inflight descriptors */	
+			if (last_has_used != last_has_avail and has_used == has_avail) {
+				state.next_desc_idx = idx;
+				state.wrap = last_has_avail;
+				recovered = true;	
+				break;
+			}
+			/* case-2: no inflight descriptors */
+			if (last_has_used == last_has_avail and has_used == has_avail and last_has_used != has_used) {
 				state.next_desc_idx = idx;
 				state.wrap = last_has_avail;
 				recovered = true;	
@@ -325,7 +373,12 @@ void PackedRingModel::init() {
 			q->desc_ring->read_elem(0, 0, &desc);
 			state.wrap = !(desc.flags & VIRTQ_DESC_F_AVAIL);
 		}
+		// printf("Recovered Packed Queue %u: next_desc_idx=%u, wrap=%d\n", i, state.next_desc_idx, state.wrap);
 	}
+}
+
+bool PackedRingModel::matched(uint64_t features) const {
+	return (features & (1ULL << VIRTIO_F_RING_PACKED)) != 0;
 }
 
 bool PackedRingModel::completed(uint16_t head) {
@@ -340,12 +393,9 @@ bool PackedRingModel::completed(uint16_t head) {
 	vring_packed_desc desc = {};
 	q->desc_ring->read_elem(0, head % q->desc_ring->size, &desc);
 
-	auto state = state_for_queue(queue_sel_);
 	bool has_avail = (desc.flags & VIRTQ_DESC_F_AVAIL) != 0;
 	bool has_used = (desc.flags & VIRTQ_DESC_F_USED) != 0;
-	// bool ok = (has_avail == state.scan_wrap && has_used != state.scan_wrap);
-	bool ok = has_avail == has_used;
-	if (ok) {
+	if (has_avail == has_used) {
 		mark_completed(queue_sel_, head);
 		return true;
 	}

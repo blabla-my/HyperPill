@@ -377,7 +377,9 @@ struct VirtioDev {
     bool indirect_desc;
 
 	SyntaxModel* get_syntax_model();
+	SyntaxModel* active_syntax_model() const;
 	void reset_syntax_model();
+	uint64_t current_features() const;
 
     void enumerate_queues_from_common_cfg();
     bool inited();
@@ -391,11 +393,23 @@ struct VirtioDev {
     bool disable_packed_queue();
     bool renegotiate_features(uint64_t new_guest_features);
 
-private:
-	std::unique_ptr<SyntaxModel> syntax_model_;
-	bool syntax_model_packed_ = false;
-    
-};
+	private:
+		void ensure_feature_store_inited();
+		void reset_features_to_shadow();
+		void set_current_features(uint64_t features);
+		void sync_feature_flags(uint64_t features);
+
+		SyntaxModel* find_syntax_model(uint64_t features) const;
+		SyntaxModel* create_syntax_model(uint64_t features);
+		void select_syntax_model(uint64_t features);
+
+		std::vector<std::unique_ptr<SyntaxModel>> syntax_models_;
+		SyntaxModel* syntax_model_in_use_ = nullptr;
+		uint64_t shadow_features_ = 0;
+		uint64_t current_features_ = 0;
+		bool features_inited_ = false;
+	    
+	};
 
 class VQueueManager {
 public:

@@ -694,22 +694,103 @@ VirtioDev::VirtioDev() {
 }
 
 SyntaxModel* VirtioDev::get_syntax_model() {
-	if (syntax_model_ && syntax_model_packed_ == packed) {
-		return syntax_model_.get();
+	ensure_feature_store_inited();
+	if (!features_inited_) {
+		return nullptr;
 	}
-	syntax_model_packed_ = packed;
-	if (packed) {
-		syntax_model_ = std::make_unique<PackedRingModel>(*this);
-	} else {
-		syntax_model_ = std::make_unique<SplitRingModel>(*this);
-	}
-	return syntax_model_.get();
+	select_syntax_model(current_features_);
+	return syntax_model_in_use_;
+}
+
+SyntaxModel* VirtioDev::active_syntax_model() const {
+	return syntax_model_in_use_;
+}
+
+uint64_t VirtioDev::current_features() const {
+	return current_features_;
 }
 
 void VirtioDev::reset_syntax_model() {
-	if (syntax_model_.get())
-		syntax_model_->reset();
-	syntax_model_packed_ = packed;
+	ensure_feature_store_inited();
+	if (!features_inited_) {
+		return;
+	}
+
+	reset_features_to_shadow();
+	select_syntax_model(current_features_);
+	for (auto &model : syntax_models_) {
+		if (model) {
+			model->reset();
+		}
+	}
+}
+
+void VirtioDev::ensure_feature_store_inited() {
+	if (features_inited_) {
+		return;
+	}
+	if (common_cfg.type != ConfigSpace::COMMON) {
+		return;
+	}
+
+	uint64_t guest_features = get_guest_features();
+	shadow_features_ = guest_features;
+	current_features_ = guest_features;
+	sync_feature_flags(current_features_);
+	features_inited_ = true;
+}
+
+void VirtioDev::reset_features_to_shadow() {
+	set_current_features(shadow_features_);
+}
+
+void VirtioDev::set_current_features(uint64_t features) {
+	current_features_ = features;
+	sync_feature_flags(features);
+}
+
+void VirtioDev::sync_feature_flags(uint64_t features) {
+	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
+	packed = (features & packed_bit) != 0;
+	uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
+	indirect_desc = (features & indirect_bit) != 0;
+}
+
+SyntaxModel* VirtioDev::find_syntax_model(uint64_t features) const {
+	for (const auto &model : syntax_models_) {
+		if (model && model->matched(features)) {
+			return model.get();
+		}
+	}
+	return nullptr;
+}
+
+SyntaxModel* VirtioDev::create_syntax_model(uint64_t features) {
+	std::unique_ptr<SyntaxModel> model;
+	if (features & (1ULL << VIRTIO_F_RING_PACKED)) {
+		model = std::make_unique<PackedRingModel>(*this);
+	} else {
+		model = std::make_unique<SplitRingModel>(*this);
+	}
+	assert(model);
+	model->init();
+	syntax_models_.push_back(std::move(model));
+	return syntax_models_.back().get();
+}
+
+void VirtioDev::select_syntax_model(uint64_t features) {
+	if (syntax_model_in_use_ && syntax_model_in_use_->matched(features)) {
+		return;
+	}
+
+	SyntaxModel *model = find_syntax_model(features);
+	if (!model) {
+		create_syntax_model(features);
+		model = find_syntax_model(features);
+	}
+	assert(model);
+	assert(model->matched(features));
+	syntax_model_in_use_ = model;
 }
 
 void VirtioDev::set_status(uint8_t status) {
@@ -783,19 +864,23 @@ bool VirtioDev::renegotiate_features(uint64_t new_guest_features) {
 		set_status(prev_status);
 	}
 
-	uint64_t packed_bit = (1ULL << VIRTIO_F_RING_PACKED);
-	packed = (negotiated & packed_bit) != 0;
-	uint64_t indirect_bit = (1ULL << VIRTIO_RING_F_INDIRECT_DESC);
-	indirect_desc = (negotiated & indirect_bit) != 0;
 	uint64_t guest_features = get_guest_features();
 
+	if (!features_inited_) {
+		shadow_features_ = guest_features;
+		features_inited_ = true;
+	}
+	set_current_features(guest_features);
+
 	if (guest_features != negotiated) {
-		printf("VirtioDev %s: Guest features readback %lx does not match negotiated %lx.\n", name, guest_features, negotiated);
+		printf("VirtioDev %s: Guest features readback %lx does not match negotiated %lx.\n",
+		       name, guest_features, negotiated);
 	}
 
 	DBG_PRINT {
 		printf("VirtioDev %s: updated guest features to %lx (packed=%d indirect=%d).\n",
-		       name, negotiated, packed ? 1 : 0, indirect_desc ? 1 : 0);
+		       name, guest_features, packed ? 1 : 0,
+		       indirect_desc ? 1 : 0);
 	}
 	get_vqueue_manager().enable_hook();
 	return true;

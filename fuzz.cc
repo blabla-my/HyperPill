@@ -1070,7 +1070,7 @@ bool op_notify() {
 	if (ic_ingest16(&queue_sel, 0, (uint16_t)(vdev->queue_num - 1)) < 0) {
 		return false;
 	}
-	auto* model = SyntaxModel::Create(*vdev);
+	auto* model = SyntaxModel::CreateOrGet(*vdev);
 	if (!model) {
 		return false;
 	}
@@ -1126,6 +1126,38 @@ static void virtio_select_driver_features_for_input() {
 	vdev->renegotiate_features(candidate);
 }
 
+static void virtio_select_ring_format_for_input() {
+	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	if (!vdev) {
+		return;
+	}
+	if (vdev->common_cfg.type != ConfigSpace::COMMON) {
+		return;
+	}
+
+	/*
+	 * Deterministic per-input "randomness": derive from the current ops
+	 * buffer without consuming bytes.
+	 */
+	uint8_t byte = 0;
+	size_t ops_len = *input_len_get();
+	if (ops_len) {
+		byte = input_get()[0];
+	}
+	bool want_packed = (byte & 1) != 0;
+
+	auto* active = vdev->active_syntax_model();
+	if (active && !active->all_completed()) {
+		return;
+	}
+
+	vdev->set_packed_queue(want_packed);
+
+	auto* model = vdev->get_syntax_model();
+	assert(model);
+	assert(model->matched(vdev->current_features()));
+}
+
 void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	bool (*ops[])() = {
 		[OP_READ] = op_read,
@@ -1154,7 +1186,6 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	if (virtio_core) {
 		reset_input_output();
 		input_deserialize(Data, Size, input_get(), input_len_get(), dma_data_get(), desc_pool_get());
-		// virtio_select_driver_features_for_input();
 	} else {
 		ic_new_input(Data, Size);
 	}
