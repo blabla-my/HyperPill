@@ -1089,7 +1089,9 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 					(dev_features & indirect_bit) &&
 					(guest_features & indirect_bit);
 			}
-			dev->enumerate_queues_from_common_cfg();
+			if (dev->to_fuzz && getenv("VIRTIO_CORE")) {
+				dev->enumerate_queues_from_common_cfg();
+			}
 			break;
 		case ConfigSpace::ISR:
 			if (dev->isr_cfg.address == address && dev->isr_cfg.size == size) {
