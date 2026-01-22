@@ -113,7 +113,7 @@ struct bxICacheEntry_c
   bxInstruction_c *i;
 };
 
-#define BX_MAX_TRACE_LENGTH 32
+#define BX_MAX_TRACE_LENGTH 64
 
 static const bx_phy_address BX_ICACHE_INVALID_PHY_ADDRESS = bx_phy_address(-1);
 
