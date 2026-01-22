@@ -1555,7 +1555,7 @@ static int ingest_vring_buffer(unsigned cpu, bx_address addr, bx_address gpa, si
 			
 	size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
 	bool is_out = desc_with_info->desc_info.is_out;
-	bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0);
+	bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && !queue->vdev->is_scsi);
 			
 	if (offset > 0x100) 
 		return 0;
