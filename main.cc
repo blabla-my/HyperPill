@@ -37,7 +37,7 @@ bool fuzzing;
 static bool executing_input;
 
 static constexpr unsigned long int kDrainIcountBudget = 5000000;
-static constexpr size_t kDrainPredTickInterval = 1000000;
+static constexpr size_t kDrainPredTickInterval = 100000;
 
 static struct {
 	bool active;
