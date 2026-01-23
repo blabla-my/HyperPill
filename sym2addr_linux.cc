@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <algorithm>
 
 
 static std::set<std::string> bins;
@@ -18,6 +19,10 @@ static std::set<std::string> bins;
 
 static std::map<sym_addr_t, sym_name_t> addr2sym;
 static std::map<sym_info_t, unsigned long> sym2addr;
+
+static std::string cached_symbols_dir;
+static std::vector<std::string> cached_symbols_files;
+static std::unordered_map<std::string, std::string> cached_symbols_match;
 
 // todo: dynamic libc symbols for stuff like exit etc
 // Strategy: Run objdump on the binary. Load the
@@ -221,6 +226,124 @@ void load_symbol_map_from_kallsyms(const char* kallsyms_path) {
         bins.insert(sym.first.bin);
     }
 }
+
+static void build_symbols_index(const std::string& symbols_dir) {
+	cached_symbols_files.clear();
+	cached_symbols_match.clear();
+
+	std::error_code ec;
+	std::filesystem::directory_iterator it(symbols_dir, ec);
+	std::filesystem::directory_iterator end;
+	if (ec) {
+		fprintf(stderr, "Failed to open SYMBOLS_DIR: %s\n",
+			symbols_dir.c_str());
+		return;
+	}
+	for (; !ec && it != end; it.increment(ec)) {
+		const auto& entry = *it;
+		std::error_code type_ec;
+		if (!(entry.is_regular_file(type_ec) || entry.is_symlink(type_ec)))
+			continue;
+		std::string filename = entry.path().filename().string();
+		if (!filename.empty())
+			cached_symbols_files.push_back(std::move(filename));
+	}
+	if (ec) {
+		fprintf(stderr, "Failed to iterate SYMBOLS_DIR: %s\n",
+			symbols_dir.c_str());
+	}
+	std::sort(cached_symbols_files.begin(), cached_symbols_files.end(),
+		[](const std::string& a, const std::string& b) {
+			return a.size() > b.size();
+		});
+}
+
+static std::string strip_suffix(std::string s, const char* suffix) {
+	size_t len = strlen(suffix);
+	if (s.size() < len)
+		return s;
+	if (s.compare(s.size() - len, len, suffix) == 0)
+		s.resize(s.size() - len);
+	return s;
+}
+
+static std::vector<std::string> version_trim_candidates(
+	const std::string& basename) {
+	std::vector<std::string> out;
+	size_t so_pos = basename.find(".so.");
+	if (so_pos == std::string::npos)
+		return out;
+
+	std::string cur = basename;
+	for (;;) {
+		size_t last_dot = cur.rfind('.');
+		if (last_dot == std::string::npos || last_dot <= so_pos + 3)
+			break;
+		bool digits = true;
+		for (size_t i = last_dot + 1; i < cur.size(); i++) {
+			if (cur[i] < '0' || cur[i] > '9') {
+				digits = false;
+				break;
+			}
+		}
+		if (!digits)
+			break;
+		cur.resize(last_dot);
+		out.push_back(cur);
+	}
+	return out;
+}
+
+static bool prefix_match_boundary(const std::string& s,
+	const std::string& prefix) {
+	if (s.size() < prefix.size())
+		return false;
+	if (s.compare(0, prefix.size(), prefix) != 0)
+		return false;
+	if (s.size() == prefix.size())
+		return true;
+	return s[prefix.size()] == '.';
+}
+
+static std::string resolve_symbols_file(const std::string& symbols_dir,
+	const std::string& raw_basename, const std::string& full_maps_path) {
+	std::string basename = strip_suffix(raw_basename, " (deleted)");
+
+	auto cached = cached_symbols_match.find(basename);
+	if (cached != cached_symbols_match.end())
+		return cached->second;
+
+	std::vector<std::string> candidates;
+	candidates.push_back(basename);
+	for (const auto& v : version_trim_candidates(basename))
+		candidates.push_back(v);
+
+	for (const auto& cand : candidates) {
+		std::string full = symbols_dir + "/" + cand;
+		if (!access(full.c_str(), F_OK)) {
+			if (cand != basename)
+				printf("symbols match: %s -> %s\n",
+					basename.c_str(), cand.c_str());
+			cached_symbols_match.emplace(basename, full);
+			return full;
+		}
+	}
+
+	for (const auto& sym : cached_symbols_files) {
+		if (prefix_match_boundary(basename, sym) ||
+			prefix_match_boundary(full_maps_path, sym)) {
+			std::string full = symbols_dir + "/" + sym;
+			printf("symbols fuzzy match: %s -> %s\n",
+				basename.c_str(), sym.c_str());
+			cached_symbols_match.emplace(basename, full);
+			return full;
+		}
+	}
+
+	cached_symbols_match.emplace(basename, std::string());
+	return std::string();
+}
+
 void load_symbol_map_from_maps(const char* maps_path) {
     char* symbols_dir = getenv("SYMBOLS_DIR");
     if (!symbols_dir) {
@@ -235,6 +358,12 @@ void load_symbol_map_from_maps(const char* maps_path) {
 
     std::filesystem::path maps_file_path(maps_path);
     int pid = std::stoi(maps_file_path.stem().string());
+
+    std::string symbols_dir_str(symbols_dir);
+    if (symbols_dir_str != cached_symbols_dir) {
+        cached_symbols_dir = symbols_dir_str;
+        build_symbols_index(cached_symbols_dir);
+    }
 
     std::string line;
     unsigned long start, end, offset, inode;
@@ -261,12 +390,13 @@ void load_symbol_map_from_maps(const char* maps_path) {
         if (basename.empty()) {
             basename = s_path; // If no '/' found, use the whole path
         }
+        basename = strip_suffix(basename, " (deleted)");
 
-        // check if $SYMBOLS_DIR/basename is a valid file
-        std::string full_path = std::string(symbols_dir) + "/" + basename;
-        if (access(full_path.c_str(), F_OK)) {
+        std::string full_path = resolve_symbols_file(
+            symbols_dir_str, basename, s_path);
+        if (full_path.empty()) {
             continue;
-        } 
+        }
 
         printf("loading symbols from %s\n", full_path.c_str());
         auto m = get_symbol_map(full_path);
