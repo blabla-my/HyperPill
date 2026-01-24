@@ -129,7 +129,7 @@ void vmcs_fixup() {
 
     BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_IA32_EFER, 0x500);
 
-    redo_paging();
+    // redo_paging();
     // TODO: Need to make sure the gaddr is associated with a valid EPT entry.
     return;
 }
