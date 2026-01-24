@@ -117,37 +117,28 @@ static size_t last_new = 0;
 void print_stacktrace(unsigned cpu){
     auto &trace = stacktrace_for_cpu(cpu);
     printf("#stacktrace\n");
-    if(trace.empty())
+    if (trace.empty()) {
+        printf("#end_stacktrace\n");
+        fflush(stdout);
+        fflush(stderr);
         return;
-    tsl::robin_set<bx_address> seen_cr3;
-    for (auto r = trace.rbegin(); r != trace.rend() ; ++r )
-    {
-        auto CR3 = r->CR3;
-        auto task = task_manager.get_task_by_cr3(CR3);
-        auto pid = task_manager.get_pid(CR3);
-        auto from_sym = addr_to_sym(r->caller, pid);
-        auto to_sym = addr_to_sym(r->callee, pid);
-        
-        // if a CR3 is unseen before, we dump current_task->rip
-        if (seen_cr3.find(CR3) == seen_cr3.end()) {
-            seen_cr3.insert(CR3);
-            if (task) {
-                auto final_rip_sym = addr_to_sym(task->get_pt_regs_rip(), pid);
-                printf("%016lx -> %016lx, %s, [%s] %s -> [%s] %s\n", r->callee, task->get_pt_regs_rip(), task->comm,
-                        to_sym.bin.c_str(), to_sym.symbol.c_str(), 
-                        final_rip_sym.bin.c_str(), final_rip_sym.symbol.c_str());
-            }
-        }
-
-        if (task)
-            printf("%016lx -> %016lx, %s, [%s] %s -> [%s] %s\n", r->caller, r->callee, task->comm,
-                    from_sym.bin.c_str(), from_sym.symbol.c_str(), 
-                    to_sym.bin.c_str(), to_sym.symbol.c_str());
-        else
-            printf("%016lx -> %016lx, [%s] %s -> [%s] %s\n", r->caller, r->callee, 
-                    from_sym.bin.c_str(), from_sym.symbol.c_str(), 
-                    to_sym.bin.c_str(), to_sym.symbol.c_str());
     }
+
+    auto print_frame = [](bx_address addr, const sym_name_t &sym) {
+        const char *symbol = sym.symbol.empty() ? "??" : sym.symbol.c_str();
+        const char *bin = sym.bin.empty() ? "??" : sym.bin.c_str();
+        printf("0x%lx %s (%s)\n", addr, symbol, bin);
+    };
+
+    const calltrace_t &last = trace.back();
+    int pid = task_manager.get_pid(last.CR3);
+    print_frame(last.callee, addr_to_sym(last.callee, pid));
+
+    for (auto r = trace.rbegin(); r != trace.rend(); ++r) {
+        pid = task_manager.get_pid(r->CR3);
+        print_frame(r->caller, addr_to_sym(r->caller, pid));
+    }
+
     printf("#end_stacktrace\n");
     fflush(stdout);
     fflush(stderr);
