@@ -154,5 +154,8 @@ Observed conventions are mixed; default to:
 
 ## Editor / Assistant Rules
 
+- Do not run `git commit` unless the user explicitly instructs or approves.
+- For each user request, make a detailed plan and TODO list; do not start
+  coding until the user says "approve".
 - No Cursor rules found (`.cursor/rules/` or `.cursorrules`).
 - No Copilot rules found (`.github/copilot-instructions.md`).
