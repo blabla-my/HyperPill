@@ -49,7 +49,7 @@ std::vector<std::tuple<bx_address, uint8_t, uint8_t>> fuzzed_guest_pages; // < H
 static int memory_commit_level;
 
 size_t ndirty=0;
-static constexpr size_t kNocovScale = 10;
+static constexpr size_t kNocovScale = 1;
 static const size_t kDirtyPageLimit =
     getenv("NOCOV") ? 10000 * kNocovScale : 10000;
 

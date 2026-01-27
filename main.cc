@@ -36,7 +36,7 @@ bool fuzz_should_abort = false;    /* We got a crash. */
 bool fuzzing;
 static bool executing_input;
 
-static constexpr size_t kNocovScale = 10;
+static constexpr size_t kNocovScale = 1;
 static bool nocov = getenv("NOCOV");
 static unsigned long int kDrainIcountBudget =
 	nocov ? 5000000 * kNocovScale : 5000000;
