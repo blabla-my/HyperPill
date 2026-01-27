@@ -11,6 +11,7 @@ static char output_buf[128];
 static char output_index = 0;
 
 Bit32u bx_devices_c::inp(Bit16u addr, unsigned len) {
+    return 0;
     if (addr == 0x3fd) {
         printf("%s\n", output_buf);
         memset(output_buf, 0, 128);
@@ -26,6 +27,7 @@ Bit32u bx_devices_c::inp(Bit16u addr, unsigned len) {
     return 0;
 }
 void bx_devices_c::outp(Bit16u addr, Bit32u value, unsigned len) { 
+    return;
     if (addr == 0x3f8) {
         output_buf[output_index % 128] = (unsigned char)value;
         output_index++;

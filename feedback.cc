@@ -27,6 +27,8 @@ tsl::robin_set<std::tuple<uint64_t, uint64_t, uint64_t>, Hasher> structset;
 
 bool fuzz_hook_vmlaunch(unsigned cpu) {
     /* printf("Vmlaunch:%lx\n", BX_CPU(id)->vmcsptr); */
+    if (drain_active())
+        return false;
     if(vmcs_addr == BX_CPU(cpu)->vmcsptr){
         pause_cpu();
         return true;

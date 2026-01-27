@@ -1241,6 +1241,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 #if BX_SUPPORT_SMP
 			if (bx_cpu_count > 1 && !model->all_completed()) {
 				drain_begin(syntax_model_completed_pred, model);
+				inject_halt();
 				start_cpu();
 				DrainStats stats = drain_end();
 				return;

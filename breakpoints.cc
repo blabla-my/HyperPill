@@ -204,6 +204,11 @@ void apply_breakpoints_linux() {
             free(msg);
         }
     });
+    add_breakpoint(sym_to_addr("vmlinux", "page_fault_oops"), [](unsigned cpu, bxInstruction_c *i) {
+        (void)i;
+        print_page_fault_pt_regs();
+        fuzz_emu_stop_crash(cpu, "page-fault-oops");
+    });
     // hook kasan
     add_breakpoint(sym_to_addr("vmlinux", "kasan_report"), [](unsigned cpu, bxInstruction_c *i) {
         (void)cpu;

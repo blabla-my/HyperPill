@@ -185,18 +185,19 @@ void add_opt_infer_range(size_t base, size_t len);
 	void fuzz_emu_stop_polling();
 	void pause_cpu();
 
-typedef bool (*drain_predicate_t)(void*);
-struct DrainStats {
-	size_t iters;
-	size_t tickn_calls;
-	bool budget_hit;
-};
-void drain_begin(drain_predicate_t pred, void* ctx);
-DrainStats drain_end();
+	typedef bool (*drain_predicate_t)(void*);
+	struct DrainStats {
+		size_t iters;
+		size_t tickn_calls;
+		bool budget_hit;
+	};
+	void drain_begin(drain_predicate_t pred, void* ctx);
+	DrainStats drain_end();
+	bool drain_active();
 
-extern uint64_t vmcs_addr;
-void redo_paging();
-void vmcs_fixup();
+	extern uint64_t vmcs_addr;
+	void redo_paging();
+	void vmcs_fixup();
 
 void add_indicator_value(uint64_t val);
 void clear_indicator_values();

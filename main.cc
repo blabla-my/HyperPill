@@ -69,6 +69,8 @@ DrainStats drain_end() {
 	return stats;
 }
 
+bool drain_active() { return drain_state.active; }
+
 // Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
 BOCHSAPI bx_pc_system_c bx_pc_system;
 #if BX_SUPPORT_SMP
@@ -169,10 +171,7 @@ void start_cpu(bool enumerating) {
 	reset_op_cov();
 
 	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-		if (drain_state.active && cpu == 0)
-			BX_CPU(cpu)->fuzz_executing_input = false;
-		else
-			BX_CPU(cpu)->fuzz_executing_input = true;
+		BX_CPU(cpu)->fuzz_executing_input = true;
 	}
 	if (BX_CPU(0)->fuzzdebug_gdb && !enumerating)
 		hp_gdbstub_debug_loop();
@@ -196,17 +195,13 @@ void start_cpu(bool enumerating) {
 			run = false;
 		}
 
-		auto smp_running = [&]() -> bool {
-			if (BX_CPU(0)->fuzz_executing_input)
-				return true;
-			if (!drain_state.active)
+			auto smp_running = [&]() -> bool {
+				for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
+					if (BX_CPU(cpu)->fuzz_executing_input)
+						return true;
+				}
 				return false;
-			for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-				if (BX_CPU(cpu)->fuzz_executing_input)
-					return true;
-			}
-			return false;
-		};
+			};
 
 		while (smp_running()) {
 			if (drain_state.active) {
@@ -315,6 +310,8 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
 			task->pid, task->kernel_task, task->hypervisor_task, task->comm,
 			task->cr3, task->pgd);
+	} else {
+		return;
 	}
 	fuzz_emu_stop_unhealthy();
 	// fuzz_should_abort = 1;
