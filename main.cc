@@ -36,7 +36,10 @@ bool fuzz_should_abort = false;    /* We got a crash. */
 bool fuzzing;
 static bool executing_input;
 
-static constexpr unsigned long int kDrainIcountBudget = 5000000;
+static constexpr size_t kNocovScale = 10;
+static bool nocov = getenv("NOCOV");
+static unsigned long int kDrainIcountBudget =
+	nocov ? 5000000 * kNocovScale : 5000000;
 static constexpr size_t kDrainPredTickIntervalInitial = 1024;
 static constexpr size_t kDrainPredTickIntervalMax = 100000;
 
@@ -95,7 +98,7 @@ static void *log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-uint64_t icount_limit = 50000000;
+uint64_t icount_limit = nocov ? 50000000 * kNocovScale : 50000000;
 uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;

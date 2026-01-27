@@ -49,6 +49,9 @@ std::vector<std::tuple<bx_address, uint8_t, uint8_t>> fuzzed_guest_pages; // < H
 static int memory_commit_level;
 
 size_t ndirty=0;
+static constexpr size_t kNocovScale = 10;
+static const size_t kDirtyPageLimit =
+    getenv("NOCOV") ? 10000 * kNocovScale : 10000;
 
 static bx_address prioraccess;
 void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
@@ -74,7 +77,7 @@ void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
       // make a complete shadow-copy on startup.
       if (dirtyset.emplace(aligned).second) {
           // if there is an infinite loop, we need to stop since it will cause a libfuzzer timeout and stop fuzzing.
-          if(ndirty++>10000){
+          if(ndirty++>kDirtyPageLimit){
               printf("Too many dirty pages. Early stop\n");
               fuzz_emu_stop_unhealthy();
           }

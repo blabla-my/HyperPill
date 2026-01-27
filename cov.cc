@@ -200,6 +200,9 @@ void add_edge_not_taken(unsigned cpu, bx_address prev_rip) {
 
 void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip) {
     static char* NEW_PC_QEMU_ONLY=getenv("NEW_PC_QEMU_ONLY");
+    static constexpr size_t kNocovScale = 10;
+    static const uint64_t kNoNewEdgeLimit =
+        getenv("NOCOV") ? 3000000 * kNocovScale : 3000000;
     if(ignore_pc(cpu, new_rip))
         // goto out;
         return ;
@@ -209,11 +212,11 @@ void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip) {
     if(fuzzing) {
         if(cur_input.emplace(new_rip).second)
             last_new = 0;
-        if(last_new++ > 3000000 && !master_fuzzer ){
+        if(last_new++ > kNoNewEdgeLimit && !master_fuzzer ){
             printf("No new edges for over %lu..\n", last_new);
             fuzz_emu_stop_unhealthy();
         }
-        if(last_new > 3000000 && master_fuzzer ){
+        if(last_new > kNoNewEdgeLimit && master_fuzzer ){
             printf("No new edges for over %lu..\n", last_new);
             fuzz_stacktrace(cpu);
             fuzz_emu_stop_unhealthy();
