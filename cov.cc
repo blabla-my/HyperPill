@@ -94,22 +94,13 @@ bool ignore_pc(unsigned cpu, bx_address pc) {
 }
 
 bool task_filter(unsigned cpu, bool user_only) {
+    (void)user_only;
     if (!fuzzing) return false;
     Task* cur_task = task_manager.get_current_task(cpu);
-    bool reject = false;
-    if(cur_task == NULL) {
+    if (cur_task == NULL) {
         return true;
     }
-    else if (cur_task->is_userspace_vmm_task()){
-        reject = BX_CPU(cpu)->get_cpl() == 0;
-    }
-    else if (!user_only && cur_task->is_hypervisor_task()){
-        reject = false;
-    }
-    else{
-        reject = true;
-    }
-    return reject;
+    return !cur_task->is_hypervisor_task();
 }
 
 static size_t last_new = 0;

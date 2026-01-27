@@ -37,7 +37,8 @@ bool fuzzing;
 static bool executing_input;
 
 static constexpr unsigned long int kDrainIcountBudget = 5000000;
-static constexpr size_t kDrainPredTickInterval = 100000;
+static constexpr size_t kDrainPredTickIntervalInitial = 1024;
+static constexpr size_t kDrainPredTickIntervalMax = 100000;
 
 static struct {
 	bool active;
@@ -46,6 +47,7 @@ static struct {
 	bool budget_hit;
 	size_t pred_calls;
 	size_t tickn_calls;
+	size_t pred_tick_interval;
 } drain_state = {};
 
 void drain_begin(drain_predicate_t pred, void* ctx) {
@@ -55,6 +57,7 @@ void drain_begin(drain_predicate_t pred, void* ctx) {
 	drain_state.budget_hit = false;
 	drain_state.pred_calls = 0;
 	drain_state.tickn_calls = 0;
+	drain_state.pred_tick_interval = kDrainPredTickIntervalInitial;
 }
 
 DrainStats drain_end() {
@@ -66,6 +69,7 @@ DrainStats drain_end() {
 	drain_state.ctx = nullptr;
 	drain_state.pred_calls = 0;
 	drain_state.tickn_calls = 0;
+	drain_state.pred_tick_interval = 0;
 	return stats;
 }
 
@@ -231,10 +235,19 @@ void start_cpu(bool enumerating) {
 					drain_state.tickn_calls++;
 					if (drain_state.pred &&
 					    drain_state.tickn_calls %
-						    kDrainPredTickInterval == 0) {
+						    drain_state.pred_tick_interval == 0) {
 						drain_state.pred_calls++;
 						if (drain_state.pred(drain_state.ctx))
 							pause_cpu();
+						if (drain_state.pred_tick_interval <
+						    kDrainPredTickIntervalMax) {
+							drain_state.pred_tick_interval *= 2;
+							if (drain_state.pred_tick_interval >
+							    kDrainPredTickIntervalMax) {
+								drain_state.pred_tick_interval =
+									kDrainPredTickIntervalMax;
+							}
+						}
 					}
 				}
 			}

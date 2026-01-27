@@ -115,6 +115,14 @@ void iterate_tasks(bx_address task_struct_head) {
         Task* task_ptr = task_manager.add_task(cpu, task);
         if (!task_ptr)
             break;
+        if (!task_ptr->hypervisor_task) {
+            for (auto sig : hypervisor_task_signatures) {
+                if (strstr(task_ptr->comm, sig.c_str()) != NULL) {
+                    task_ptr->hypervisor_task = 1;
+                    break;
+                }
+            }
+        }
 
         printf("Task at %lx PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Userspace VMM: %d, Comm: %s, CR3: %lx, PGD: %lx, flags: %x, stack: %lx, RIP: %lx\n",
                task, task_ptr->pid, task_ptr->kernel_task, task_ptr->hypervisor_task, task_ptr->userspace_vmm_task, task_ptr->comm,
