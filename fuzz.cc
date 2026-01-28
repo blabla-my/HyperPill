@@ -5,6 +5,7 @@
 #include "syntax.h"
 #include "virtio.h"
 #include "cov.h"
+#include "option.h"
 #include "vendor/libfuzzer-ng/FuzzerInternal.h"
 #include "vendor/libfuzzer-ng/FuzzerTracePC.h"
 #include <cstddef>
@@ -83,7 +84,7 @@ static void *pattern_alloc(pattern p, size_t len) {
 	1: not a vring element, should be considered as normal memory read
 */
 static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* data) {
-	static void* replay = getenv("REPLAY");
+	static bool replay = replay_enabled();
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
@@ -156,7 +157,7 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 		}
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
-			static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
+			static bool no_double_fetch = no_double_fetch_enabled();
 			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
 			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
 			assert(overlapped_size <= len);
@@ -169,7 +170,7 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 				return 0;
 
 			/* ingest random data */
-			bool overwrite = (replay == NULL);
+			bool overwrite = !replay;
 			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
@@ -205,7 +206,7 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 
 /* packed queue variant mirroring ingest_vring_split for future packed ring support */
 static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* data) {
-	static void* replay = getenv("REPLAY");
+	static bool replay = replay_enabled();
 	if (get_vqueue_manager().hooks_disabled()) {
 		return 0;
 	}
@@ -275,7 +276,7 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 		/* get the corresponding desc */
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
-			static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
+			static bool no_double_fetch = no_double_fetch_enabled();
 			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
 			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
 			assert(overlapped_size <= len);
@@ -288,7 +289,7 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 				return 0;
 
 			/* ingest random data */
-			bool overwrite = (replay == NULL);
+			bool overwrite = !replay;
 			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
@@ -327,7 +328,7 @@ void clear_seen_dma() {
 }
 
 void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void *data) {
-	static char* bypass_virtio_core = getenv("VIRTIO_CORE");
+	static bool bypass_virtio_core = virtio_core_enabled();
 	uint8_t *buf;
 	int rc;
 	bx_phy_address origin_addr = addr;
@@ -1092,8 +1093,8 @@ static void virtio_select_driver_features_for_input() {
 	static bool log_enabled;
 	if (!log_enabled_inited) {
 		log_enabled_inited = true;
-		log_enabled = getenv("VIRTIO_FEATURE_LOG") != nullptr ||
-			getenv("VIRTIO_RING_FORMAT_LOG") != nullptr;
+		log_enabled = virtio_feature_log_enabled() ||
+			virtio_ring_format_log_enabled();
 	}
 
 	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
@@ -1172,15 +1173,16 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	static const int nr_ops = sizeof(ops) / sizeof((ops)[0]);
 	uint8_t op;
 
-	static void *fuzz_legacy, *fuzz_hypercalls;
-	static void *virtio_core;
+	static bool fuzz_legacy;
+	static bool fuzz_hypercalls;
+	static bool virtio_core;
 	static int inited;
 	if (!inited) {
 		inited = 1;
-		fuzz_legacy = getenv("FUZZ_LEGACY");
-		fuzz_hypercalls = getenv("FUZZ_HYPERCALLS");
-		log_ops = getenv("LOG_OPS") || BX_CPU(0)->fuzztrace;
-		virtio_core = getenv("VIRTIO_CORE");
+		fuzz_legacy = fuzz_legacy_enabled();
+		fuzz_hypercalls = fuzz_hypercalls_enabled();
+		log_ops = log_ops_enabled() || BX_CPU(0)->fuzztrace;
+		virtio_core = virtio_core_enabled();
 	}
 
 	if (virtio_core) {
@@ -1273,16 +1275,17 @@ void add_ram_region(uint64_t addr, uint64_t size) {
 }
 void init_regions(const char *path) {
 	open_db(path);
-	if (getenv("FUZZ_ENUM")) {
+	if (fuzz_enum_enabled()) {
 		enum_pio_regions();
 		enum_mmio_regions();
         exit(0);
 	}
-	if (getenv("MANUAL_RANGES")) {
-		load_manual_ranges(getenv("MANUAL_RANGES"),
-				   getenv("RANGE_REGEX"), pio_regions,
+	if (manual_ranges_path()) {
+		load_manual_ranges(const_cast<char *>(manual_ranges_path()),
+				   const_cast<char *>(range_regex()),
+				   pio_regions,
 				   mmio_regions);
-		load_ram_regions_from_iomem(getenv("IOMEM"));
+		load_ram_regions_from_iomem(const_cast<char *>(iomem_path()));
 	} else {
 		load_regions(pio_regions, mmio_regions);
 	}

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "cpu/cpu.h"
 #include "fuzz.h"
+#include "option.h"
 #include "pc_system.h"
 #include "sourcecov.h"
 #include "task.h"
@@ -37,7 +38,7 @@ bool fuzzing;
 static bool executing_input;
 
 static constexpr size_t kNocovScale = 1;
-static bool nocov = getenv("NOCOV");
+static bool nocov = nocov_enabled();
 static unsigned long int kDrainIcountBudget =
 	nocov ? 5000000 * kNocovScale : 5000000;
 static constexpr size_t kDrainPredTickIntervalInitial = 1024;
@@ -54,6 +55,16 @@ static struct {
 } drain_state = {};
 
 void drain_begin(drain_predicate_t pred, void* ctx) {
+	if (!virtio_core_enabled()) {
+		drain_state.active = false;
+		drain_state.pred = nullptr;
+		drain_state.ctx = nullptr;
+		drain_state.budget_hit = false;
+		drain_state.pred_calls = 0;
+		drain_state.tickn_calls = 0;
+		drain_state.pred_tick_interval = 0;
+		return;
+	}
 	drain_state.active = true;
 	drain_state.pred = pred;
 	drain_state.ctx = ctx;
@@ -76,7 +87,7 @@ DrainStats drain_end() {
 	return stats;
 }
 
-bool drain_active() { return drain_state.active; }
+bool drain_active() { return virtio_core_enabled() && drain_state.active; }
 
 // Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
 BOCHSAPI bx_pc_system_c bx_pc_system;
@@ -94,7 +105,7 @@ BOCHSAPI Bit64s shadow_tsc;
 uint64_t vmcs_addr;
 uint64_t guest_rip; /* Entrypoint. Reset after each op */
 
-static void *log_writes;
+static bool log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
@@ -444,15 +455,15 @@ static void usage() {
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
-	static void *ic_test = getenv("FUZZ_IC_TEST");
-	static void *virtio_core = getenv("VIRTIO_CORE");
+	static bool ic_test = fuzz_ic_test_enabled();
+	static bool virtio_core = virtio_core_enabled();
 	static int done;
 	if (BX_CPU(0)->fuzztrace)
 		printf("NEW INPUT\n");
 	if (!done) {
 		if (!log_writes)
-			log_writes = getenv("LOG_WRITES");
-		if (!getenv("NOCOV")) {
+			log_writes = log_writes_enabled();
+		if (!nocov_enabled()) {
 			auto qemu_source_cov = new UserSourceCov("qemu-system-x86_64");
 			auto spdk_source_cov = new UserSourceCov("vhost");
 			auto vhost_net_source_cov = new KernelSourceCov("vhost-net", "vhost/net.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
@@ -558,24 +569,25 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 }
 
 extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
+	option_init();
 	/* Path to VM Snapshot */
-	char *mem_path = getenv("ICP_MEM_PATH");
-	char *regs_path = getenv("ICP_REGS_PATH");
-	char *icp_db_path = getenv("ICP_DB_PATH");
-	verbose = getenv("VERBOSE");
+	const char *mem_path = icp_mem_path();
+	const char *regs_path = icp_regs_path();
+	const char *icp_db_path_str = icp_db_path();
+	verbose = verbose_enabled();
 
 	/* The Layout of the VMCS is specific to the CPU where the snapshot was
 	 * collected, so we also need to load a mapping of VMCS encodings to
 	 * offsets
 	 */
-	char *vmcs_shadow_layout_path = getenv("ICP_VMCS_LAYOUT_PATH");
+	const char *vmcs_shadow_layout_path = icp_vmcs_layout_path();
 
 	/*
 	 * Location of VMCS is not contained in either the mem or regs, so
 	 * speicify it manually. It can be obtained from the KVM state dump into
 	 * syslog.
 	 */
-	char *vmcs_addr_str = getenv("ICP_VMCS_ADDR");
+	const char *vmcs_addr_str = icp_vmcs_addr_env();
 
 	if (!(mem_path && regs_path && vmcs_shadow_layout_path &&
 	      vmcs_addr_str))
@@ -584,7 +596,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	vmcs_addr = strtoll(vmcs_addr_str, NULL, 16);
 
 	auto guess_cpu_count = [&](const char *base) -> unsigned int {
-		const char *env = getenv("ICP_NCPUS");
+		const char *env = icp_ncpus_env();
 		if (env) {
 			long n = strtol(env, nullptr, 10);
 			if (n > 0)
@@ -613,8 +625,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	bx_init_pc_system();
 
 	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-		BX_CPU(cpu)->fuzzdebug_gdb = getenv("GDB");
-		BX_CPU(cpu)->fuzztrace = (getenv("FUZZ_DEBUG_DISASM") != 0);
+		BX_CPU(cpu)->fuzzdebug_gdb = gdb_enabled();
+		BX_CPU(cpu)->fuzztrace = fuzz_debug_disasm_enabled();
 	}
 
 	/* Load the snapshot */
@@ -687,13 +699,14 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	guest_rip = BX_CPU(0)->get_rip();
 	
 	/* Load symbols from files */
-	if (getenv("KALLSYMS") and getenv("MAPS")) {
+	if (kallsyms_path() and maps_path()) {
 		/* only in infer stage, these two should be set */
 		/* Load the kallsyms file */
-		load_symbol_map_from_kallsyms(getenv("KALLSYMS"));
-		// load_symbol_map_from_maps(getenv("MAPS"));
+		load_symbol_map_from_kallsyms(kallsyms_path());
+		// load_symbol_map_from_maps(maps_path());
 		// walk snapshot dir, find all file names that end with '.maps'
-		for (const auto &entry : std::filesystem::directory_iterator(getenv("SNAPSHOT_BASE"))) {
+		for (const auto &entry :
+		     std::filesystem::directory_iterator(snapshot_base())) {
 			if (entry.path().extension() == ".maps") {
 				printf("Loading symbol map from %s\n", entry.path().string().c_str());
 				load_symbol_map_from_maps(entry.path().string().c_str());
@@ -701,16 +714,16 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		}
 
 		/* Since we are in infer stage, after doing this, we write sym back to the db, then exit*/
-		store_sym_back_to_db(icp_db_path);
+		store_sym_back_to_db(icp_db_path_str);
 		exit(0);
 	}
 
 
 	/* For symbol - > addr (for breakpoints)*/
-	if (getenv("SYMBOL_MAPPING")) {
-		// load_symbol_map(getenv("SYMBOL_MAPPING"));
-		load_symbol_map_from_db(icp_db_path);
-		if (getenv("HACK_TIMER_MOD")) {
+	if (symbol_mapping_path()) {
+		// load_symbol_map(symbol_mapping_path());
+		load_symbol_map_from_db(icp_db_path_str);
+		if (hack_timer_mod_enabled()) {
 			timer_mod[0] = sym_to_addr("qemu-system", "timer_mod");
 			timer_mod[1] = sym_to_addr("qemu-system", "timer_mod_anticipate");
 			timer_mod[2] = sym_to_addr("qemu-system", "timer_mod_ns");
@@ -727,13 +740,14 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	ept_mark_page_table();
 	// init_register_feedback();
 
-	if (getenv("LINK_MAP") && getenv("LINK_OBJ_REGEX"))
-		load_link_map(getenv("LINK_MAP"), getenv("LINK_OBJ_REGEX"),
-			      strtoll(getenv("LINK_OBJ_BASE"), NULL, 16));
+	if (link_map_path() && link_obj_regex())
+		load_link_map(const_cast<char *>(link_map_path()),
+			      const_cast<char *>(link_obj_regex()),
+			      strtoll(link_obj_base_env(), NULL, 16));
 
 	uint32_t pciid = 0;
-	if (getenv("PCI_ID")) {
-		pciid = strtol(getenv("PCI_ID"), NULL, 16);
+	if (pci_id_env()) {
+		pciid = strtol(pci_id_env(), NULL, 16);
 		for (int i = 0; i < 32; i++)
 			for (int j = 0; j < 8; j++) {
 				uint32_t id = inject_pci_read(i, j, 0x0);
@@ -745,8 +759,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 				}
 			}
 	}
-	if (getenv("KVM")) {
-		if (getenv("KERNEL_DMA"))
+	if (kvm_enabled()) {
+		if (kernel_dma_enabled())
 			add_pc_range(0x0, 0xffffffffffffffff);
 		else
 			add_pc_range(0, 0x5fffffffffff);
@@ -774,7 +788,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 	/* Also, enumerate virtio queues */
 	/* Since virtio queue enumeration would inject MMIOs, reset bx vm. */
 	fuzzenum = true;
-	init_regions(icp_db_path);
+	init_regions(icp_db_path_str);
 	fuzzenum = false;
 	reset_bx_vm();
 

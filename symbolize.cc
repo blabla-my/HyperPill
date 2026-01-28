@@ -1,4 +1,5 @@
 #include "fuzz.h"
+#include "option.h"
 #include <stdlib.h>
 #include <string>
 #include <fstream>
@@ -146,8 +147,8 @@ void symbolize(size_t pc) {
     printf("Symbolization Range: %lx - %lx size: %lx file: %s section: %s sh_addr: %lx \n", vstart, vstart+size, size, match.c_str(), name, shaddr);
     /* load all symbol into database */
     static bool db_opened = false;
-    if(!db_opened && getenv("ICP_DB_PATH")) {
-        open_db(getenv("ICP_DB_PATH"));
+    if(!db_opened && icp_db_path()) {
+        open_db(icp_db_path());
         db_opened = true;
     }
     auto m = get_symbol_map(match);

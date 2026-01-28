@@ -16,6 +16,7 @@
 #include <tsl/robin_set.h>
 #include <tsl/robin_map.h>
 #include "../fuzz.h"
+#include "../option.h"
 #include <openssl/md5.h>
 
 BX_MEM_C::BX_MEM_C() {}
@@ -51,12 +52,12 @@ static int memory_commit_level;
 size_t ndirty=0;
 static constexpr size_t kNocovScale = 1;
 static const size_t kDirtyPageLimit =
-    getenv("NOCOV") ? 10000 * kNocovScale : 10000;
+    nocov_enabled() ? 10000 * kNocovScale : 10000;
 
 static bx_address prioraccess;
 void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
                              unsigned memtype, unsigned rw, void* data) {
-    static char* kernel_dma = getenv("KERNEL_DMA");
+    static bool kernel_dma = kernel_dma_enabled();
     bx_address aligned = phy&(~0xFFFLL);
 
     /* printf("Memory access to %lx\n", phy); */
@@ -91,7 +92,7 @@ void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
         if(BX_CPU(cpu)->fuzztrace) {
             /* printf(".dma inject: %lx +%lx ",phy, len); */
         }
-        static void* hv = getenv("HYPERV");
+        static bool hv = hyperv_enabled();
         if(BX_CPU(cpu)->user_pl || hv || kernel_dma) {
             Task* current_task = task_manager.get_current_task(cpu);
             if (!current_task) 
@@ -423,7 +424,7 @@ void icp_init_mem(const char *filename) {
     overlays[1]= (uint8_t *)mmap(NULL, maxaddr, PROT_READ | PROT_WRITE,
                           MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-    char *saved_md5sum_chr = getenv("ICP_MEM_MD5SUM");
+    const char *saved_md5sum_chr = icp_mem_md5sum();
     if (saved_md5sum_chr) {
         memcpy(md5sum_chr, saved_md5sum_chr, 32);
     } else {

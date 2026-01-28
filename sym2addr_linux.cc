@@ -1,4 +1,5 @@
 #include "fuzz.h"
+#include "option.h"
 #include <sstream>
 #include <fstream>
 #include <iostream>
@@ -345,7 +346,7 @@ static std::string resolve_symbols_file(const std::string& symbols_dir,
 }
 
 void load_symbol_map_from_maps(const char* maps_path) {
-    char* symbols_dir = getenv("SYMBOLS_DIR");
+    const char* symbols_dir = symbols_dir_path();
     if (!symbols_dir) {
         return;
     }

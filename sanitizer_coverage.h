@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include "fuzz.h"
+#include "option.h"
 
 static int duration = 0;
 static int coverage_dump_precision = 300;
@@ -68,7 +69,7 @@ static void llvm_profile_initialize_file(bool periodic) {
 
     if (!init) {
         __llvm_profile_initialize_file();
-        char *p = getenv("COVEARGE_DUMP_PRECISION");
+        const char *p = coverage_dump_precision_env();
         if (p) { coverage_dump_precision = atoi(p); }
         // first dump
         llvm_profile_dump();

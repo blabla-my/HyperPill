@@ -14,6 +14,7 @@
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include "cpu/vmx.h"
+#include "option.h"
 #include "pc_system.h"
 
 
@@ -491,7 +492,7 @@ void icp_init_regs_cpu(const char* filename, unsigned cpu) {
     BX_CPU(cpu)->cr2 = GETREG64(CR2);
     BX_CPU(cpu)->cr3 = GETREG64(CR3);
     BX_CPU(cpu)->cr4.set32(GETREG32(CR4));
-    if (!getenv("NOCOV")) {
+    if (!nocov_enabled()) {
         BX_CPU(cpu)->cr4.set_SMAP(false);
     }
     
@@ -510,9 +511,9 @@ void icp_init_regs_cpu(const char* filename, unsigned cpu) {
     uint64_t tsc = GETREG64(tsc);
     int64_t tsc_adjust = (int64_t) GETREG64(tsc_adjust);
     uint64_t tsc_factor = 1;
-    const char *tsc_factor_env = getenv("TSC_FACTOR");
-    if (tsc_factor_env) {
-        tsc_factor = strtoull(tsc_factor_env, NULL, 10);
+    const char *tsc_factor_env_value = tsc_factor_env();
+    if (tsc_factor_env_value) {
+        tsc_factor = strtoull(tsc_factor_env_value, NULL, 10);
         if (tsc_factor == 0) {
             tsc_factor = 1;
         }

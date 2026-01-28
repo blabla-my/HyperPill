@@ -6,6 +6,7 @@
 #include "time.h"
 #include "conveyor.h"
 #include "cov.h"
+#include "option.h"
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -76,7 +77,7 @@ void add_pc_range(size_t base, size_t len) {
 }
 
 bool ignore_pc(unsigned cpu, bx_address pc) {
-    static char* pc_filter = getenv("PC_FILTER");
+    static bool pc_filter = pc_filter_enabled();
     if (pc_filter){
         return task_filter(cpu);
     }
@@ -199,10 +200,10 @@ void add_edge_not_taken(unsigned cpu, bx_address prev_rip) {
 }
 
 void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip) {
-    static char* NEW_PC_QEMU_ONLY=getenv("NEW_PC_QEMU_ONLY");
+    static bool NEW_PC_QEMU_ONLY = new_pc_qemu_only_enabled();
     static constexpr size_t kNocovScale = 1;
     static const uint64_t kNoNewEdgeLimit =
-        getenv("NOCOV") ? 3000000 * kNocovScale : 3000000;
+        nocov_enabled() ? 3000000 * kNocovScale : 3000000;
     if(ignore_pc(cpu, new_rip))
         // goto out;
         return ;
@@ -262,7 +263,7 @@ void fuzz_stacktrace(unsigned cpu){
     /* if(master_fuzzer) */
     if(fuzzing)
         ic_dump();
-    static void *log_crashes = getenv("LOG_CRASHES");
+    static bool log_crashes = log_crashes_enabled();
     if(!log_crashes)
         return;
     print_stacktrace(cpu);

@@ -13,6 +13,7 @@
 #include "virtio.h"
 #include "conveyor.h"
 #include "conveyor.h"
+#include "option.h"
 #include <sys/types.h>
 #include "vendor/libfuzzer-ng/FuzzerMutate.h"
 
@@ -559,7 +560,7 @@ extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 extern "C" size_t LLVMFuzzerMutateParadox(uint8_t *Data, size_t Size, size_t MaxSize, int type);
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                          size_t MaxSize, unsigned int Seed) {
-    static void* virtio_core = getenv("VIRTIO_CORE");
+    static bool virtio_core = virtio_core_enabled();
     if (!mutate_desc_pool1) {
         mutate_desc_pool1 = new fuzzer::DescPool();
     }

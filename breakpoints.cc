@@ -3,6 +3,7 @@
 #include "cpu/decoder/decoder.h"
 #include "cpu/decoder/instr.h"
 #include "fuzz.h"
+#include "option.h"
 #include "task.h"
 #include <string>
 #include <tsl/robin_map.h>
@@ -233,7 +234,7 @@ void handle_syscall_hooks(unsigned cpu, bxInstruction_c *i)
 {
     // crashes often go for exit/abort
     /* Hook Syscalls */
-    static void* nocov = getenv("NOCOV");
+    static bool nocov = nocov_enabled();
     if (i->getIaOpcode() == 0x471) {
 		switch(BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx) {
 			case 231:

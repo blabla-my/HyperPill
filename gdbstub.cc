@@ -22,6 +22,7 @@
 /////////////////////////////////////////////////////////////////////////
 
 #include "fuzz.h"
+#include "option.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -793,8 +794,8 @@ static void debug_loop(void)
         }
         else if (strncmp(&buffer[1], "Offsets", strlen("Offsets")) == 0)
         {
-          if (getenv("LINK_OBJ_BASE")) {
-            uint64_t base = strtoull(getenv("LINK_OBJ_BASE"), NULL, 16);
+          if (link_obj_base_env()) {
+            uint64_t base = strtoull(link_obj_base_env(), NULL, 16);
             sprintf(obuf, "Text=%lx;Data=%lx;Bss=%lx", base, base, base);
             put_reply(obuf);
           } else {

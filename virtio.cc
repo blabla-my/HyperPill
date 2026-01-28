@@ -11,6 +11,7 @@
 #include "task.h"
 #include "pc_system.h"
 #include "cov.h"
+#include "option.h"
 #include <bits/types/struct_iovec.h>
 #include <cassert>
 #include <algorithm>
@@ -1089,7 +1090,7 @@ void VQueueManager::add_config_space(const std::string& name, enum ConfigSpace::
 					(dev_features & indirect_bit) &&
 					(guest_features & indirect_bit);
 			}
-			if (dev->to_fuzz && getenv("VIRTIO_CORE")) {
+			if (dev->to_fuzz && virtio_core_enabled()) {
 				dev->enumerate_queues_from_common_cfg();
 			}
 			break;
@@ -1516,13 +1517,13 @@ size_t DescChainFSM::get_request_offset(bx_address gpa) const {
 }
 
 void AddDescSize(uint16_t queue_id, uint16_t desc_idx, bool is_out, uint32_t size) {
-	static void* enabled = getenv("SGL_SIZE_INFER");
+	static bool enabled = sgl_size_infer_enabled();
 	if (enabled)
 		__trace_pc_add_desc_size(queue_id, desc_idx, is_out, size);
 }
 
 const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_out) {
-	static void* enabled = getenv("SGL_SIZE_INFER");
+	static bool enabled = sgl_size_infer_enabled();
 	if (enabled)
 		return (DescSize*)__trace_pc_get_desc_size_hints(queue_id, desc_idx, is_out);
 	return nullptr;
@@ -1537,8 +1538,8 @@ const DescSize* GetDescSizeHints(uint16_t queue_id, uint16_t desc_idx, bool is_o
  */
 static int ingest_vring_buffer(unsigned cpu, bx_address addr, bx_address gpa, size_t len,
                                void* data) {
-	static void* replay = getenv("REPLAY");
-	static char* no_double_fetch = getenv("NO_DOUBLE_FETCH");
+	static bool replay = replay_enabled();
+	static bool no_double_fetch = no_double_fetch_enabled();
 
 	/* get the corresponding desc */
 	if (get_vqueue_manager().hooks_disabled()) {
@@ -1561,7 +1562,7 @@ static int ingest_vring_buffer(unsigned cpu, bx_address addr, bx_address gpa, si
 		return 0;
 
 	/* ingest random data */
-	bool overwrite = (replay == NULL);
+	bool overwrite = !replay;
 	uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
 	if (!buf)
 		return -1;
@@ -1675,7 +1676,7 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 
 /* packed queue variant mirroring ingest_vring_split for packed ring support */
 static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* data) {
-	static char* vring_log = getenv("VIRTIO_VRING_LOG");
+	static const char* vring_log = virtio_vring_log();
 	static tsl::robin_map<size_t, bool> logged_init;
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);

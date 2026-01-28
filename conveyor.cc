@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "conveyor.h"
+#include "option.h"
 #include <sys/types.h>
 #include <x86intrin.h>
 #include <stdio.h>
@@ -230,7 +231,7 @@ void ic_modify_output(size_t offset, size_t len, void *src) {
 }
 
 uint8_t* final_input_get(size_t* length) {
-    static void* virtio_core = getenv("VIRTIO_CORE");
+    static bool virtio_core = virtio_core_enabled();
     if(!final_input) {
         final_input = (uint8_t*)malloc(MAXLEN + sizeof(fuzzer::DescPool) + sizeof(fuzzer::DMAData));
     }
@@ -506,7 +507,7 @@ void ic_dump(){
 }
 
 void ic_dump_file(const char* filepath) {
-    static void* virtio_core = getenv("VIRTIO_CORE");
+    static bool virtio_core = virtio_core_enabled();
     FILE *f = fopen(filepath, "wb");
 
     uint8_t* data;
@@ -585,5 +586,3 @@ void ic_subtract(size_t l){
 void update_desc_region(uint16_t queue_idx, uint16_t desc_idx, bool is_out, unsigned long pos, unsigned long len) {
     __trace_pc_add_desc_region(queue_idx, desc_idx, is_out, pos, len);
 }
-
-

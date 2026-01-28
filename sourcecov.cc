@@ -2,6 +2,7 @@
 #include "config.h"
 #include "fuzz.h"
 #include "sourcecov.h"
+#include "option.h"
 
 #include "task.h"
 #include "gcov.h"
@@ -56,7 +57,8 @@ static uint64_t get_addr_of_symbol(const char* symbolname)
     char addr[100];
 
     char cmd[500];
-    snprintf(cmd, 500, "nm --defined-only -n %s | grep %s | cut -f1 -d ' '", getenv("LINK_OBJ_PATH"), symbolname);
+    snprintf(cmd, 500, "nm --defined-only -n %s | grep %s | cut -f1 -d ' '",
+	     link_obj_path(), symbolname);
     fp = popen(cmd, "r");
     if (fp == NULL) {
         printf("Failed to run command %s\n", cmd);
@@ -216,14 +218,14 @@ void check_write_coverage(){
         return;
     last_coverage_dump=t;
     // following dump
-    static char* no_cov = getenv("NOCOV");
+    static bool no_cov = nocov_enabled();
     if (!no_cov){
         for (auto source_cov : source_cov_set){
             source_cov->write_source_cov();
         }
     }
 
-    static char* dump_seen_edges = getenv("SEEN_EDGES");
+    static bool dump_seen_edges = seen_edges_enabled();
     if (dump_seen_edges)
         dump_seen_edges_to_file();
 }
@@ -340,18 +342,19 @@ void setup_periodic_coverage(){
     readlink("/proc/self/fd/1", linkpath, 128);
     linkpath[127] = 0;
     if(strstr(linkpath, "fuzz-0.log")){
-        if(!getenv("NOCOV")) {
+        if(!nocov_enabled()) {
             last_coverage_dump=time(NULL);
             for (auto source_cov : source_cov_set) {
                 source_cov->write_source_cov();
             }
         }
-        if(getenv("SEEN_EDGES")) {
+        if(seen_edges_enabled()) {
             last_coverage_dump=time(NULL);
             dump_seen_edges_to_file();
         }
         master_fuzzer = true;
-    } else if(strstr(linkpath, "fuzz-") && getenv("PROGRESSIVE_TIMEOUT")){
+    } else if(strstr(linkpath, "fuzz-") &&
+	      progressive_timeout_enabled()){
         std::stringstream ss;
         std::regex log_regex("fuzz-(.*).log");
         std::smatch match;
@@ -361,7 +364,7 @@ void setup_periodic_coverage(){
         ss << std::dec << match[1].str();
         int val;
         ss >> val;
-        unsigned long max = strtol(getenv("NSLOTS"), NULL, 10);
+        unsigned long max = strtol(nslots_env(), NULL, 10);
         assert(val < max);
         if(max != LONG_MIN){
             icount_limit = icount_limit_floor + ((icount_limit-icount_limit_floor)/(max))*(val-1);

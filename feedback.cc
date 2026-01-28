@@ -1,5 +1,6 @@
 #include "bochs.h"
 #include "fuzz.h"
+#include "option.h"
 #include <sys/types.h>
 #include <tsl/robin_set.h>
 #include <unordered_set>
@@ -77,7 +78,7 @@ void indicator_cb(void(*cb)(uint64_t)) {
 
 void fuzz_hook_cmp(unsigned cpu, uint64_t op1, uint64_t op2, size_t size,
                    bool constant){
-    static void* constant_only = getenv("CMPLOG_CONSTANT_ONLY"); 
+    static bool constant_only = cmplog_constant_only_enabled();
     if (constant_only && !constant)
         return;
 
