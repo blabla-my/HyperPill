@@ -156,10 +156,28 @@ DEFINE_BOOL_OPTION(verbose_enabled, "VERBOSE")
 DEFINE_BOOL_OPTION(gdb_enabled, "GDB")
 DEFINE_BOOL_OPTION(fuzz_debug_disasm_enabled, "FUZZ_DEBUG_DISASM")
 DEFINE_BOOL_OPTION(hack_timer_mod_enabled, "HACK_TIMER_MOD")
+DEFINE_BOOL_OPTION(abort_on_err_enabled, "ABORT_ON_ERR")
+DEFINE_BOOL_OPTION(no_asan_enabled, "NO_ASAN")
 DEFINE_BOOL_OPTION(kvm_enabled, "KVM")
 DEFINE_BOOL_OPTION(sgl_size_infer_enabled, "SGL_SIZE_INFER")
 
 #undef DEFINE_BOOL_OPTION
+
+size_t nocov_scale(void) {
+	static bool init = false;
+	static size_t value = 1;
+	if (!init) {
+		init = true;
+		const char *env = getenv("NOCOV_SCALE");
+		if (env) {
+			char *end = nullptr;
+			unsigned long parsed = strtoul(env, &end, 10);
+			if (end != env && *end == '\0' && parsed > 0)
+				value = static_cast<size_t>(parsed);
+		}
+	}
+	return value;
+}
 
 const char *manual_ranges_path(void) {
 	option_require_checked();

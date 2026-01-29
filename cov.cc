@@ -201,9 +201,8 @@ void add_edge_not_taken(unsigned cpu, bx_address prev_rip) {
 
 void add_edge(unsigned cpu, bx_address prev_rip, bx_address new_rip) {
     static bool NEW_PC_QEMU_ONLY = new_pc_qemu_only_enabled();
-    static constexpr size_t kNocovScale = 1;
     static const uint64_t kNoNewEdgeLimit =
-        nocov_enabled() ? 3000000 * kNocovScale : 3000000;
+        nocov_enabled() ? 3000000 * nocov_scale() : 3000000;
     if(ignore_pc(cpu, new_rip))
         // goto out;
         return ;

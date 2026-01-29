@@ -50,9 +50,8 @@ std::vector<std::tuple<bx_address, uint8_t, uint8_t>> fuzzed_guest_pages; // < H
 static int memory_commit_level;
 
 size_t ndirty=0;
-static constexpr size_t kNocovScale = 1;
 static const size_t kDirtyPageLimit =
-    nocov_enabled() ? 10000 * kNocovScale : 10000;
+    nocov_enabled() ? 10000 * nocov_scale() : 10000;
 
 static bx_address prioraccess;
 void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,

@@ -37,10 +37,9 @@ bool fuzz_should_abort = false;    /* We got a crash. */
 bool fuzzing;
 static bool executing_input;
 
-static constexpr size_t kNocovScale = 1;
 static bool nocov = nocov_enabled();
 static unsigned long int kDrainIcountBudget =
-	nocov ? 5000000 * kNocovScale : 5000000;
+	nocov ? 5000000 * nocov_scale() : 5000000;
 static constexpr size_t kDrainPredTickIntervalInitial = 1024;
 static constexpr size_t kDrainPredTickIntervalMax = 100000;
 
@@ -109,7 +108,7 @@ static bool log_writes;
 static bool fuzzenum;
 
 uint64_t icount_limit_floor = 200000;
-uint64_t icount_limit = nocov ? 50000000 * kNocovScale : 50000000;
+uint64_t icount_limit = nocov ? 50000000 * nocov_scale() : 50000000;
 uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;
@@ -358,6 +357,11 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 		std::stringstream ss;
 		ss << type << "-" << std::hex << hash;
 		ic_dump_file(ss.str().c_str());
+	}
+	if (abort_on_err_enabled()) {
+		fflush(stdout);
+		fflush(stderr);
+		_exit(0);
 	}
 }
 

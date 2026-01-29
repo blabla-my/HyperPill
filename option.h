@@ -2,6 +2,7 @@
 #define OPTION_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 void option_init(void);
 
@@ -29,8 +30,11 @@ bool verbose_enabled(void);
 bool gdb_enabled(void);
 bool fuzz_debug_disasm_enabled(void);
 bool hack_timer_mod_enabled(void);
+bool abort_on_err_enabled(void);
+bool no_asan_enabled(void);
 bool kvm_enabled(void);
 bool sgl_size_infer_enabled(void);
+size_t nocov_scale(void);
 
 const char *manual_ranges_path(void);
 const char *range_regex(void);

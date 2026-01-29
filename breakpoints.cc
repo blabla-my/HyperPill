@@ -140,6 +140,7 @@ void apply_breakpoints_linux() {
     //         BX_CPU(id)->gen_reg[BX_64BIT_REG_RAX].rrx = 0;
     //         BX_CPU(id)->async_event = 1;
     //         });
+	if (!no_asan_enabled()) {
 	    add_breakpoint(sym_to_addr("firecracker", "__asan::CheckUnwind()"), [](unsigned cpu, bxInstruction_c *i) {
 	            printf("Skipping __asan::CheckUnwind");
 	            print_stacktrace(cpu);
@@ -148,50 +149,51 @@ void apply_breakpoints_linux() {
 	            i->modRMForm.Iw[1] = 0;
 	            BX_CPU(cpu)->async_event = 1;
 	            });
-    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            // every error through asan should reach this
-            printf("ASAN error report\n");
-            fuzz_stacktrace(cpu);
-            fuzz_emu_stop_crash(cpu, "asan-scoped-error");
-            }, false);
-    add_breakpoint(sym_to_addr("vhost", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            // every error through asan should reach this
-            printf("ASAN error report\n");
-            fuzz_stacktrace(cpu);
-            fuzz_emu_stop_crash(cpu, "asan-scoped-error");
-            }, false);
-    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            printf("ASAN GENERIC ERROR\n");
-            fuzz_emu_stop_crash(cpu, "asan-generic-error");
-            });
-    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            printf("ASAN Deadly Signal\n");
-            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
-            });
-    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            printf("ASAN GENERIC ERROR\n");
-            fuzz_emu_stop_crash(cpu, "asan-generic-error");
-            }, false);
-    add_breakpoint(sym_to_addr("vhost", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            printf("ASAN GENERIC ERROR\n");
-            fuzz_emu_stop_crash(cpu, "asan-generic-error");
-            }, false);
-    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            printf("ASAN Deadly Signal\n");
-            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
-            }, false);
-    add_breakpoint(sym_to_addr("vhost", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
-            (void)cpu;
-            printf("ASAN Deadly Signal\n");
-            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
-            }, false);
+	    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            // every error through asan should reach this
+	            printf("ASAN error report\n");
+	            fuzz_stacktrace(cpu);
+	            fuzz_emu_stop_crash(cpu, "asan-scoped-error");
+	            }, false);
+	    add_breakpoint(sym_to_addr("vhost", "__asan::ScopedInErrorReport::~ScopedInErrorReport"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            // every error through asan should reach this
+	            printf("ASAN error report\n");
+	            fuzz_stacktrace(cpu);
+	            fuzz_emu_stop_crash(cpu, "asan-scoped-error");
+	            }, false);
+	    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("ASAN GENERIC ERROR\n");
+	            fuzz_emu_stop_crash(cpu, "asan-generic-error");
+	            });
+	    add_breakpoint(sym_to_addr("libasan.so.8", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("ASAN Deadly Signal\n");
+	            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
+	            });
+	    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("ASAN GENERIC ERROR\n");
+	            fuzz_emu_stop_crash(cpu, "asan-generic-error");
+	            }, false);
+	    add_breakpoint(sym_to_addr("vhost", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("ASAN GENERIC ERROR\n");
+	            fuzz_emu_stop_crash(cpu, "asan-generic-error");
+	            }, false);
+	    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("ASAN Deadly Signal\n");
+	            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
+	            }, false);
+	    add_breakpoint(sym_to_addr("vhost", "__asan::AsanOnDeadlySignal"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("ASAN Deadly Signal\n");
+	            fuzz_emu_stop_crash(cpu, "asan-deadly-signal");
+	            }, false);
+	}
     add_breakpoint(sym_to_addr("libc.so", "abort@@GLIBC_2.2.5"), [](unsigned cpu, bxInstruction_c *i) {
             (void)cpu;
             fuzz_emu_stop_crash(cpu, "abort");
