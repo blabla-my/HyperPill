@@ -339,7 +339,7 @@ void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void *dat
 
 	/* we should not ignore polling */
 	if (!bypass_virtio_core && seen_dma[addr + len - 1] == len) {
-		printf("DMA at %lx len %x already handled\n", addr, len);
+		// printf("DMA at %lx len %x already handled\n", addr, len);
 		return;
 	}
 
