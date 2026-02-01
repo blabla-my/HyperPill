@@ -5,6 +5,7 @@
 #include "option.h"
 #include "pc_system.h"
 #include "sourcecov.h"
+#include "syntax.h"
 #include "task.h"
 #include "gui/siminterface.h"
 #include "param_names.h"
@@ -351,6 +352,12 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type){
 		printf("Stacktrace hash: %lx\n", hash);
 		stacktrace_hash_add(hash);
 		print_stacktrace(cpu);
+		auto *vdev = get_vqueue_manager().get_fuzzed_dev();
+		if (vdev) {
+			if (auto *model = vdev->get_syntax_model()) {
+				model->log_generated_request(cpu);
+			}
+		}
 		dump_regs_cpu(cpu);
 		dump_instr_cpu(cpu);
 		// construct a string type-hash, hash is hexadecimal

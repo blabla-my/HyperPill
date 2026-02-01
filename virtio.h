@@ -167,6 +167,11 @@ struct vring_desc_with_info {
     uint8_t used_cnt;
 } __attribute__((packed));
 
+struct SeenRange {
+    uint64_t start;
+    uint64_t end;
+};
+
 typedef uint16_t vring_avail_elem;
 
 struct alignas(8) vring_used_elem {
@@ -437,6 +442,7 @@ public:
     void add_seen_buffer(uint64_t start, uint64_t size);
     void reset_seen_buffer() {seen_buffers.clear();}
     uint64_t overlapped_size(uint64_t start, uint64_t size); /* if non-overlap, return 0 */
+    std::vector<SeenRange> get_seen_ranges(uint64_t start, uint64_t end) const;
 
     size_t get_queue_list_size() const {return queue_list.size();}
     void add_to_queue_list(VQueue* queue) {queue_list.push_back(queue);}

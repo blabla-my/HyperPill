@@ -1354,6 +1354,49 @@ uint64_t VQueueManager::overlapped_size(uint64_t start, uint64_t size) {
 	}
 }
 
+std::vector<SeenRange> VQueueManager::get_seen_ranges(uint64_t start,
+						      uint64_t end) const {
+	std::vector<SeenRange> ranges;
+	if (start >= end) {
+		return ranges;
+	}
+	for (const auto &entry : seen_buffers) {
+		uint64_t s = entry.first;
+		uint64_t e = s + entry.second;
+		if (e <= start || s >= end) {
+			continue;
+		}
+		uint64_t rs = s > start ? s : start;
+		uint64_t re = e < end ? e : end;
+		if (rs < re) {
+			ranges.push_back({rs, re});
+		}
+	}
+	if (ranges.empty()) {
+		return ranges;
+	}
+	std::sort(ranges.begin(), ranges.end(),
+		  [](const SeenRange &a, const SeenRange &b) {
+			  return a.start < b.start;
+		  });
+	std::vector<SeenRange> merged;
+	merged.reserve(ranges.size());
+	SeenRange cur = ranges[0];
+	for (size_t i = 1; i < ranges.size(); i++) {
+		const auto &r = ranges[i];
+		if (r.start <= cur.end) {
+			if (r.end > cur.end) {
+				cur.end = r.end;
+			}
+		} else {
+			merged.push_back(cur);
+			cur = r;
+		}
+	}
+	merged.push_back(cur);
+	return merged;
+}
+
 /* VirtQueueElement */
 int read_virtqueue_element(unsigned cpu, bx_address elem_ptr_hva, VirtQueueElement* elem){
 	if (elem_ptr_hva == 0 || elem == NULL) {

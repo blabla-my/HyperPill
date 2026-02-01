@@ -29,6 +29,7 @@ class SyntaxModel {
 	virtual bool completed(uint16_t head) = 0;
 	bool all_completed();
 	uint64_t model_features() const;
+	virtual void log_generated_request(unsigned cpu) = 0;
 
     protected:
 	virtual void init_impl() = 0;
@@ -78,6 +79,7 @@ class SplitRingModel final : public SyntaxModel {
 	void reset() override;
 	bool matched(uint64_t features) const override;
 	bool completed(uint16_t head) override;
+	void log_generated_request(unsigned cpu) override;
 
     protected:
 	void init_impl() override;
@@ -104,6 +106,7 @@ class PackedRingModel final : public SyntaxModel {
 	void reset() override;
 	bool matched(uint64_t features) const override;
 	bool completed(uint16_t head) override;
+	void log_generated_request(unsigned cpu) override;
 
     protected:
 	void init_impl() override;
