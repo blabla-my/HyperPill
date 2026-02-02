@@ -135,7 +135,6 @@ static bool write_json_request(unsigned cpu, VQueue *queue, bool is_packed,
 		json_indent(indent_level + 2);
 		printf("{\n");
 		json_indent(indent_level + 3);
-		printf("\"index\": %u,\n", desc_with_info->desc_info.desc_idx);
 		json_indent(indent_level + 3);
 		printf("\"addr\": \"%s\",\n", hex_u64(addr).c_str());
 		json_indent(indent_level + 3);
