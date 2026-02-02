@@ -57,10 +57,10 @@ static uint8_t *final_input;
 static size_t final_input_len;
 
 static fuzzer::DescPool desc_pool;
-static fuzzer::DMAData dma_data;
+static fuzzer::RequestBuffer request_buffer;
 
 fuzzer::DescPool* desc_pool_get() {return &desc_pool;}
-fuzzer::DMAData* dma_data_get() {return &dma_data;}
+fuzzer::RequestBuffer* request_buffer_get() {return &request_buffer;}
 
 uint8_t* input_get() {return (uint8_t*)input;}
 size_t* input_len_get() {return &input_len;}
@@ -233,7 +233,8 @@ void ic_modify_output(size_t offset, size_t len, void *src) {
 uint8_t* final_input_get(size_t* length) {
     static bool virtio_core = virtio_core_enabled();
     if(!final_input) {
-        final_input = (uint8_t*)malloc(MAXLEN + sizeof(fuzzer::DescPool) + sizeof(fuzzer::DMAData));
+        final_input = (uint8_t*)malloc(MAXLEN + sizeof(fuzzer::DescPool) +
+				       sizeof(fuzzer::RequestBuffer));
     }
     size_t sz = 0;
 
@@ -243,9 +244,9 @@ uint8_t* final_input_get(size_t* length) {
             desc_pool.array[i].used_cnt = 0;
         }
         if (input_len && !output_len)
-            *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, input, input_len, dma_data_get(), desc_pool_get());
+            *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, input, input_len, request_buffer_get(), desc_pool_get());
         else
-            *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, output, output_len, dma_data_get(), desc_pool_get());
+            *length = final_input_len = fuzzer::input_serialize(final_input, MAXLEN, output, output_len, request_buffer_get(), desc_pool_get());
     } else {
         memcpy(final_input, output, output_len);
         *length = final_input_len = output_len;

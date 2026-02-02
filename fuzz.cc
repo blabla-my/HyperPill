@@ -171,7 +171,8 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 
 			/* ingest random data */
 			bool overwrite = !replay;
-			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
+			uint8_t* buf = request_buffer_get()->ingest_data(
+				len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
@@ -290,7 +291,8 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 
 			/* ingest random data */
 			bool overwrite = !replay;
-			uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
+			uint8_t* buf = request_buffer_get()->ingest_data(
+				len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
@@ -1190,7 +1192,9 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 
 	if (virtio_core) {
 		reset_input_output();
-		input_deserialize(Data, Size, input_get(), input_len_get(), dma_data_get(), desc_pool_get());
+			input_deserialize(Data, Size, input_get(), input_len_get(),
+					  request_buffer_get(),
+					  desc_pool_get());
 	} else {
 		ic_new_input(Data, Size);
 	}

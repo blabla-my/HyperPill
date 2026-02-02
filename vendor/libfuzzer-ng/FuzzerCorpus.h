@@ -60,11 +60,11 @@ struct vring_desc_with_info {
 
 
 #define DESC_ARRAY_MAX_LEN 0x20
-#define DMA_DATA_MAX_LENGTH 0x1000
+#define REQUEST_BUFFER_MAX_LENGTH 0x1000
 
-struct DMAData {
+struct RequestBuffer {
     uint32_t len;
-    uint8_t dma_data[DMA_DATA_MAX_LENGTH];
+    uint8_t bytes[REQUEST_BUFFER_MAX_LENGTH];
     uint32_t cursor;
 
     const size_t get_size() const {return sizeof(len) + len; }
@@ -72,7 +72,7 @@ struct DMAData {
     size_t serialize(void* dst, size_t max_len) const;
     uint8_t* ingest_data(size_t data_len, bool integer = false, bool overwrite = true);
 
-    DMAData();
+    RequestBuffer();
 } __attribute__((packed));
 
 struct DescPool {
@@ -94,7 +94,7 @@ struct DescPool {
 struct input_hdr {
     uint32_t magic;
     uint32_t ops_size;
-    uint32_t dma_data_size;
+    uint32_t request_buffer_size;
     uint32_t desc_pool_size;
     void set_magic() {magic = 0xdeadbeef;}
     bool check_magic() {return magic == 0xdeadbeef;}
@@ -104,11 +104,15 @@ struct input_hdr {
 #define DESC_POOL_SEPARATOR "DESCPOOL"
 #define DESC_POOL_SEPARATOR_LEN 8
 
-#define DMA_DATA_SEPARATOR "DMADATA"
-#define DMA_DATA_SEPARATOR_LEN 7
+#define REQUEST_BUFFER_SEPARATOR "DMADATA"
+#define REQUEST_BUFFER_SEPARATOR_LEN 7
 
-bool input_deserialize(const uint8_t* data, size_t size, uint8_t* ops, size_t* ops_len, DMAData* dma_data, DescPool* desc_pool);
-size_t input_serialize(uint8_t* data, size_t max_size, const uint8_t* ops, size_t ops_len, const DMAData* dma_data, const DescPool* desc_pool);
+bool input_deserialize(const uint8_t* data, size_t size, uint8_t* ops,
+		       size_t* ops_len, RequestBuffer* request_buffer,
+		       DescPool* desc_pool);
+size_t input_serialize(uint8_t* data, size_t max_size, const uint8_t* ops,
+		       size_t ops_len, const RequestBuffer* request_buffer,
+		       const DescPool* desc_pool);
 
   
 template <typename T, typename Pred = std::less<T>>
@@ -183,14 +187,15 @@ struct InputInfo {
   std::set<uint32_t> switch_values;
 
   Unit Ops;
-  DMAData DmaData;
+  RequestBuffer RequestBufferData;
   DescPool DescPoolData;
   bool parse_valid = false;
 
   void Parse() {
     Ops.resize(MAX_OPS_LEN);
     size_t ops_len = MAX_OPS_LEN;
-    parse_valid = input_deserialize(U.data(), U.size(), Ops.data(), &ops_len, &DmaData, &DescPoolData);
+    parse_valid = input_deserialize(U.data(), U.size(), Ops.data(), &ops_len,
+				    &RequestBufferData, &DescPoolData);
     Ops.resize(ops_len);
   }
 
@@ -470,7 +475,8 @@ public:
                   hints.insert(hint_val);
                 };
                 search_in(II->Ops.data(), II->Ops.size(), HotPos::OPS, 0);
-                search_in(II->DmaData.dma_data, II->DmaData.len, HotPos::DMA, 0);
+                search_in(II->RequestBufferData.bytes, II->RequestBufferData.len,
+			  HotPos::DMA, 0);
             } else {
                 auto start = U.begin();
                 auto end = U.end();

@@ -30,7 +30,7 @@
     } while(0)
 
 fuzzer::DescPool* desc_pool_get();
-fuzzer::DMAData* dma_data_get();
+fuzzer::RequestBuffer* request_buffer_get();
 uint8_t* input_get();
 size_t* input_len_get();
 void reset_input_output();

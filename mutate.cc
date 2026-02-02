@@ -19,7 +19,7 @@
 
 static fuzzer::DescPool* mutate_desc_pool1 = nullptr;
 static fuzzer::DescPool* mutate_desc_pool2 = nullptr;
-static fuzzer::DMAData* mutate_dma_data = nullptr;
+static fuzzer::RequestBuffer* mutate_request_buffer = nullptr;
 static uint8_t* crossover_buffer = nullptr;
 
 extern bool log_ops;
@@ -189,68 +189,86 @@ std::vector<void (*)(fuzzer::DescPool*, std::mt19937 &)> mutators = {
 
 namespace DMAMutator {
 
-static void EraseBytes(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len <= 1) return;
-    size_t n = gen() % (dma_data->len / 2) + 1;
-    size_t idx = gen() % (dma_data->len - n + 1);
-    memmove(dma_data->dma_data + idx, dma_data->dma_data + idx + n, dma_data->len - idx - n);
-    dma_data->len -= n;
+static void EraseBytes(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                       std::mt19937 &gen) {
+    if (request_buffer->len <= 1) return;
+    size_t n = gen() % (request_buffer->len / 2) + 1;
+    size_t idx = gen() % (request_buffer->len - n + 1);
+    memmove(request_buffer->bytes + idx, request_buffer->bytes + idx + n,
+            request_buffer->len - idx - n);
+    request_buffer->len -= n;
 }
 
-static void InsertByte(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len >= std::min((size_t)DMA_DATA_MAX_LENGTH, MaxSize)) return;
-    size_t idx = gen() % (dma_data->len + 1);
-    memmove(dma_data->dma_data + idx + 1, dma_data->dma_data + idx, dma_data->len - idx);
-    dma_data->dma_data[idx] = gen();
-    dma_data->len++;
+static void InsertByte(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                       std::mt19937 &gen) {
+    if (request_buffer->len >= std::min((size_t)REQUEST_BUFFER_MAX_LENGTH,
+                                        MaxSize))
+        return;
+    size_t idx = gen() % (request_buffer->len + 1);
+    memmove(request_buffer->bytes + idx + 1, request_buffer->bytes + idx,
+            request_buffer->len - idx);
+    request_buffer->bytes[idx] = gen();
+    request_buffer->len++;
 }
 
-static void InsertRepeatedBytes(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
+static void InsertRepeatedBytes(fuzzer::RequestBuffer* request_buffer,
+                                size_t MaxSize, std::mt19937 &gen) {
     const size_t kMinBytesToInsert = 3;
-    size_t limit = std::min((size_t)DMA_DATA_MAX_LENGTH, MaxSize);
-    if (dma_data->len + kMinBytesToInsert >= limit) return;
-    size_t max_bytes_to_insert = std::min((size_t)limit - dma_data->len, (size_t)128);
+    size_t limit = std::min((size_t)REQUEST_BUFFER_MAX_LENGTH, MaxSize);
+    if (request_buffer->len + kMinBytesToInsert >= limit) return;
+    size_t max_bytes_to_insert =
+        std::min((size_t)limit - request_buffer->len, (size_t)128);
     if (max_bytes_to_insert < kMinBytesToInsert) return;
     size_t n = gen() % (max_bytes_to_insert - kMinBytesToInsert + 1) + kMinBytesToInsert;
-    if (dma_data->len + n > limit) return;
-    size_t idx = gen() % (dma_data->len + 1);
-    memmove(dma_data->dma_data + idx + n, dma_data->dma_data + idx, dma_data->len - idx);
+    if (request_buffer->len + n > limit) return;
+    size_t idx = gen() % (request_buffer->len + 1);
+    memmove(request_buffer->bytes + idx + n, request_buffer->bytes + idx,
+            request_buffer->len - idx);
     uint8_t byte = (gen() % 2 == 0) ? (gen() % 256) : ((gen() % 2 == 0) ? 0 : 255);
     for (size_t i = 0; i < n; i++)
-        dma_data->dma_data[idx + i] = byte;
-    dma_data->len += n;
+        request_buffer->bytes[idx + i] = byte;
+    request_buffer->len += n;
 }
 
-static void ChangeByte(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len == 0) return;
-    size_t idx = gen() % dma_data->len;
-    dma_data->dma_data[idx] = gen();
+static void ChangeByte(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                       std::mt19937 &gen) {
+    if (request_buffer->len == 0) return;
+    size_t idx = gen() % request_buffer->len;
+    request_buffer->bytes[idx] = gen();
 }
 
-static void FlipBit(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len == 0) return;
-    size_t idx = gen() % dma_data->len;
-    dma_data->dma_data[idx] ^= 1 << (gen() % 8);
+static void FlipBit(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                    std::mt19937 &gen) {
+    if (request_buffer->len == 0) return;
+    size_t idx = gen() % request_buffer->len;
+    request_buffer->bytes[idx] ^= 1 << (gen() % 8);
 }
 
-static void ShuffleBytes(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len < 2) return;
-    size_t shuffle_amount = gen() % std::min((size_t)dma_data->len, (size_t)8) + 1;
-    if (shuffle_amount > dma_data->len) shuffle_amount = dma_data->len;
-    size_t shuffle_start = gen() % (dma_data->len - shuffle_amount + 1);
-    std::shuffle(dma_data->dma_data + shuffle_start, dma_data->dma_data + shuffle_start + shuffle_amount, gen);
+static void ShuffleBytes(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                         std::mt19937 &gen) {
+    if (request_buffer->len < 2) return;
+    size_t shuffle_amount =
+        gen() % std::min((size_t)request_buffer->len, (size_t)8) + 1;
+    if (shuffle_amount > request_buffer->len)
+        shuffle_amount = request_buffer->len;
+    size_t shuffle_start =
+        gen() % (request_buffer->len - shuffle_amount + 1);
+    std::shuffle(request_buffer->bytes + shuffle_start,
+                 request_buffer->bytes + shuffle_start + shuffle_amount, gen);
 }
 
-static void ChangeASCIIInteger(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len == 0) return;
-    size_t b = gen() % dma_data->len;
-    while (b < dma_data->len && !isdigit(dma_data->dma_data[b])) b++;
-    if (b == dma_data->len) return;
+static void ChangeASCIIInteger(fuzzer::RequestBuffer* request_buffer,
+                               size_t MaxSize, std::mt19937 &gen) {
+    if (request_buffer->len == 0) return;
+    size_t b = gen() % request_buffer->len;
+    while (b < request_buffer->len && !isdigit(request_buffer->bytes[b]))
+        b++;
+    if (b == request_buffer->len) return;
     size_t e = b;
-    while (e < dma_data->len && isdigit(dma_data->dma_data[e])) e++;
+    while (e < request_buffer->len && isdigit(request_buffer->bytes[e])) e++;
     uint64_t val = 0;
     for (size_t i = b; i < e; i++)
-        val = val * 10 + dma_data->dma_data[i] - '0';
+        val = val * 10 + request_buffer->bytes[i] - '0';
     
     switch(gen() % 5) {
         case 0: val++; break;
@@ -262,42 +280,47 @@ static void ChangeASCIIInteger(fuzzer::DMAData* dma_data, size_t MaxSize, std::m
 
     for (size_t i = b; i < e; i++) {
         size_t idx = e + b - i - 1;
-        if (idx < dma_data->len) {
-            dma_data->dma_data[idx] = (val % 10) + '0';
+        if (idx < request_buffer->len) {
+            request_buffer->bytes[idx] = (val % 10) + '0';
             val /= 10;
         }
     }
 }
 
 template<class T>
-void ChangeBinaryInteger(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len < sizeof(T)) return;
-    size_t off = gen() % (dma_data->len - sizeof(T) + 1);
+void ChangeBinaryInteger(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                         std::mt19937 &gen) {
+    if (request_buffer->len < sizeof(T)) return;
+    size_t off = gen() % (request_buffer->len - sizeof(T) + 1);
     T val;
-    memcpy(&val, dma_data->dma_data + off, sizeof(val));
+    memcpy(&val, request_buffer->bytes + off, sizeof(val));
     val += (gen() % 21) - 10;
-    memcpy(dma_data->dma_data + off, &val, sizeof(val));
+    memcpy(request_buffer->bytes + off, &val, sizeof(val));
 }
 
-static void Mutate_ChangeBinaryInteger(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
+static void Mutate_ChangeBinaryInteger(fuzzer::RequestBuffer* request_buffer,
+                                       size_t MaxSize, std::mt19937 &gen) {
     switch (gen() % 4) {
-        case 3: return ChangeBinaryInteger<uint64_t>(dma_data, MaxSize, gen);
-        case 2: return ChangeBinaryInteger<uint32_t>(dma_data, MaxSize, gen);
-        case 1: return ChangeBinaryInteger<uint16_t>(dma_data, MaxSize, gen);
-        case 0: return ChangeBinaryInteger<uint8_t>(dma_data, MaxSize, gen);
+        case 3: return ChangeBinaryInteger<uint64_t>(request_buffer, MaxSize, gen);
+        case 2: return ChangeBinaryInteger<uint32_t>(request_buffer, MaxSize, gen);
+        case 1: return ChangeBinaryInteger<uint16_t>(request_buffer, MaxSize, gen);
+        case 0: return ChangeBinaryInteger<uint8_t>(request_buffer, MaxSize, gen);
     }
 }
 
-static void CopyPart(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len == 0) return;
-    size_t to_beg = gen() % dma_data->len;
-    size_t copy_size = gen() % (dma_data->len - to_beg) + 1;
-    copy_size = std::min(copy_size, (size_t)dma_data->len);
-    size_t from_beg = gen() % (dma_data->len - copy_size + 1);
-    memmove(dma_data->dma_data + to_beg, dma_data->dma_data + from_beg, copy_size);
+static void CopyPart(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+                     std::mt19937 &gen) {
+    if (request_buffer->len == 0) return;
+    size_t to_beg = gen() % request_buffer->len;
+    size_t copy_size = gen() % (request_buffer->len - to_beg) + 1;
+    copy_size = std::min(copy_size, (size_t)request_buffer->len);
+    size_t from_beg = gen() % (request_buffer->len - copy_size + 1);
+    memmove(request_buffer->bytes + to_beg, request_buffer->bytes + from_beg,
+            copy_size);
 }
 
-static void ReplaceHotspotHint(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
+static void ReplaceHotspotHint(fuzzer::RequestBuffer* request_buffer,
+                               size_t MaxSize, std::mt19937 &gen) {
     if (!fuzzer::F) return;
     const auto* II = fuzzer::F->GetMD().GetBaseII();
     if (!II || II->HotSpots.empty()) return;
@@ -312,13 +335,14 @@ static void ReplaceHotspotHint(fuzzer::DMAData* dma_data, size_t MaxSize, std::m
     if (dma_hotspots.empty()) return;
 
     const auto* hotspot = dma_hotspots[gen() % dma_hotspots.size()];
-    if (hotspot->pos + hotspot->size > dma_data->len) return;
+    if (hotspot->pos + hotspot->size > request_buffer->len) return;
 
-    memcpy(dma_data->dma_data + hotspot->pos, &hotspot->hint, hotspot->size);
+    memcpy(request_buffer->bytes + hotspot->pos, &hotspot->hint,
+           hotspot->size);
 }
 
 
-std::vector<void (*)(fuzzer::DMAData*, size_t, std::mt19937 &)> mutators = {
+std::vector<void (*)(fuzzer::RequestBuffer*, size_t, std::mt19937 &)> mutators = {
     EraseBytes,
     InsertByte,
     InsertRepeatedBytes,
@@ -521,15 +545,16 @@ static void mutate_desc(fuzzer::DescPool* pool, std::mt19937 &gen) {
     }
 }
 
-void mutate_dma(fuzzer::DMAData* dma_data, size_t MaxSize, std::mt19937 &gen) {
-    if (dma_data->len == 0) {
+void mutate_dma(fuzzer::RequestBuffer* request_buffer, size_t MaxSize,
+		std::mt19937 &gen) {
+    if (request_buffer->len == 0) {
         return;
     }
 
     /* mutation */
     for (int i = 0; i < 1; i++) {
         auto choosed_mutator = DMAMutator::mutators[gen() % DMAMutator::mutators.size()];
-        choosed_mutator(dma_data, MaxSize, gen);
+        choosed_mutator(request_buffer, MaxSize, gen);
     }
 }
 
@@ -564,15 +589,16 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
     if (!mutate_desc_pool1) {
         mutate_desc_pool1 = new fuzzer::DescPool();
     }
-    if (!mutate_dma_data) {
-        mutate_dma_data = new fuzzer::DMAData();
+    if (!mutate_request_buffer) {
+        mutate_request_buffer = new fuzzer::RequestBuffer();
     }
     if (virtio_core) {
         /* first, deserialize the input */
         uint8_t* ops = Data + sizeof(fuzzer::input_hdr);
         size_t ops_len = Size - sizeof(fuzzer::input_hdr);
         size_t new_ops_len;
-        fuzzer::input_deserialize(Data, Size, ops, &ops_len, mutate_dma_data, mutate_desc_pool1);
+        fuzzer::input_deserialize(Data, Size, ops, &ops_len,
+				  mutate_request_buffer, mutate_desc_pool1);
         /* select one of the ops, dma_data, desc_pool to mutate */
         std::mt19937 gen(Seed);
         std::uniform_int_distribution<> distrib(0, 2);
@@ -584,18 +610,28 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                 size_t MaxOpsSize = MAX_OPS_LEN < MaxSize ? MAX_OPS_LEN : MaxSize;
                 ops_len = LLVMFuzzerMutateParadox(ops, ops_len, MaxOpsSize, fuzzer::HotPos::OPS);
                 // ops_len = mutate_ops(ops, ops_len, MaxOpsSize, gen);
-                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
+                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len,
+					       mutate_request_buffer,
+					       mutate_desc_pool1);
             }
             case 1: // mutate dma data
             {
-                size_t MaxDMASize = DMA_DATA_MAX_LENGTH < MaxSize ? DMA_DATA_MAX_LENGTH : MaxSize;
-                // mutate_dma(mutate_dma_data, MaxDMASize, gen);
-                mutate_dma_data->len = LLVMFuzzerMutateParadox(mutate_dma_data->dma_data, mutate_dma_data->len, MaxDMASize, fuzzer::HotPos::DMA);
-                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
+                size_t MaxDMASize = REQUEST_BUFFER_MAX_LENGTH < MaxSize ?
+						    REQUEST_BUFFER_MAX_LENGTH :
+						    MaxSize;
+                // mutate_dma(mutate_request_buffer, MaxDMASize, gen);
+                mutate_request_buffer->len = LLVMFuzzerMutateParadox(
+			mutate_request_buffer->bytes, mutate_request_buffer->len,
+			MaxDMASize, fuzzer::HotPos::DMA);
+                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len,
+					       mutate_request_buffer,
+					       mutate_desc_pool1);
             }
             case 2: // mutate desc pool
                 mutate_desc(mutate_desc_pool1, gen);
-                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len, mutate_dma_data, mutate_desc_pool1);
+                return fuzzer::input_serialize(Data, MaxSize, ops, ops_len,
+					       mutate_request_buffer,
+					       mutate_desc_pool1);
             default:
                 assert(false);
         }

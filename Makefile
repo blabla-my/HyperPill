@@ -103,7 +103,9 @@ fuzz: rebuild_bochs $(OBJS) $(VENDOR_LIBS) vendor/libfuzzer-ng/libFuzzer.a
 	@echo "===> Compiling $<"
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
 
-vendor/libfuzzer-ng/libFuzzer.a:
+vendor/libfuzzer-ng/libFuzzer.a: \
+		vendor/libfuzzer-ng/build.sh \
+		$(wildcard vendor/libfuzzer-ng/*.cpp vendor/libfuzzer-ng/*.h)
 	@echo "===> Building libFuzzer-ng"
 	cd vendor/libfuzzer-ng/; DEBUG=$(DEBUG) ./build.sh
 

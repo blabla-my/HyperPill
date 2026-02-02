@@ -1631,7 +1631,8 @@ static int ingest_vring_buffer(unsigned cpu, bx_address addr, bx_address gpa, si
 
 	/* ingest random data */
 	bool overwrite = !replay;
-	uint8_t* buf = dma_data_get()->ingest_data(len, possible_switch, overwrite);
+	uint8_t* buf = request_buffer_get()->ingest_data(len, possible_switch,
+							 overwrite);
 	if (!buf)
 		return -1;
 	/* fetch overlapped data */
