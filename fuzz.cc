@@ -1079,12 +1079,7 @@ bool op_notify() {
 		return false;
 	}
 	uint16_t head = model->submit_request(queue_sel);
-	bool ok = head != UINT16_MAX;
-	if ((BX_CPU(0)->fuzztrace || log_ops) && ok) {
-		printf("!submit inject: dev=%s queue_sel=%u head=%u\n",
-		       vdev->name, queue_sel, head);
-	}
-	return ok;
+	return head != UINT16_MAX;
 }
 
 bool op_trigger_aio() {
@@ -1199,6 +1194,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 	} else {
 		ic_new_input(Data, Size);
 	}
+	get_vqueue_manager().reset_request_history();
 	uint16_t start = 0;
 	int nops = 0;
 	uint8_t *input_start = ic_get_cursor();

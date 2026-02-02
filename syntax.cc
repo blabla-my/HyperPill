@@ -75,57 +75,32 @@ static std::string hex_u64(uint64_t v) {
 	return std::string(buf);
 }
 
-static bool write_json_request(unsigned cpu, VQueue *queue, bool is_packed,
+static void write_json_request(unsigned cpu, const VirtioRequestRecord &req,
 			       int indent_level) {
-	if (!queue) {
-		return false;
-	}
-	auto &fsm = queue->desc_chain_fsm;
-	size_t count = fsm.generated_descs_size;
-	if (count == 0) {
-		return false;
-	}
-	std::string dev_name =
-		queue->vdev ? json_escape(queue->vdev->name) : std::string();
+	std::string dev_name = json_escape(req.dev);
 	json_indent(indent_level);
 	printf("{\n");
 	json_indent(indent_level + 1);
+	printf("\"seq\": %lu,\n", (unsigned long)req.seq);
+	json_indent(indent_level + 1);
 	printf("\"device\": \"%s\",\n", dev_name.c_str());
 	json_indent(indent_level + 1);
-	printf("\"queue_id\": %zu,\n", queue->idx);
+	printf("\"queue_id\": %zu,\n", req.queue_id);
 	json_indent(indent_level + 1);
-	printf("\"queue_sel\": %u,\n", queue->queue_sel);
+	printf("\"queue_sel\": %u,\n", req.queue_sel);
 	json_indent(indent_level + 1);
-	printf("\"packed\": %s,\n", is_packed ? "true" : "false");
+	printf("\"head\": %u,\n", req.head);
+	json_indent(indent_level + 1);
+	printf("\"packed\": %s,\n", req.packed ? "true" : "false");
 	json_indent(indent_level + 1);
 	printf("\"descriptors\": [");
 	bool any_desc = false;
-	for (size_t i = 0; i < count; i++) {
-		const auto *desc_with_info = fsm.generated_descs[i];
-		if (!desc_with_info) {
-			continue;
-		}
-		uint64_t addr = 0;
-		uint32_t len = 0;
-		uint16_t flags = 0;
-		uint16_t next = 0;
-		uint16_t id = 0;
-		if (is_packed) {
-			vring_packed_desc desc{};
-			memcpy(&desc, desc_with_info->desc, sizeof(desc));
-			addr = desc.addr;
-			len = desc.len;
-			flags = desc.flags;
-			id = desc.id;
-		} else {
-			vring_desc desc{};
-			memcpy(&desc, desc_with_info->desc, sizeof(desc));
-			addr = desc.addr;
-			len = desc.len;
-			flags = desc.flags;
-			next = desc.next;
-			id = desc_with_info->desc_info.desc_idx;
-		}
+	for (const auto &desc_entry : req.descs) {
+		uint64_t addr = desc_entry.addr;
+		uint32_t len = desc_entry.len;
+		uint16_t flags = desc_entry.flags;
+		uint16_t next = desc_entry.next;
+		uint16_t id = desc_entry.id;
 		if (!any_desc) {
 			printf("\n");
 		} else {
@@ -134,7 +109,6 @@ static bool write_json_request(unsigned cpu, VQueue *queue, bool is_packed,
 		any_desc = true;
 		json_indent(indent_level + 2);
 		printf("{\n");
-		json_indent(indent_level + 3);
 		json_indent(indent_level + 3);
 		printf("\"addr\": \"%s\",\n", hex_u64(addr).c_str());
 		json_indent(indent_level + 3);
@@ -147,7 +121,7 @@ static bool write_json_request(unsigned cpu, VQueue *queue, bool is_packed,
 		printf("\"id\": %u,\n", id);
 		json_indent(indent_level + 3);
 		printf("\"buffers\": [");
-		uint64_t end = addr + len;
+		uint64_t end = addr + static_cast<uint64_t>(len);
 		auto seen = get_vqueue_manager().get_seen_ranges(addr, end);
 		bool any_buf = false;
 		for (const auto &r : seen) {
@@ -211,7 +185,36 @@ static bool write_json_request(unsigned cpu, VQueue *queue, bool is_packed,
 	}
 	json_indent(indent_level);
 	printf("}");
-	return true;
+}
+
+static void dump_request_history_json(unsigned cpu, const char *dev_filter) {
+	printf("#requests_start\n");
+	printf("{\n");
+	json_indent(1);
+	printf("\"requests\": [");
+	bool first = true;
+	for (const auto &req : get_vqueue_manager().request_history()) {
+		if (dev_filter && dev_filter[0] &&
+		    strcmp(req.dev, dev_filter) != 0) {
+			continue;
+		}
+		if (!first) {
+			printf(",\n");
+		} else {
+			printf("\n");
+			first = false;
+		}
+		write_json_request(cpu, req, 2);
+	}
+	if (!first) {
+		printf("\n");
+		json_indent(1);
+		printf("]\n");
+	} else {
+		printf("]\n");
+	}
+	printf("}\n");
+	printf("#request_end\n");
 }
 
 SyntaxModel::SyntaxModel(VirtioDev &vdev)
@@ -373,6 +376,49 @@ uint16_t SyntaxModel::submit_request(uint16_t queue_sel) {
 	queue_->submit_request(head);
 	remember_pending(queue_sel, head);
 	completed_heads_[queue_sel].erase(head);
+	uint64_t seq = get_vqueue_manager().next_request_seq();
+	VirtioRequestRecord rec = {};
+	rec.seq = seq;
+	memcpy(rec.dev, vdev_.name, sizeof(rec.dev));
+	rec.dev[sizeof(rec.dev) - 1] = '\0';
+	rec.queue_id = queue_->idx;
+	rec.queue_sel = queue_sel;
+	rec.head = head;
+	rec.packed = vdev_.packed;
+	rec.descs.reserve(fsm.generated_descs_size);
+	for (size_t i = 0; i < fsm.generated_descs_size; i++) {
+		const auto *desc_with_info = fsm.generated_descs[i];
+		if (!desc_with_info) {
+			continue;
+		}
+		VirtioDescEntry entry = {};
+		entry.is_out = desc_with_info->desc_info.is_out;
+		if (rec.packed) {
+			vring_packed_desc desc = {};
+			memcpy(&desc, desc_with_info->desc, sizeof(desc));
+			entry.addr = desc.addr;
+			entry.len = desc.len;
+			entry.flags = desc.flags;
+			entry.next = 0;
+			entry.id = desc.id;
+		} else {
+			vring_desc desc = {};
+			memcpy(&desc, desc_with_info->desc, sizeof(desc));
+			entry.addr = desc.addr;
+			entry.len = desc.len;
+			entry.flags = desc.flags;
+			entry.next = desc.next;
+			entry.id = desc_with_info->desc_info.desc_idx;
+		}
+		rec.descs.push_back(entry);
+	}
+	size_t desc_count = rec.descs.size();
+	get_vqueue_manager().record_request(std::move(rec));
+	if (BX_CPU(0)->fuzztrace || log_ops) {
+		printf("!request inject: seq=%lu dev=%s queue_sel=%u head=%u descs=%zu\n",
+		       (unsigned long)seq, vdev_.name, queue_sel, head,
+		       desc_count);
+	}
 	notify(head);
 	return head;
 }
@@ -452,36 +498,7 @@ bool SplitRingModel::completed(uint16_t head) {
 }
 
 void SplitRingModel::log_generated_request(unsigned cpu) {
-	printf("#requests_start\n");
-	printf("{\n");
-	json_indent(1);
-	printf("\"requests\": [");
-	bool first = true;
-	for (int i = 0; i < vdev().queue_num; i++) {
-		VQueue *q = vdev().queues[i];
-		if (!q) {
-			continue;
-		}
-		if (q->desc_chain_fsm.generated_descs_size == 0) {
-			continue;
-		}
-		if (!first) {
-			printf(",\n");
-		} else {
-			printf("\n");
-			first = false;
-		}
-		write_json_request(cpu, q, false, 2);
-	}
-	if (!first) {
-		printf("\n");
-		json_indent(1);
-		printf("]\n");
-	} else {
-		printf("]\n");
-	}
-	printf("}\n");
-	printf("#request_end\n");
+	dump_request_history_json(cpu, vdev().name);
 }
 
 uint16_t SplitRingModel::allocate_descriptors(DescChainFSM &fsm) {
@@ -656,36 +673,7 @@ PackedRingModel::shadow_state_for_queue(uint16_t queue_sel) {
 }
 
 void PackedRingModel::log_generated_request(unsigned cpu) {
-	printf("#requests_start\n");
-	printf("{\n");
-	json_indent(1);
-	printf("\"requests\": [");
-	bool first = true;
-	for (int i = 0; i < vdev().queue_num; i++) {
-		VQueue *q = vdev().queues[i];
-		if (!q) {
-			continue;
-		}
-		if (q->desc_chain_fsm.generated_descs_size == 0) {
-			continue;
-		}
-		if (!first) {
-			printf(",\n");
-		} else {
-			printf("\n");
-			first = false;
-		}
-		write_json_request(cpu, q, true, 2);
-	}
-	if (!first) {
-		printf("\n");
-		json_indent(1);
-		printf("]\n");
-	} else {
-		printf("]\n");
-	}
-	printf("}\n");
-	printf("#request_end\n");
+	dump_request_history_json(cpu, vdev().name);
 }
 
 uint16_t PackedRingModel::allocate_descriptors(DescChainFSM &fsm) {

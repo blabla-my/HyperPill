@@ -416,6 +416,25 @@ struct VirtioDev {
 	    
 	};
 
+struct VirtioDescEntry {
+	uint64_t addr;
+	uint32_t len;
+	uint16_t flags;
+	uint16_t next;
+	uint16_t id;
+	bool is_out;
+};
+
+struct VirtioRequestRecord {
+	uint64_t seq;
+	char dev[VIRTIO_NAME_MAX];
+	size_t queue_id;
+	uint16_t queue_sel;
+	uint16_t head;
+	bool packed;
+	std::vector<VirtioDescEntry> descs;
+};
+
 class VQueueManager {
 public:
     VQueueManager(): virtio_devs(), virtio_dev_list(), queue_list(), rings_grouped_by_page(), all_queue_count(0UL), generated_descs(), seen_buffers(), indirect_tables(), fuzzed_dev_cache(nullptr), hook_disabled(false) {}
@@ -443,6 +462,11 @@ public:
     void reset_seen_buffer() {seen_buffers.clear();}
     uint64_t overlapped_size(uint64_t start, uint64_t size); /* if non-overlap, return 0 */
     std::vector<SeenRange> get_seen_ranges(uint64_t start, uint64_t end) const;
+    void reset_request_seq();
+    uint64_t next_request_seq();
+    void reset_request_history();
+    void record_request(VirtioRequestRecord&& req);
+    const std::vector<VirtioRequestRecord>& request_history() const;
 
     size_t get_queue_list_size() const {return queue_list.size();}
     void add_to_queue_list(VQueue* queue) {queue_list.push_back(queue);}
@@ -475,6 +499,8 @@ private:
     tsl::robin_map<bx_address, std::vector<uint8_t>> indirect_tables;
     size_t indirect_alloc_scratch_idx = 4;
     size_t indirect_alloc_off = 0;
+    uint64_t request_seq = 0;
+    std::vector<VirtioRequestRecord> request_history_;
     VirtioDev* fuzzed_dev_cache;
     bool hook_disabled = false;
 };

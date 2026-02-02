@@ -1354,6 +1354,31 @@ uint64_t VQueueManager::overlapped_size(uint64_t start, uint64_t size) {
 	}
 }
 
+void VQueueManager::reset_request_seq() {
+	request_seq = 0;
+}
+
+uint64_t VQueueManager::next_request_seq() {
+	return request_seq++;
+}
+
+void VQueueManager::reset_request_history() {
+	reset_request_seq();
+	request_history_.clear();
+}
+
+void VQueueManager::record_request(VirtioRequestRecord&& req) {
+	static const size_t kMaxHistory = 8192;
+	if (request_history_.size() >= kMaxHistory) {
+		request_history_.erase(request_history_.begin());
+	}
+	request_history_.push_back(std::move(req));
+}
+
+const std::vector<VirtioRequestRecord>& VQueueManager::request_history() const {
+	return request_history_;
+}
+
 std::vector<SeenRange> VQueueManager::get_seen_ranges(uint64_t start,
 						      uint64_t end) const {
 	std::vector<SeenRange> ranges;
