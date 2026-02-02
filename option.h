@@ -14,6 +14,7 @@ bool virtio_ring_format_log_enabled(void);
 bool fuzz_legacy_enabled(void);
 bool fuzz_hypercalls_enabled(void);
 bool log_ops_enabled(void);
+bool log_new_pc_enabled(void);
 bool fuzz_enum_enabled(void);
 bool nocov_enabled(void);
 bool kernel_dma_enabled(void);
