@@ -104,21 +104,21 @@ void fuzz_hook_memory_access(unsigned cpu, bx_address phy, unsigned len,
                        current_task->pid, current_task->comm, phy);
             }
             fuzz_dma_read_cb(cpu, phy, len, data);
-            if (log_ops) {
-                uint8_t buf[len];
-                BX_MEM_C::readPhysicalPage(BX_CPU(cpu), phy, len, buf);
-                bx_address gpa = lookup_gpa_by_hpa(phy);
-                const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa);
-                if (vring && vring->queue->vdev->to_fuzz)
-                    printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x data: ",
-                            phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len);
-                else
-                    printf("!dma inject: [HPA: %lx, GPA: %lx] len: %x data: ",
-                            phy, gpa, len);
-                for (int i = 0; i < len; i++)
-                    printf("%02x", buf[i]);
-                printf("\n");
-            }
+            // if (log_ops) {
+            //     uint8_t buf[len];
+            //     BX_MEM_C::readPhysicalPage(BX_CPU(cpu), phy, len, buf);
+            //     bx_address gpa = lookup_gpa_by_hpa(phy);
+            //     const VRing* vring = get_vqueue_manager().get_belonging_vring(gpa);
+            //     if (vring && vring->queue->vdev->to_fuzz)
+            //         printf("!dma inject: [HPA: %lx, GPA: %lx, vring: %s, start: %lx, end: %lx, type: %d] len: %x data: ",
+            //                 phy, gpa, vring->type_str(), vring->start(), vring->end(), vring->filed_type(gpa), len);
+            //     else
+            //         printf("!dma inject: [HPA: %lx, GPA: %lx] len: %x data: ",
+            //                 phy, gpa, len);
+            //     for (int i = 0; i < len; i++)
+            //         printf("%02x", buf[i]);
+            //     printf("\n");
+            // }
         }
     
         prioraccess = -1;
