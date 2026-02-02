@@ -470,12 +470,6 @@ bool inject_write(bx_address addr, int size, uint64_t val) {
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RDX, addr);
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RAX, val);
 
-	if (BX_CPU(0)->fuzztrace || log_ops) {
-		printf("!write inject: [GPA: %lx] len: %d data: ", addr, 1<<size);
-		for (int i = 0; i < (1 << size); i++)
-			printf("%02x", ((uint8_t *)&val)[i]);
-		printf(" (reason: %d)\n", exit_reason);
-	}
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
@@ -522,9 +516,6 @@ bool inject_read(bx_address addr, int size) {
 
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RCX, addr);
 
-	if (BX_CPU(0)->fuzztrace || log_ops) {
-		printf("!read inject: [GPA: %lx] len: %d\n", addr, 1<<size);
-	}
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
 	if (phy > maxaddr || !res) {
@@ -756,6 +747,15 @@ bool op_write() {
 		break;
 	}
 
+	if (BX_CPU(0)->fuzztrace || log_ops) {
+		uint32_t exit_reason =
+			vmcs_translate_guest_physical_ept(addr, NULL, NULL);
+		printf("!write inject: [GPA: %lx] len: %d data: ", addr,
+		       1 << size);
+		for (int i = 0; i < (1 << size); i++)
+			printf("%02x", ((uint8_t *)&value)[i]);
+		printf(" (reason: %d)\n", exit_reason);
+	}
 	if (!inject_write(addr, size, value))
 		return false;
 
@@ -782,6 +782,9 @@ bool op_read() {
 		return false;
 	addr += offset;
 
+	if (BX_CPU(0)->fuzztrace || log_ops) {
+		printf("!read inject: [GPA: %lx] len: %d\n", addr, 1 << size);
+	}
 	if (!inject_read(addr, size))
 		return false;
 
@@ -1075,7 +1078,12 @@ bool op_notify() {
 	if (!model) {
 		return false;
 	}
-	bool ok = model->submit_request(queue_sel) != UINT16_MAX;
+	uint16_t head = model->submit_request(queue_sel);
+	bool ok = head != UINT16_MAX;
+	if ((BX_CPU(0)->fuzztrace || log_ops) && ok) {
+		printf("!submit inject: dev=%s queue_sel=%u head=%u\n",
+		       vdev->name, queue_sel, head);
+	}
 	return ok;
 }
 
