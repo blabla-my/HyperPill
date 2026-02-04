@@ -286,12 +286,12 @@ void load_symbol_map_from_kallsyms(const char* kallsyms_path);
 void load_symbol_map_from_maps(const char* maps_path);
 void load_symbol_map_from_maps(int pid);
 void store_sym_back_to_db(const char* db_path);
-unsigned long sym_to_addr(std::string bin, std::string name, int pid=0);
+unsigned long sym_to_addr(std::string bin, std::string name, bool full = false, int pid=0);
 sym_name_t addr_to_sym(unsigned long addr, int pid=0);
 void set_addr2sym(sym_info_t sym);
 void set_sym2addr(sym_info_t sym);
 std::map<std::string, size_t> get_symbol_map(const std::string& binaryPath);
-const char* get_bin_full_path(std::string bin);
+const char* get_bin_full_path(std::string bin, bool full=false);
 
 // link_map.c
 void load_link_map(char* map_path, char* obj_regex, size_t base);

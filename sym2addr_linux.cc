@@ -27,11 +27,14 @@ static std::unordered_map<std::string, std::string> cached_symbols_match;
 
 // todo: dynamic libc symbols for stuff like exit etc
 // Strategy: Run objdump on the binary. Load the
-unsigned long sym_to_addr(std::string bin, std::string name, int pid) {
+unsigned long sym_to_addr(std::string bin, std::string name, bool full, int pid) {
     sym_info_t key {0, pid, bin, name};
     for (const auto & b : bins) {
         std::string filename = std::filesystem::path(b).filename().string();
-        if (filename.find(bin) != std::string::npos) {
+        if (!full && filename.find(bin) != std::string::npos) {
+            key.bin = b;
+            break;
+        } else if (full && filename == bin) {
             key.bin = b;
             break;
         }
@@ -42,10 +45,12 @@ unsigned long sym_to_addr(std::string bin, std::string name, int pid) {
     return 0UL;
 }
 
-const char* get_bin_full_path(std::string bin) {
+const char* get_bin_full_path(std::string bin, bool full) {
     for (const auto & b : bins) {
         std::string filename = std::filesystem::path(b).filename().string();
-        if (filename.find(bin) != std::string::npos) {
+        if (!full && filename.find(bin) != std::string::npos) {
+            return b.c_str();
+        } else if (full && filename == bin) {
             return b.c_str();
         }
     }

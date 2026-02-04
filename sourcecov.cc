@@ -258,19 +258,19 @@ UserSourceCov::UserSourceCov(const std::string& binary, bool reserve_init_cov): 
     reserve_init_cov = reserve_init_cov;
 
     // we have already loaded all symbol addresses in the main.cc
-    pdstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_data");
-    pdstop = sym_to_addr(binary.c_str(), "__stop___llvm_prf_data");
-    pcstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_cnts");
-    pcstop = sym_to_addr(binary.c_str(), "__stop___llvm_prf_cnts");
-    pnstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_names");
-    pnstop = sym_to_addr(binary.c_str(), "__stop___llvm_prf_names");
+    pdstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_data", true);
+    pdstop = sym_to_addr(binary.c_str(), "__stop___llvm_prf_data", true);
+    pcstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_cnts", true);
+    pcstop = sym_to_addr(binary.c_str(), "__stop___llvm_prf_cnts", true);
+    pnstart = sym_to_addr(binary.c_str(), "__start___llvm_prf_names", true);
+    pnstop = sym_to_addr(binary.c_str(), "__stop___llvm_prf_names", true);
     
     if (!pdstart && !pdstop) {
         __inited = false;
         return;
     }
 
-    const char* binpath = get_bin_full_path(binary);
+    const char* binpath = get_bin_full_path(binary, true);
     assert(binpath != NULL);
 
     auto pids = select_pid(binpath);

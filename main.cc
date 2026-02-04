@@ -476,7 +476,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 			log_writes = log_writes_enabled();
 		if (!nocov_enabled()) {
 			auto qemu_source_cov = new UserSourceCov("qemu-system-x86_64");
-			auto spdk_source_cov = new UserSourceCov("bin/vhost");
+			auto spdk_source_cov = new UserSourceCov("vhost");
 			auto dpdk_source_cov = new UserSourceCov("dpdk-vhost_crypto");
 			auto passt_source_cov = new UserSourceCov("passt.avx2");
 			auto vhost_net_source_cov = new KernelSourceCov("vhost-net", "vhost/net.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
