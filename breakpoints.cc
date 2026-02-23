@@ -178,6 +178,11 @@ void apply_breakpoints_linux() {
 	            printf("ASAN GENERIC ERROR\n");
 	            fuzz_emu_stop_crash(cpu, "asan-generic-error");
 	            }, false);
+	    add_breakpoint(sym_to_addr("qemu-system-x86_64", "__ubsan::ScopedReport::~ScopedReport"), [](unsigned cpu, bxInstruction_c *i) {
+	            (void)cpu;
+	            printf("UBSAN SCOPED ERROR\n");
+	            fuzz_emu_stop_crash(cpu, "ubsan");
+	            }, false);
 	    add_breakpoint(sym_to_addr("vhost", "__asan::ReportGenericError"), [](unsigned cpu, bxInstruction_c *i) {
 	            (void)cpu;
 	            printf("ASAN GENERIC ERROR\n");
