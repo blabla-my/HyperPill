@@ -261,17 +261,17 @@ void handle_syscall_hooks(unsigned cpu, bxInstruction_c *i)
     static bool nocov = nocov_enabled();
     if (i->getIaOpcode() == 0x471) {
 		switch(BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RAX].rrx) {
-			case 231:
-			case 60:    // exit
-				fuzz_emu_stop_crash(cpu, "exit-syscall");
-				break;
-			case 62:    // kill
-			case 200:   // tkill
-                if (nocov && BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
-                    fuzz_emu_stop_crash(cpu, "kill-syscall");
-                    return;
-                }
-                break;
+		    case 231:
+		    case 60:    // exit
+		    	//fuzz_emu_stop_crash(cpu, "exit-syscall");
+		    	//break;
+		    case 62:    // kill
+		    case 200:   // tkill
+			if (nocov && BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RSI].rrx == 6) { // SIGABRT
+			    fuzz_emu_stop_crash(cpu, "kill-syscall");
+			    return;
+			}
+			break;
 	            case 1:     // write
 	                if (BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RDI].rrx == 1 ||
 	                        BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RDI].rrx == 2) {
