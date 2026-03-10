@@ -72,6 +72,7 @@ int task_buf_to_task(unsigned cpu, const uint8_t* task_buf, Task* task_ptr) {
     task_ptr->stack = task_stack(task_buf);
     task_ptr->hypervisor_task = 0;
     task_ptr->CPU_KVM = false;
+    memset(&task_ptr->regs, 0, sizeof(task_ptr->regs));
 
     unsigned long mm = task_mm(task_buf);
     if (mm == 0) {
@@ -79,8 +80,9 @@ int task_buf_to_task(unsigned cpu, const uint8_t* task_buf, Task* task_ptr) {
     }
 
     if (mm == 0) {
-        task_ptr->pgd = 0; // Kernel threads do not have a user space memory
-        task_ptr->cr3 = 0; // Kernel threads do not have a user space memory
+        task_ptr->kernel_task = 1;
+        task_ptr->pgd = 0; // No usable user space memory
+        task_ptr->cr3 = 0;
     }
     else {
         // fuzz_task_ptr->pgd = task_mm(task_buf);
@@ -93,6 +95,10 @@ int task_buf_to_task(unsigned cpu, const uint8_t* task_buf, Task* task_ptr) {
         task_ptr->cr3 = pgd2cr3(cpu, task_ptr->pgd);
     }
     
+    if (task_ptr->stack == 0) {
+        return 0;
+    }
+
     bx_address task_pt_regs_addr = (bx_address)task_pt_regs(task_buf);
     if (read_pt_regs(cpu, task_pt_regs_addr, &task_ptr->regs) < 0) {
         return -1; // Failed to read pt_regs
@@ -194,7 +200,7 @@ Task* TaskManager::add_task(unsigned cpu, bx_address task_addr){
     if (!already_in){
         Task* new_task = alloca_task(cpu, task_addr);
         if (!new_task) return NULL;
-        if (!new_task->kernel_task){
+        if (!new_task->kernel_task && new_task->cr3 != 0){
             // if new_task is a userspace task, index it by CR3 as well
             bx_address index = new_task->cr3 >> PAGE_SHIFT;
             if (user_task_map.find(index) == user_task_map.end()) {

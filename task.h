@@ -15,6 +15,7 @@ class Task {
 public:
     Task() : vaddr(0), pid(0), kernel_task(false), hypervisor_task(false), userspace_vmm_task(false) {
         memset(comm, 0, sizeof(comm));
+        memset(&regs, 0, sizeof(regs));
         cr3 = 0;
         pgd = 0;
         next = 0;
