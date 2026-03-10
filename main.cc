@@ -114,6 +114,30 @@ uint64_t pio_icount_limit = icount_limit;
 
 static unsigned long int icount, pio_icount;
 
+static uint64_t scaled_icount_limit(uint64_t base, size_t scale) {
+	if (scale == 0)
+		return base;
+	if (base > UINT64_MAX / scale)
+		return UINT64_MAX;
+	return base * scale;
+}
+
+static void configure_pio_icount_limit(void) {
+	size_t scale = pio_icount_scale();
+	const char *reason = "default";
+
+	if (scale == 1 && sym_to_addr("vmlinux", "kasan_report") != 0) {
+		scale = 16;
+		reason = "kasan";
+	} else if (scale != 1) {
+		reason = "env";
+	}
+
+	pio_icount_limit = scaled_icount_limit(icount_limit, scale);
+	printf(".pio_icount_limit=%lu scale=%zu (%s)\n", pio_icount_limit,
+	       scale, reason);
+}
+
 static void dump_hex(const uint8_t *data, size_t len) {
 	for (int i = 0; i < len; i++)
 		printf("%02x ", data[i]);
@@ -747,6 +771,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 			hack_timer_mod = true;
 		}
 	}
+
+	configure_pio_icount_limit();
 
 	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++)
 		BX_CPU(cpu)->TLB_flush();

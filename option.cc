@@ -180,6 +180,22 @@ size_t nocov_scale(void) {
 	return value;
 }
 
+size_t pio_icount_scale(void) {
+	static bool init = false;
+	static size_t value = 1;
+	if (!init) {
+		init = true;
+		const char *env = getenv("PIO_ICOUNT_SCALE");
+		if (env) {
+			char *end = nullptr;
+			unsigned long parsed = strtoul(env, &end, 10);
+			if (end != env && *end == '\0' && parsed > 0)
+				value = static_cast<size_t>(parsed);
+		}
+	}
+	return value;
+}
+
 const char *manual_ranges_path(void) {
 	option_require_checked();
 	return get_env_cached("MANUAL_RANGES", &manual_ranges_path_value,

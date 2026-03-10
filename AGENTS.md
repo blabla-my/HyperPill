@@ -8,17 +8,15 @@ Keep changes minimal, simple, and consistent with existing patterns.
 **Compiler**: always use clang.
 
 ```bash
-# Build the main binary (default target: fuzz)
-CC=clang CXX=clang++ make
-
-# Clean rebuild (recommended when vendor/ changes)
+# Preferred build for agent work and validation
 make clean && CC=clang CXX=clang++ make
 
 # Debug build (adds -O0 -g)
-CC=clang CXX=clang++ make DEBUG=1
+make clean && CC=clang CXX=clang++ make DEBUG=1
 ```
 
 Notes:
+- Use `make clean && CC=clang CXX=clang++ make` after code changes instead of building individual object files.
 - The default `make` target builds the `fuzz` binary.
 - The build invokes Bochs and libFuzzer-ng builds as dependencies.
 - `make clean` removes `vendor/bochs-build`, `vendor/lib`, `vendor/include`, and objects.

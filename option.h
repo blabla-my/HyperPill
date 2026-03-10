@@ -36,6 +36,7 @@ bool no_asan_enabled(void);
 bool kvm_enabled(void);
 bool sgl_size_infer_enabled(void);
 size_t nocov_scale(void);
+size_t pio_icount_scale(void);
 
 const char *manual_ranges_path(void);
 const char *range_regex(void);
