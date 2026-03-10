@@ -962,6 +962,11 @@ void insert_register_value_into_fuzz_input(int idx) {
  * [the corresponding registers in natural order]
  */
 bool op_vmcall() {
+	static bool disable_with_virtio_core_nocov =
+		virtio_core_enabled() && nocov_enabled();
+	if (disable_with_virtio_core_nocov)
+		return false;
+
 	static uint8_t local_dma[4096]; // Used to make a copy of dma data
 					// before rewriting regs
 	size_t local_dma_len; // Used to make a copy of dma data before
@@ -1175,12 +1180,35 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		[OP_VMCALL] = op_vmcall,
 		[OP_NOTIFY] = op_notify,
 	};
-	static const int nr_ops = sizeof(ops) / sizeof((ops)[0]);
+	static const uint8_t virtio_core_ops[] = {
+		OP_READ,
+		OP_WRITE,
+		OP_IN,
+		OP_OUT,
+		OP_PCI_WRITE,
+		OP_MSR_WRITE,
+		OP_VMCALL,
+		OP_NOTIFY,
+	};
+	static const uint8_t virtio_core_ops_nocov[] = {
+		OP_READ,
+		OP_WRITE,
+		OP_IN,
+		OP_OUT,
+		OP_PCI_WRITE,
+		OP_NOTIFY,
+	};
+	static const uint8_t nr_ops = sizeof(ops) / sizeof((ops)[0]);
+	static const uint8_t nr_virtio_core_ops =
+		sizeof(virtio_core_ops) / sizeof((virtio_core_ops)[0]);
+	static const uint8_t nr_virtio_core_ops_nocov =
+		sizeof(virtio_core_ops_nocov) / sizeof((virtio_core_ops_nocov)[0]);
 	uint8_t op;
 
 	static bool fuzz_legacy;
 	static bool fuzz_hypercalls;
 	static bool virtio_core;
+	static bool nocov_mode;
 	static int inited;
 	if (!inited) {
 		inited = 1;
@@ -1188,6 +1216,7 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		fuzz_hypercalls = fuzz_hypercalls_enabled();
 		log_ops = log_ops_enabled() || BX_CPU(0)->fuzztrace;
 		virtio_core = virtio_core_enabled();
+		nocov_mode = nocov_enabled();
 	}
 
 	if (virtio_core) {
@@ -1218,11 +1247,18 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 				continue;
 			}
 		} else if (virtio_core) {
-			if (ic_ingest8(&op, 0, OP_NOTIFY, true)) {
+			const uint8_t *virtio_ops = nocov_mode ?
+				virtio_core_ops_nocov : virtio_core_ops;
+			uint8_t virtio_nr_ops = nocov_mode ?
+				nr_virtio_core_ops_nocov : nr_virtio_core_ops;
+			uint8_t op_idx;
+
+			if (ic_ingest8(&op_idx, 0, virtio_nr_ops - 1, true)) {
 				ic_erase_backwards_until_token();
 				ic_subtract(4);
 				continue;
 			}
+			op = virtio_ops[op_idx];
 		} else { /* Fuzz Everything */
 			if (ic_ingest8(&op, 0, OP_VMCALL, true)) {
 				ic_erase_backwards_until_token();
