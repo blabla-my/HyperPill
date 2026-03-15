@@ -17,7 +17,14 @@ export NOCOV=1
 export ICP_VMCS_LAYOUT_PATH="$PROJECT_ROOT/data/vmcs.layout"
 export ICP_VMCS_ADDR=$(cat "$SNAPSHOT_BASE/vmcs")
 export SYMBOL_MAPPING="$SNAPSHOT_BASE/layout"
-export ICP_MEM_PATH="$SNAPSHOT_BASE/mem"
+if [ -e "$SNAPSHOT_BASE/mem.zst" ]; then
+    export ICP_MEM_PATH="$SNAPSHOT_BASE/mem.zst"
+elif [ -e "$SNAPSHOT_BASE/mem" ]; then
+    export ICP_MEM_PATH="$SNAPSHOT_BASE/mem"
+else
+    echo "Neither $SNAPSHOT_BASE/mem.zst nor $SNAPSHOT_BASE/mem exists. Exiting."
+    exit 1
+fi
 if [ -e "$SNAPSHOT_BASE/mem.md5sum" ]; then
     export ICP_MEM_MD5SUM=$(cat "$SNAPSHOT_BASE/mem.md5sum")
 fi

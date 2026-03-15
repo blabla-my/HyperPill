@@ -39,7 +39,7 @@ LDFLAGS    =
 endif
 
 # LDLIBS: The libraries to link against.
-LDLIBS     = -lrt -ldl -lpthread -lsqlite3 -lstdc++fs -lcrypto
+LDLIBS     = -lrt -ldl -lpthread -lsqlite3 -lstdc++fs -lcrypto -lzstd
 
 # SANITIZE_FLAGS: Flags needed for BOTH compilation and linking for sanitizers.
 SANITIZE_FLAGS = 

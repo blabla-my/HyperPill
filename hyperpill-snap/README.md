@@ -331,6 +331,8 @@ EOF
 # Attach to qemu monitor:
 [L0] $ telnet localhost 55556
 [L0 qemu-monitor] dump-guest-memory /path/to/snapshots/dir/mem
+[L0] $ md5sum /path/to/snapshots/dir/mem | cut -d ' ' -f 1 > /path/to/snapshots/dir/mem.md5sum
+[L0] $ zstd -f --rm /path/to/snapshots/dir/mem
 [L0 qemu-monitor] info registers
 # Copy the output of the above command to /path/to/snapshots/dir/regs
 [L0] sudo dmesg | grep "VMCS.*last" | cut -f2 -d"(" | cut -f1 -d ")"

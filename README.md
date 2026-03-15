@@ -8,7 +8,7 @@ Building
 ```
 sudo apt-get install libssl-dev libsqlite3-dev \
     flex bison clang build-essential debuginfod elfutils \
-    python3-pip libcapstone4 libcapstone-dev
+    python3-pip libcapstone4 libcapstone-dev libzstd-dev
 CC=clang CXX=clang++ make
 ```
 
@@ -34,15 +34,17 @@ A valid snapshot snapshot directory must contain the following files:
 ```
 .
 └──── dir
-   ├── mem
+   ├── mem.zst
    ├── regs
    └── vmcs 
 ```
 
-Here `dir` can be `kvm` or any other custom name.
+Here `dir` can be `kvm` or any other custom name. Legacy raw `mem`
+snapshots are still accepted during transition.
 
-Tip: Run `md5sum mem | cut -d ' ' -f 1 > mem.md5sum` to avoid unnecessary
-remapping of the snapshot.
+Tip: Keep `mem.md5sum` as the MD5 of the original uncompressed ELF snapshot
+to avoid unnecessary remapping. If you only have `mem.zst`, run
+`zstd -d -c mem.zst | md5sum | cut -d ' ' -f 1 > mem.md5sum`.
 
 For elf-based hypervisors, it is recommended to store relevant binaries in
 `dir/symbols` for symbolization and breakpointing.  See
