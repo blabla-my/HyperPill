@@ -529,25 +529,6 @@ bool has_magic(const uint8_t *data, size_t size, const uint8_t *magic,
 	return size >= magic_size && memcmp(data, magic, magic_size) == 0;
 }
 
-void build_cached_elf_shm_name(const char *md5_chr, char *shm_name,
-			       size_t shm_name_size) {
-	int ret =
-		snprintf(shm_name, shm_name_size, "/hyperpill-elf-%s", md5_chr);
-
-	if (ret < 0 || (size_t)ret >= shm_name_size)
-		snapshot_load_fail("snapshot",
-				   "cached ELF shm name is too long");
-}
-
-int open_named_shm_fd(const char *filename, const char *shm_name) {
-	int fd = shm_open(shm_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-
-	if (fd == -1)
-		snapshot_load_perror(filename, "shm_open cached ELF snapshot");
-
-	return fd;
-}
-
 int open_tmp_shm_fd(const char *filename) {
 	char shm_name[128];
 
@@ -772,16 +753,17 @@ void icp_init_mem(const char *filename) {
 	struct stat statbuf;
 	const char *saved_md5sum_chr = icp_mem_md5sum();
 	bool have_computed_md5 = false;
+	bool have_cached_backing_store = false;
 	const uint8_t *elf = NULL;
 	size_t elf_size = 0;
 	uint8_t *elf_mapping = NULL;
 	size_t elf_mapping_size = 0;
-	int elf_fd = -1;
-	char elf_shm_name[64];
+	int temp_fd = -1;
 	uint8_t *mapped_file = NULL;
 	const ElfW(Ehdr) * ehdr;
 	const ElfW(Phdr) * phdr;
 	size_t total_pt_load_bytes;
+	off_t shfd_size = -1;
 	unsigned char md5sum_hex[MD5_DIGEST_LENGTH];
 	FILE *file;
 
@@ -797,82 +779,130 @@ void icp_init_mem(const char *filename) {
 		snapshot_load_fail(filename, "snapshot file is empty");
 	}
 
+	if (saved_md5sum_chr) {
+		memcpy(md5sum_chr, saved_md5sum_chr, 32);
+		md5sum_chr[32] = '\0';
+		shfd = shm_open((const char *)md5sum_chr, O_CREAT | O_RDWR,
+				S_IRUSR | S_IWUSR);
+		if (shfd == -1) {
+			fclose(file);
+			perror("shm_open");
+			exit(1);
+		}
+		shfd_size = lseek(shfd, 0L, SEEK_END);
+		if (shfd_size == -1) {
+			fclose(file);
+			perror("snapshot backing store");
+			exit(1);
+		}
+		if (shfd_size > 0) {
+			maxaddr = shfd_size;
+			have_cached_backing_store = true;
+			verbose_printf("Max Addr: %lx\n", maxaddr);
+			assert(maxaddr % 4096 == 0);
+		}
+	}
+
 	mapped_file =
 		mmap_snapshot_file(fileno(file), statbuf.st_size, filename);
-	if (has_magic(mapped_file, statbuf.st_size, kZstdMagic,
+	if (!have_cached_backing_store &&
+	    has_magic(mapped_file, statbuf.st_size, kZstdMagic,
 		      sizeof(kZstdMagic))) {
 		unsigned char *md5_dst = NULL;
-		off_t cached_elf_size;
 
-		if (saved_md5sum_chr) {
-			build_cached_elf_shm_name(saved_md5sum_chr,
-						  elf_shm_name,
-						  sizeof(elf_shm_name));
-			elf_fd = open_named_shm_fd(filename, elf_shm_name);
-		} else {
-			elf_fd = open_tmp_shm_fd(filename);
+		temp_fd = open_tmp_shm_fd(filename);
+		if (!saved_md5sum_chr)
 			md5_dst = md5sum_hex;
-		}
-		cached_elf_size = lseek(elf_fd, 0L, SEEK_END);
-		if (cached_elf_size == -1) {
-			close(elf_fd);
-			snapshot_load_perror(filename,
-					     "seek cached ELF snapshot");
-		}
-		if (cached_elf_size == 0) {
-			if (lseek(elf_fd, 0L, SEEK_SET) == -1 ||
-			    ftruncate(elf_fd, 0) == -1) {
-				close(elf_fd);
-				snapshot_load_perror(
-					filename,
-					"prepare cached ELF snapshot");
-			}
-			decompress_zstd_snapshot_to_fd(mapped_file,
-						       statbuf.st_size,
-						       filename, md5_dst,
-						       elf_fd, &elf_size);
-			have_computed_md5 = md5_dst != NULL;
-		} else {
-			if (lseek(elf_fd, 0L, SEEK_SET) == -1) {
-				close(elf_fd);
-				snapshot_load_perror(
-					filename, "seek cached ELF snapshot");
-			}
-			fprintf(stderr,
-				".reusing cached decompressed snapshot /dev/shm%s\n",
-				elf_shm_name);
-			elf_size = cached_elf_size;
-		}
+
+		decompress_zstd_snapshot_to_fd(mapped_file, statbuf.st_size,
+					       filename, md5_dst, temp_fd,
+					       &elf_size);
+		have_computed_md5 = md5_dst != NULL;
 		if (elf_size == 0)
 			snapshot_load_fail(filename,
 					   "decompressed snapshot is empty");
-		elf_mapping = mmap_snapshot_file(elf_fd, elf_size, filename);
+		elf_mapping =
+			mmap_snapshot_file(temp_fd, elf_size, filename);
 		elf_mapping_size = elf_size;
-		close(elf_fd);
-		elf_fd = -1;
+		close(temp_fd);
+		temp_fd = -1;
 		elf = elf_mapping;
-		have_computed_md5 = md5_dst != NULL;
-	} else {
+	} else if (!have_cached_backing_store) {
 		elf = mapped_file;
 		elf_size = statbuf.st_size;
 	}
 
-	validate_elf_snapshot(elf, elf_size, filename);
-	ehdr = (const ElfW(Ehdr) *)elf;
-	phdr = (const ElfW(Phdr) *)(elf + ehdr->e_phoff);
-	total_pt_load_bytes = get_total_pt_load_bytes(ehdr, phdr, filename);
-	maxaddr = 0;
-	for (int i = 0; i < ehdr->e_phnum; i++) {
-		if (phdr[i].p_type != 1)
-			continue;
-		if (phdr[i].p_vaddr + phdr[i].p_memsz > maxaddr)
-			maxaddr = phdr[i].p_vaddr + phdr[i].p_memsz;
+	if (!have_cached_backing_store) {
+		validate_elf_snapshot(elf, elf_size, filename);
+		ehdr = (const ElfW(Ehdr) *)elf;
+		phdr = (const ElfW(Phdr) *)(elf + ehdr->e_phoff);
+		total_pt_load_bytes = get_total_pt_load_bytes(ehdr, phdr,
+							      filename);
+		maxaddr = 0;
+		for (int i = 0; i < ehdr->e_phnum; i++) {
+			if (phdr[i].p_type != 1)
+				continue;
+			if (phdr[i].p_vaddr + phdr[i].p_memsz > maxaddr)
+				maxaddr = phdr[i].p_vaddr + phdr[i].p_memsz;
+		}
+		if (maxaddr == 0)
+			snapshot_load_fail(
+				filename,
+				"ELF snapshot contains no PT_LOAD segments");
+		verbose_printf("Max Addr: %lx\n", maxaddr);
+		assert(maxaddr % 4096 == 0);
+
+		if (!saved_md5sum_chr) {
+			if (have_computed_md5) {
+				for (int i = 0; i < MD5_DIGEST_LENGTH; ++i)
+					sprintf(md5sum_chr + (i * 2),
+						"%02x", md5sum_hex[i]);
+			} else {
+				MD5((unsigned char *)elf, elf_size, md5sum_hex);
+				for (int i = 0; i < MD5_DIGEST_LENGTH; ++i)
+					sprintf(md5sum_chr + (i * 2), "%02x",
+						md5sum_hex[i]);
+			}
+			md5sum_chr[32] = '\0';
+			shfd = shm_open((const char *)md5sum_chr,
+					O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+			if (shfd == -1) {
+				if (elf_mapping)
+					munmap(elf_mapping, elf_mapping_size);
+				if (mapped_file)
+					munmap(mapped_file, statbuf.st_size);
+				if (temp_fd != -1)
+					close(temp_fd);
+				fclose(file);
+				perror("shm_open");
+				exit(1);
+			}
+			shfd_size = lseek(shfd, 0L, SEEK_END);
+			if (shfd_size == -1) {
+				if (elf_mapping)
+					munmap(elf_mapping, elf_mapping_size);
+				if (mapped_file)
+					munmap(mapped_file, statbuf.st_size);
+				if (temp_fd != -1)
+					close(temp_fd);
+				fclose(file);
+				perror("snapshot backing store");
+				exit(1);
+			}
+		}
+
+		if (shfd_size > 0 && shfd_size != (off_t)maxaddr) {
+			if (elf_mapping)
+				munmap(elf_mapping, elf_mapping_size);
+			if (mapped_file)
+				munmap(mapped_file, statbuf.st_size);
+			if (temp_fd != -1)
+				close(temp_fd);
+			fclose(file);
+			snapshot_load_fail(filename,
+					   "cached memory snapshot size mismatch");
+		}
 	}
-	if (maxaddr == 0)
-		snapshot_load_fail(filename,
-				   "ELF snapshot contains no PT_LOAD segments");
-	verbose_printf("Max Addr: %lx\n", maxaddr);
-	assert(maxaddr % 4096 == 0);
 
 	// Now that we know how much memory we need, do THREE mmaps:
 	// 3 layers 3 mmaps
@@ -892,44 +922,6 @@ void icp_init_mem(const char *filename) {
 				   MAP_SHARED | MAP_ANONYMOUS, -1, 0,
 				   "mmap overlay[1]");
 
-	if (saved_md5sum_chr) {
-		memcpy(md5sum_chr, saved_md5sum_chr, 32);
-	} else if (have_computed_md5) {
-		for (int i = 0; i < MD5_DIGEST_LENGTH; ++i)
-			sprintf(md5sum_chr + (i * 2), "%02x", md5sum_hex[i]);
-	} else {
-		MD5((unsigned char *)elf, elf_size, md5sum_hex);
-		for (int i = 0; i < MD5_DIGEST_LENGTH; ++i)
-			sprintf(md5sum_chr + (i * 2), "%02x", md5sum_hex[i]);
-	}
-	md5sum_chr[32] = '\0';
-	shfd = shm_open((const char *)md5sum_chr, O_CREAT | O_RDWR,
-			S_IRUSR | S_IWUSR);
-	if (shfd == -1) {
-		if (elf_mapping)
-			munmap(elf_mapping, elf_mapping_size);
-		if (mapped_file)
-			munmap(mapped_file, statbuf.st_size);
-		if (elf_fd != -1)
-			close(elf_fd);
-		fclose(file);
-		perror("shm_open");
-		exit(1);
-	}
-
-	off_t shfd_size = lseek(shfd, 0L, SEEK_END);
-	if (shfd_size == -1) {
-		if (elf_mapping)
-			munmap(elf_mapping, elf_mapping_size);
-		if (mapped_file)
-			munmap(mapped_file, statbuf.st_size);
-		if (elf_fd != -1)
-			close(elf_fd);
-		fclose(file);
-		perror("snapshot backing store");
-		exit(1);
-	}
-
 	if (shfd_size == 0) {
 		if (lseek(shfd, 0L, SEEK_SET) == -1 ||
 		    ftruncate(shfd, maxaddr) == -1) {
@@ -937,8 +929,8 @@ void icp_init_mem(const char *filename) {
 				munmap(elf_mapping, elf_mapping_size);
 			if (mapped_file)
 				munmap(mapped_file, statbuf.st_size);
-			if (elf_fd != -1)
-				close(elf_fd);
+			if (temp_fd != -1)
+				close(temp_fd);
 			fclose(file);
 			perror("snapshot backing store");
 			exit(1);
@@ -965,8 +957,8 @@ void icp_init_mem(const char *filename) {
 				munmap(elf_mapping, elf_mapping_size);
 			if (mapped_file)
 				munmap(mapped_file, statbuf.st_size);
-			if (elf_fd != -1)
-				close(elf_fd);
+			if (temp_fd != -1)
+				close(temp_fd);
 			fclose(file);
 			perror("snapshot backing store");
 			exit(1);
@@ -994,8 +986,8 @@ void icp_init_mem(const char *filename) {
 		munmap(mapped_file, statbuf.st_size);
 	if (elf_mapping)
 		munmap(elf_mapping, elf_mapping_size);
-	if (elf_fd != -1)
-		close(elf_fd);
+	if (temp_fd != -1)
+		close(temp_fd);
 	fclose(file);
 }
 

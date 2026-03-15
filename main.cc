@@ -776,9 +776,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++)
 		BX_CPU(cpu)->TLB_flush();
-	fuzz_walk_ept();
-	vmcs_fixup();
-	ept_mark_page_table();
 	// init_register_feedback();
 
 	if (link_map_path() && link_obj_regex())
