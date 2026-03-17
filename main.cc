@@ -11,6 +11,7 @@
 #include "param_names.h"
 #include "vendor/libfuzzer-ng/FuzzerInternal.h"
 #include "virtio.h"
+#include <csignal>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -36,6 +37,16 @@ bool fuzz_unhealthy_input = false; /* We reached an execution timeout */
 bool fuzz_do_not_continue = false; /* Don't inject new instructions. */
 bool fuzz_should_abort = false; /* We got a crash. */
 
+enum {
+	kFuzzTimeoutIdle = 0,
+	kFuzzTimeoutRequested,
+	kFuzzTimeoutHandling,
+};
+
+// libFuzzer raises SIGALRM in the fuzzing thread, so keep the handler side
+// signal-safe and do the dump from normal emulator context.
+static volatile sig_atomic_t fuzz_timeout_state = kFuzzTimeoutIdle;
+
 bool fuzzing;
 static bool executing_input;
 
@@ -44,6 +55,24 @@ static unsigned long int kDrainIcountBudget = nocov ? 5000000 * nocov_scale() :
 							    5000000;
 static constexpr size_t kDrainPredTickIntervalInitial = 1024;
 static constexpr size_t kDrainPredTickIntervalMax = 100000;
+
+bool fuzz_request_timeout_dump(void) {
+	if (fuzz_timeout_state != kFuzzTimeoutIdle)
+		return false;
+	fuzz_timeout_state = kFuzzTimeoutRequested;
+	return true;
+}
+
+static void fuzz_reset_timeout_state(void) {
+	fuzz_timeout_state = kFuzzTimeoutIdle;
+}
+
+static bool fuzz_timeout_pending(void) {
+	return fuzz_timeout_state == kFuzzTimeoutRequested;
+}
+
+static void fuzz_handle_timeout_request(unsigned cpu);
+static void fuzz_emu_stop_timeout(unsigned cpu);
 
 static struct {
 	bool active;
@@ -211,6 +240,10 @@ static void init_cpu(void) {
 void start_cpu(bool enumerating) {
 	if (fuzzing && (fuzz_unhealthy_input || fuzz_do_not_continue))
 		return;
+	if (fuzz_timeout_pending()) {
+		fuzz_handle_timeout_request(0);
+		return;
+	}
 
 	srand(1); /* rdrand */
 	if (!drain_state.active)
@@ -230,6 +263,10 @@ void start_cpu(bool enumerating) {
 		hp_gdbstub_debug_loop();
 	if (bx_cpu_count == 1) {
 		while (BX_CPU(0)->fuzz_executing_input) {
+			if (fuzz_timeout_pending()) {
+				fuzz_handle_timeout_request(0);
+				continue;
+			}
 			BX_CPU(0)->cpu_loop();
 		}
 	} else {
@@ -259,6 +296,10 @@ void start_cpu(bool enumerating) {
 		};
 
 		while (smp_running()) {
+			if (fuzz_timeout_pending()) {
+				fuzz_handle_timeout_request(processor);
+				continue;
+			}
 			if (drain_state.active) {
 				if (icount > kDrainIcountBudget) {
 					drain_state.budget_hit = true;
@@ -317,6 +358,10 @@ void start_cpu(bool enumerating) {
 		}
 #else
 		while (BX_CPU(0)->fuzz_executing_input) {
+			if (fuzz_timeout_pending()) {
+				fuzz_handle_timeout_request(0);
+				continue;
+			}
 			BX_CPU(0)->cpu_loop();
 		}
 #endif
@@ -376,22 +421,24 @@ void fuzz_emu_stop_polling() {
 	fuzz_do_not_continue = 1;
 }
 
-void fuzz_emu_stop_crash(unsigned cpu, const char *type) {
+static void fuzz_emu_stop_report(unsigned cpu, const char *event,
+				 const char *artifact_prefix,
+				 const char *detail, bool require_task) {
 	// judege whether the crash is from a hypervisor thread
 	Task *task = task_manager.get_current_task(cpu);
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
 		       task->pid, task->kernel_task, task->hypervisor_task,
 		       task->comm, task->cr3, task->pgd);
-	} else {
+	} else if (require_task) {
 		return;
 	}
 	fuzz_emu_stop_unhealthy();
 	// fuzz_should_abort = 1;
-	if (type) {
-		printf(".crash %s\n", type);
+	if (detail) {
+		printf(".%s %s\n", event, detail);
 	} else {
-		printf(".crash\n");
+		printf(".%s\n", event);
 	}
 	auto hash = stacktrace_hash_get(cpu);
 	if (not stacktrace_hash_seen(hash)) {
@@ -408,7 +455,7 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type) {
 		dump_instr_cpu(cpu);
 		// construct a string type-hash, hash is hexadecimal
 		std::stringstream ss;
-		ss << type << "-" << std::hex << hash;
+		ss << artifact_prefix << "-" << std::hex << hash;
 		ic_dump_file(ss.str().c_str());
 	}
 	if (abort_on_err_enabled()) {
@@ -416,6 +463,21 @@ void fuzz_emu_stop_crash(unsigned cpu, const char *type) {
 		fflush(stderr);
 		_exit(0);
 	}
+}
+
+void fuzz_emu_stop_crash(unsigned cpu, const char *type) {
+	fuzz_emu_stop_report(cpu, "crash", type ? type : "crash", type, true);
+}
+
+static void fuzz_emu_stop_timeout(unsigned cpu) {
+	fuzz_emu_stop_report(cpu, "timeout", "timeout", nullptr, false);
+}
+
+static void fuzz_handle_timeout_request(unsigned cpu) {
+	if (!fuzz_timeout_pending())
+		return;
+	fuzz_timeout_state = kFuzzTimeoutHandling;
+	fuzz_emu_stop_timeout(cpu);
 }
 
 void fuzz_hook_exception(unsigned cpu, unsigned vector, unsigned error_code) {
@@ -487,9 +549,13 @@ void fuzz_instr_after_execution(bxInstruction_c *i) {
 }
 
 void fuzz_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
+	if (fuzz_timeout_pending())
+		fuzz_handle_timeout_request(cpu);
 	handle_breakpoints(cpu, i);
 	handle_syscall_hooks(cpu, i);
 	if (!fuzzing && !fuzzenum)
+		return;
+	if (fuzz_unhealthy_input || fuzz_do_not_continue)
 		return;
 
 	/* Check Icount limits */
@@ -518,6 +584,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	static bool ic_test = fuzz_ic_test_enabled();
 	static bool virtio_core = virtio_core_enabled();
 	static int done;
+	fuzz_reset_timeout_state();
 	if (BX_CPU(0)->fuzztrace)
 		printf("NEW INPUT\n");
 	if (!done) {

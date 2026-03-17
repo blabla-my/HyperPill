@@ -39,6 +39,8 @@
 #endif
 #endif
 
+bool fuzz_request_timeout_dump(void);
+
 namespace fuzzer {
 std::map <uintptr_t, int> cmplog_counts;
 
@@ -298,6 +300,8 @@ void Fuzzer::AlarmCallback() {
   if (Options.Verbosity >= 2)
     Printf("AlarmCallback %zd\n", Seconds);
   if (Seconds >= (size_t)Options.UnitTimeoutSec) {
+    if (::fuzz_request_timeout_dump())
+      return;
     if (EF->__sanitizer_acquire_crash_state &&
         !EF->__sanitizer_acquire_crash_state())
       return;
