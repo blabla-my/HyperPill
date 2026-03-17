@@ -9,14 +9,23 @@ else
     export LIBFUZZER_ARGS="-jobs=$NSLOTS -workers=$NSLOTS $LIBFUZZER_ARGS"
 fi
 
+LIBFUZZER_TIMEOUT_ARG=
+case " $LIBFUZZER_ARGS " in
+    *" -timeout="*)
+        ;;
+    *)
+        LIBFUZZER_TIMEOUT_ARG="-timeout=60"
+        ;;
+esac
+
 export ASAN_OPTIONS=use_sigaltstack=false
 if [ -z $crash ]; then
 LIBFUZZER_FLAGS="-max_len=8192 -rss_limit_mb=-1 -detect_leaks=0 -use_value_profile=1 -reload=60 \
     -dict=$PROJECT_ROOT/data/dict \
-    $LIBFUZZER_ARGS $CORPUS_DIR
+    $LIBFUZZER_TIMEOUT_ARG $LIBFUZZER_ARGS $CORPUS_DIR
     "
 else
-LIBFUZZER_FLAGS="$crash"
+LIBFUZZER_FLAGS="$LIBFUZZER_TIMEOUT_ARG $crash"
 fi
 
 if [[ -z "$KVM" && -z "$HYPERV" && -z "$MACOS" ]]; then
