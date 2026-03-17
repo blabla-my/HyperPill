@@ -19,13 +19,14 @@
 #include <filesystem>
 #include <vector>
 
-namespace fuzzer {
-	extern TracePC TPC;
-	extern Fuzzer* F;
+namespace fuzzer
+{
+extern TracePC TPC;
+extern Fuzzer *F;
 };
 
 int in_timer_mode = 0;
-uint64_t timer_mod[5] = {0};
+uint64_t timer_mod[5] = { 0 };
 bool hack_timer_mod = false;
 
 bool master_fuzzer;
@@ -33,28 +34,28 @@ bool verbose = 1;
 
 bool fuzz_unhealthy_input = false; /* We reached an execution timeout */
 bool fuzz_do_not_continue = false; /* Don't inject new instructions. */
-bool fuzz_should_abort = false;    /* We got a crash. */
+bool fuzz_should_abort = false; /* We got a crash. */
 
 bool fuzzing;
 static bool executing_input;
 
 static bool nocov = nocov_enabled();
-static unsigned long int kDrainIcountBudget =
-	nocov ? 5000000 * nocov_scale() : 5000000;
+static unsigned long int kDrainIcountBudget = nocov ? 5000000 * nocov_scale() :
+							    5000000;
 static constexpr size_t kDrainPredTickIntervalInitial = 1024;
 static constexpr size_t kDrainPredTickIntervalMax = 100000;
 
 static struct {
 	bool active;
 	drain_predicate_t pred;
-	void* ctx;
+	void *ctx;
 	bool budget_hit;
 	size_t pred_calls;
 	size_t tickn_calls;
 	size_t pred_tick_interval;
 } drain_state = {};
 
-void drain_begin(drain_predicate_t pred, void* ctx) {
+void drain_begin(drain_predicate_t pred, void *ctx) {
 	if (!virtio_core_enabled()) {
 		drain_state.active = false;
 		drain_state.pred = nullptr;
@@ -87,7 +88,9 @@ DrainStats drain_end() {
 	return stats;
 }
 
-bool drain_active() { return virtio_core_enabled() && drain_state.active; }
+bool drain_active() {
+	return virtio_core_enabled() && drain_state.active;
+}
 
 // Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
 BOCHSAPI bx_pc_system_c bx_pc_system;
@@ -159,7 +162,9 @@ static void dump_regs_cpu(unsigned cpu_id) {
 	fflush(stderr);
 }
 
-void dump_regs() { dump_regs_cpu(0); }
+void dump_regs() {
+	dump_regs_cpu(0);
+}
 
 static void dump_instr_cpu(unsigned cpu_id) {
 	auto *cpu = BX_CPU(cpu_id);
@@ -169,7 +174,9 @@ static void dump_instr_cpu(unsigned cpu_id) {
 	cpu->debug_disasm_instruction(cpu->get_rip());
 }
 
-void dump_instr() { dump_instr_cpu(0); }
+void dump_instr() {
+	dump_instr_cpu(0);
+}
 
 static void hp_init_cpus(unsigned int cpu_count) {
 #if BX_SUPPORT_SMP
@@ -179,7 +186,7 @@ static void hp_init_cpus(unsigned int cpu_count) {
 		cpu_count = 1;
 
 	bx_cpu_count = static_cast<Bit8u>(cpu_count);
-	bx_cpu_array = new BX_CPU_C*[cpu_count];
+	bx_cpu_array = new BX_CPU_C *[cpu_count];
 	for (unsigned int i = 0; i < bx_cpu_count; i++) {
 		bx_cpu_array[i] = new BX_CPU_C(i);
 	}
@@ -222,14 +229,16 @@ void start_cpu(bool enumerating) {
 			BX_CPU(0)->cpu_loop();
 		}
 	} else {
-	#if BX_SUPPORT_SMP
+#if BX_SUPPORT_SMP
 		Bit32u executed = 0;
 		Bit32u processor = 0;
 		bool run = true;
-		const Bit32u quantum = SIM->get_param_num(BXPN_SMP_QUANTUM)->get();
+		const Bit32u quantum =
+			SIM->get_param_num(BXPN_SMP_QUANTUM)->get();
 
 		for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-			BX_CPU(cpu)->icount_last_sync = BX_CPU(cpu)->get_icount();
+			BX_CPU(cpu)->icount_last_sync =
+				BX_CPU(cpu)->get_icount();
 		}
 
 		if (setjmp(BX_CPU_C::jmp_buf_env)) {
@@ -237,13 +246,13 @@ void start_cpu(bool enumerating) {
 			run = false;
 		}
 
-			auto smp_running = [&]() -> bool {
-				for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-					if (BX_CPU(cpu)->fuzz_executing_input)
-						return true;
-				}
-				return false;
-			};
+		auto smp_running = [&]() -> bool {
+			for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
+				if (BX_CPU(cpu)->fuzz_executing_input)
+					return true;
+			}
+			return false;
+		};
 
 		while (smp_running()) {
 			if (drain_state.active) {
@@ -259,8 +268,9 @@ void start_cpu(bool enumerating) {
 			else
 				run = true;
 
-			Bit32u n = (Bit32u)(BX_CPU(processor)->get_icount() -
-			                    BX_CPU(processor)->icount_last_sync);
+			Bit32u n =
+				(Bit32u)(BX_CPU(processor)->get_icount() -
+					 BX_CPU(processor)->icount_last_sync);
 			if (n == 0)
 				n = quantum;
 			executed += n;
@@ -273,16 +283,24 @@ void start_cpu(bool enumerating) {
 					drain_state.tickn_calls++;
 					if (drain_state.pred &&
 					    drain_state.tickn_calls %
-						    drain_state.pred_tick_interval == 0) {
+							    drain_state
+								    .pred_tick_interval ==
+						    0) {
 						drain_state.pred_calls++;
-						if (drain_state.pred(drain_state.ctx))
+						if (drain_state.pred(
+							    drain_state.ctx))
 							pause_cpu();
-						if (drain_state.pred_tick_interval <
+						if (drain_state
+							    .pred_tick_interval <
 						    kDrainPredTickIntervalMax) {
-							drain_state.pred_tick_interval *= 2;
-							if (drain_state.pred_tick_interval >
+							drain_state
+								.pred_tick_interval *=
+								2;
+							if (drain_state
+								    .pred_tick_interval >
 							    kDrainPredTickIntervalMax) {
-								drain_state.pred_tick_interval =
+								drain_state
+									.pred_tick_interval =
 									kDrainPredTickIntervalMax;
 							}
 						}
@@ -297,19 +315,19 @@ void start_cpu(bool enumerating) {
 		while (BX_CPU(0)->fuzz_executing_input) {
 			BX_CPU(0)->cpu_loop();
 		}
-	#endif
-		}
-		pause_cpu();
-		if (fuzz_unhealthy_input || fuzz_do_not_continue)
-			return;
-		if (drain_state.active)
-			return;
-		BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
+#endif
+	}
+	pause_cpu();
+	if (fuzz_unhealthy_input || fuzz_do_not_continue)
+		return;
+	if (drain_state.active)
+		return;
+	BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
 
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
 	// assert(res == 1); // Guest page table should be guarded
-	if (res != 1){
+	if (res != 1) {
 		fuzz_emu_stop_unhealthy();
 	}
 	if (phy > maxaddr || !res) {
@@ -339,14 +357,14 @@ void pause_cpu() {
 	fuzz_emu_stop();
 }
 
-void fuzz_emu_stop_normal(){
+void fuzz_emu_stop_normal() {
 	pause_cpu();
 }
 
-void fuzz_emu_stop_unhealthy(){
+void fuzz_emu_stop_unhealthy() {
 	pause_cpu();
-    fuzz_do_not_continue = 1;
-    fuzz_unhealthy_input = 1;
+	fuzz_do_not_continue = 1;
+	fuzz_unhealthy_input = 1;
 }
 
 void fuzz_emu_stop_polling() {
@@ -354,13 +372,13 @@ void fuzz_emu_stop_polling() {
 	fuzz_do_not_continue = 1;
 }
 
-void fuzz_emu_stop_crash(unsigned cpu, const char *type){
+void fuzz_emu_stop_crash(unsigned cpu, const char *type) {
 	// judege whether the crash is from a hypervisor thread
-	Task* task = task_manager.get_current_task(cpu);
+	Task *task = task_manager.get_current_task(cpu);
 	if (task) {
 		printf("Task PID: %d, Kernel Thread: %d, Hypervisor Thread: %d, Comm: %s, CR3: %lx, PGD: %lx\n",
-			task->pid, task->kernel_task, task->hypervisor_task, task->comm,
-			task->cr3, task->pgd);
+		       task->pid, task->kernel_task, task->hypervisor_task,
+		       task->comm, task->cr3, task->pgd);
 	} else {
 		return;
 	}
@@ -426,32 +444,35 @@ void reset_bx_vm() {
 
 void fuzz_instr_interrupt(unsigned cpu, unsigned vector) {
 	// if (vector == 3) {
-    //     fuzz_emu_stop_crash(cpu, "debug-interrupt");
+	//     fuzz_emu_stop_crash(cpu, "debug-interrupt");
 	// }
 }
 
 void fuzz_instr_after_execution(bxInstruction_c *i) {
-	/* I don't think we need hacker_timer_mod. This prevent from configuring bochs to use -O2 optimization, just remove it */
+	/* I don't think we need hacker_timer_mod. This prevent from configuring
+	 * bochs to use -O2 optimization, just remove it */
 	// if (hack_timer_mod && i->getIaOpcode() == 0x4b8 /*CALL_Jq*/) {
 	// 	static uint64_t rdi, rsi; // context
 	// 	uint64_t rip = BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx;
-	// 	if (rip == timer_mod[0] || rip == timer_mod[1] || rip == timer_mod[2] || rip == timer_mod[3]) {
-	// 		if (in_timer_mode == 0) {
-	// 			uint64_t anchor = BX_CPU(id)->pop_64() - 5; // assume CALL_Ja
-	// 			rdi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx;
-	// 			rsi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx;
-	// 			// printf("call timer_mod(ts=0x%lx, expire_time=0x%lx), ", rdi, rsi);
-	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, 1 /*CLOCK_VIRTUAL*/);
-	// 			BX_CPU(id)->prev_rip = timer_mod[4];
-	// 			BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = timer_mod[4];
-	// 			BX_CPU(id)->push_64(anchor);
+	// 	if (rip == timer_mod[0] || rip == timer_mod[1] || rip ==
+	// timer_mod[2] || rip == timer_mod[3]) { 		if (in_timer_mode == 0) {
+	// 			uint64_t anchor = BX_CPU(id)->pop_64() - 5; // assume
+	// CALL_Ja 			rdi = BX_CPU(id)->gen_reg[BX_64BIT_REG_RDI].rrx; 			rsi =
+	// BX_CPU(id)->gen_reg[BX_64BIT_REG_RSI].rrx;
+	// 			// printf("call timer_mod(ts=0x%lx,
+	// expire_time=0x%lx), ", rdi, rsi);
+	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, 1
+	// /*CLOCK_VIRTUAL*/); 			BX_CPU(id)->prev_rip = timer_mod[4];
+	// 			BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx =
+	// timer_mod[4]; 			BX_CPU(id)->push_64(anchor);
 	// 			BX_CPU(id)->invalidate_prefetch_q();
 	// 			in_timer_mode++;
 	// 		} else if (in_timer_mode == 1) {
-	// 			uint64_t current = BX_CPU(id)->get_reg64(BX_64BIT_REG_RAX);
+	// 			uint64_t current =
+	// BX_CPU(id)->get_reg64(BX_64BIT_REG_RAX);
 	// 			// printf("while current=0x%lx\n", current);
-	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RSI, current);
-	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, rdi);
+	// 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RSI,
+	// current); 			BX_CPU(id)->set_reg64(BX_64BIT_REG_RDI, rdi);
 	// 			BX_CPU(id)->prev_rip = rip;
 	// 			BX_CPU(id)->gen_reg[BX_64BIT_REG_RIP].rrx = rip;
 	// 			BX_CPU(id)->invalidate_prefetch_q();
@@ -470,14 +491,14 @@ void fuzz_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
 	/* Check Icount limits */
 	if (icount > icount_limit && fuzzing) {
 		printf("icount abort %ld\n", icount);
-	    fuzz_emu_stop_unhealthy();
+		fuzz_emu_stop_unhealthy();
 	}
-	if (pio_icount > pio_icount_limit && fuzzenum){
+	if (pio_icount > pio_icount_limit && fuzzenum) {
 		printf("pio_icount abort %ld\n", pio_icount);
 		fuzz_emu_stop_unhealthy();
 	}
-    icount++;
-    pio_icount++;
+	icount++;
+	pio_icount++;
 }
 
 static void usage() {
@@ -499,22 +520,35 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		if (!log_writes)
 			log_writes = log_writes_enabled();
 		if (!nocov_enabled()) {
-			auto qemu_source_cov = new UserSourceCov("qemu-system-x86_64");
+			auto qemu_source_cov =
+				new UserSourceCov("qemu-system-x86_64");
 			auto spdk_source_cov = new UserSourceCov("vhost");
-			auto dpdk_source_cov = new UserSourceCov("dpdk-vhost_crypto");
+			auto dpdk_source_cov =
+				new UserSourceCov("dpdk-vhost_crypto");
 			auto passt_source_cov = new UserSourceCov("passt.avx2");
-			auto vhost_net_source_cov = new KernelSourceCov("vhost-net", "vhost/net.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
-			auto vhost_scsi_source_cov = new KernelSourceCov("vhost-scsi", "vhost/scsi.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
-			auto vhost_vsock_source_cov = new KernelSourceCov("vhost-vsock", "vhost/vsock.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
-			auto vhost_source_cov = new KernelSourceCov("vhost", "vhost/vhost.gcda", sym_to_addr("vmlinux", "gcov_info_head"));
-			add_to_source_cov_set((SourceCov*)qemu_source_cov);
-			add_to_source_cov_set((SourceCov*)spdk_source_cov);
-			add_to_source_cov_set((SourceCov*)dpdk_source_cov);
-			add_to_source_cov_set((SourceCov*)passt_source_cov);
-			add_to_source_cov_set((SourceCov*)vhost_net_source_cov);
-			add_to_source_cov_set((SourceCov*)vhost_scsi_source_cov);
-			add_to_source_cov_set((SourceCov*)vhost_vsock_source_cov);
-			add_to_source_cov_set((SourceCov*)vhost_source_cov);
+			auto vhost_net_source_cov = new KernelSourceCov(
+				"vhost-net", "vhost/net.gcda",
+				sym_to_addr("vmlinux", "gcov_info_head"));
+			auto vhost_scsi_source_cov = new KernelSourceCov(
+				"vhost-scsi", "vhost/scsi.gcda",
+				sym_to_addr("vmlinux", "gcov_info_head"));
+			auto vhost_vsock_source_cov = new KernelSourceCov(
+				"vhost-vsock", "vhost/vsock.gcda",
+				sym_to_addr("vmlinux", "gcov_info_head"));
+			auto vhost_source_cov = new KernelSourceCov(
+				"vhost", "vhost/vhost.gcda",
+				sym_to_addr("vmlinux", "gcov_info_head"));
+			add_to_source_cov_set((SourceCov *)qemu_source_cov);
+			add_to_source_cov_set((SourceCov *)spdk_source_cov);
+			add_to_source_cov_set((SourceCov *)dpdk_source_cov);
+			add_to_source_cov_set((SourceCov *)passt_source_cov);
+			add_to_source_cov_set(
+				(SourceCov *)vhost_net_source_cov);
+			add_to_source_cov_set(
+				(SourceCov *)vhost_scsi_source_cov);
+			add_to_source_cov_set(
+				(SourceCov *)vhost_vsock_source_cov);
+			add_to_source_cov_set((SourceCov *)vhost_source_cov);
 		}
 		setup_periodic_coverage();
 	}
@@ -526,7 +560,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	fuzz_unhealthy_input = false;
 	fuzz_should_abort = false;
 	reset_cur_cov();
-	/* this should be put before fuzz_run_input() since we will access it after LLVMFuzzerTestOneInput finishes */
+	/* this should be put before fuzz_run_input() since we will access it
+	 * after LLVMFuzzerTestOneInput finishes */
 	fuzzer::TPC.switch_values.clear();
 
 	fuzzing = true;
@@ -536,11 +571,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 	size_t final_size;
 	final_input_get(&final_size);
 
-	if (fuzz_should_abort) abort();
+	if (fuzz_should_abort)
+		abort();
 
 	if (final_size == 0 || fuzz_unhealthy_input || !done) {
-		verbose_printf("Skipping saving input (size: %ld, unhealthy: %d, done: %d)\n",
-		       final_size, fuzz_unhealthy_input, done);
+		verbose_printf(
+			"Skipping saving input (size: %ld, unhealthy: %d, done: %d)\n",
+			final_size, fuzz_unhealthy_input, done);
 		fflush(stdout);
 		uint8_t *dummy = (uint8_t *)"AAA";
 		__fuzzer_set_output(dummy, 1);
@@ -577,7 +614,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 		fuzzing = false;
 
 		output = ic_get_output(&len2);
-		
+
 		if (len != len2 || memcmp(output, newdata, len)) {
 			printf("Detected mismatch. Original Input %ld. IC Output1: %ld IC "
 			       "Output2: %ld\n",
@@ -645,7 +682,8 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		if (std::filesystem::exists(base, ec))
 			return 1;
 		for (unsigned int cpu = 0;; cpu++) {
-			std::string path = std::string(base) + std::to_string(cpu);
+			std::string path =
+				std::string(base) + std::to_string(cpu);
 			if (!std::filesystem::exists(path, ec))
 				return cpu ? cpu : 1;
 		}
@@ -675,24 +713,25 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	icp_init_shadow_vmcs_layout(vmcs_shadow_layout_path);
 	printf(".loading register snapshot from %s\n", regs_path);
-		{
-			std::error_code ec;
-			for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
-				std::string path;
+	{
+		std::error_code ec;
+		for (unsigned int cpu = 0; cpu < bx_cpu_count; cpu++) {
+			std::string path;
 			if (std::filesystem::exists(regs_path, ec)) {
 				if (cpu != 0)
 					break;
 				path = regs_path;
 			} else {
-				path = std::string(regs_path) + std::to_string(cpu);
+				path = std::string(regs_path) +
+				       std::to_string(cpu);
 			}
-				icp_init_regs_cpu(path.c_str(), cpu);
-			}
+			icp_init_regs_cpu(path.c_str(), cpu);
 		}
+	}
 
-		/* The current VMCS address is part of the CPU-state, but it is not part
-		 * of the memory or register snapshot. As such, we load it (and adjacent
-		 * internal Bochs pointers) separately.
+	/* The current VMCS address is part of the CPU-state, but it is not part
+	 * of the memory or register snapshot. As such, we load it (and adjacent
+	 * internal Bochs pointers) separately.
 	 */
 	printf(".vmcs addr set  to %lx\n", vmcs_addr);
 	icp_set_vmcs(vmcs_addr);
@@ -736,7 +775,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 	/* Save guest RIP so that we can restore it after each fuzzer input */
 	guest_rip = BX_CPU(0)->get_rip();
-	
+
 	/* Load symbols from files */
 	if (kallsyms_path() and maps_path()) {
 		/* only in infer stage, these two should be set */
@@ -747,16 +786,18 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		for (const auto &entry :
 		     std::filesystem::directory_iterator(snapshot_base())) {
 			if (entry.path().extension() == ".maps") {
-				printf("Loading symbol map from %s\n", entry.path().string().c_str());
-				load_symbol_map_from_maps(entry.path().string().c_str());
+				printf("Loading symbol map from %s\n",
+				       entry.path().string().c_str());
+				load_symbol_map_from_maps(
+					entry.path().string().c_str());
 			}
 		}
 
-		/* Since we are in infer stage, after doing this, we write sym back to the db, then exit*/
+		/* Since we are in infer stage, after doing this, we write sym
+		 * back to the db, then exit*/
 		store_sym_back_to_db(icp_db_path_str);
 		exit(0);
 	}
-
 
 	/* For symbol - > addr (for breakpoints)*/
 	if (symbol_mapping_path()) {
@@ -764,10 +805,14 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		load_symbol_map_from_db(icp_db_path_str);
 		if (hack_timer_mod_enabled()) {
 			timer_mod[0] = sym_to_addr("qemu-system", "timer_mod");
-			timer_mod[1] = sym_to_addr("qemu-system", "timer_mod_anticipate");
-			timer_mod[2] = sym_to_addr("qemu-system", "timer_mod_ns");
-			timer_mod[3] = sym_to_addr("qemu-system", "timer_mod_anticipate_ns");
-			timer_mod[4] = sym_to_addr("qemu-system", "qemu_clock_get_ns");
+			timer_mod[1] = sym_to_addr("qemu-system",
+						   "timer_mod_anticipate");
+			timer_mod[2] =
+				sym_to_addr("qemu-system", "timer_mod_ns");
+			timer_mod[3] = sym_to_addr("qemu-system",
+						   "timer_mod_anticipate_ns");
+			timer_mod[4] =
+				sym_to_addr("qemu-system", "qemu_clock_get_ns");
 			hack_timer_mod = true;
 		}
 	}
@@ -803,7 +848,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		else
 			add_pc_range(0, 0x5fffffffffff);
 		apply_breakpoints_linux();
-    }
+	}
 	/*
 	 * make a copy of the bochs CPU state, which we use to reset the CPU
 	 * state after each fuzzer input

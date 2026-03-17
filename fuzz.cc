@@ -16,13 +16,14 @@
 
 #include <ctime>
 
-namespace fuzzer {
-	extern TracePC TPC;
-	extern Fuzzer* F;
+namespace fuzzer
+{
+extern TracePC TPC;
+extern Fuzzer *F;
 };
 
-static bool syntax_model_completed_pred(void* ctx) {
-	return ((SyntaxModel*)ctx)->all_completed();
+static bool syntax_model_completed_pred(void *ctx) {
+	return ((SyntaxModel *)ctx)->all_completed();
 }
 
 enum cmds {
@@ -40,7 +41,7 @@ bool log_ops;
 
 std::map<bx_address, uint32_t> mmio_regions;
 std::map<uint16_t, uint16_t> pio_regions;
-std::vector<std::pair<uint64_t, uint64_t>> ram_regions;
+std::vector<std::pair<uint64_t, uint64_t> > ram_regions;
 
 static tsl::robin_map<bx_address, size_t> seen_dma;
 uint16_t dma_start = 0;
@@ -77,26 +78,28 @@ static void *pattern_alloc(pattern p, size_t len) {
 	return buf;
 }
 
-/* 
+/*
 	returns:
 	 0: success
 	-1: failed to ingest element
 	1: not a vring element, should be considered as normal memory read
 */
-static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* data) {
+static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len,
+			      void *data) {
 	static bool replay = replay_enabled();
 	auto gpa = lookup_gpa_by_hpa(addr);
 	const VRing *vring = get_vqueue_manager().get_belonging_vring(gpa);
 	int rc;
 	bx_address off_in_elem = 0;
 	if (vring) {
-		if (vring->queue && vring->queue->vdev && !vring->queue->vdev->to_fuzz) {
+		if (vring->queue && vring->queue->vdev &&
+		    !vring->queue->vdev->to_fuzz) {
 			// device is not being fuzzed
 			// just ignore
 			return 0;
 		}
 		uint16_t vring_idx = 0;
-		uint8_t vring_elem[16] = {0};
+		uint8_t vring_elem[16] = { 0 };
 		switch (vring->filed_type(gpa)) {
 		case VRing::FILED_TYPE::FLAGS:
 			return 0;
@@ -105,13 +108,14 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 				return 0;
 			}
 			rc = vring->ingest_idx(cpu, &vring_idx);
-			if (rc == -1) {  
+			if (rc == -1) {
 				// -1, ingest error
 				// -2, queue locates at page 0
 				// if (rc == -1) // ingest error
-				/* here we should not call fuzz_emu_stop_unhealthy */
+				/* here we should not call
+				 * fuzz_emu_stop_unhealthy */
 				// fuzz_emu_stop_unhealthy();
-				return rc;				
+				return rc;
 			}
 			if (rc == -2) {
 				fuzz_emu_stop_polling();
@@ -121,24 +125,32 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 				// just mark the region, do nothing
 				return 0;
 			}
-			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, (void*)&vring_idx);
+			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len,
+						     (void *)&vring_idx);
 			memcpy(data, &vring_idx, len);
 			return 0;
 		case VRing::FILED_TYPE::VRING_ELEM:
 			if (get_vqueue_manager().hooks_disabled()) {
 				return 0;
 			}
-			rc = vring->ingest_elem(cpu, (void*)vring_elem, vring->element_index(gpa));
-			off_in_elem = gpa - (vring->start() + vring->ring_offset() + vring->element_index(gpa) * vring->element_size());
+			rc = vring->ingest_elem(cpu, (void *)vring_elem,
+						vring->element_index(gpa));
+			off_in_elem =
+				gpa - (vring->start() + vring->ring_offset() +
+				       vring->element_index(gpa) *
+					       vring->element_size());
 			if (rc == -1) {
-				/* here we should not call fuzz_emu_stop_unhealthy */
+				/* here we should not call
+				 * fuzz_emu_stop_unhealthy */
 				// fuzz_emu_stop_unhealthy();
 				return -1;
 			} else if (rc == -2) {
 				fuzz_emu_stop_polling();
 				return -2;
 			} else if (rc == 0) {
-				vring->write_elem(cpu, vring->element_index(gpa), vring_elem);
+				vring->write_elem(cpu,
+						  vring->element_index(gpa),
+						  vring_elem);
 				memcpy(data, vring_elem + off_in_elem, len);
 			} else if (rc == 1) { // genereted elem, already written
 				// just mark the region, do nothing
@@ -158,45 +170,57 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
 			static bool no_double_fetch = no_double_fetch_enabled();
-			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
-			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
+			auto overlapped_size =
+				get_vqueue_manager().overlapped_size(gpa, len);
+			auto *queue = get_vqueue_manager().get_queue_by_id(
+				desc_with_info->desc_info.queue_id);
 			assert(overlapped_size <= len);
-			
-			size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
+
+			size_t offset =
+				queue->desc_chain_fsm.get_request_offset(gpa);
 			bool is_out = desc_with_info->desc_info.is_out;
-			bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && !queue->vdev->is_scsi);
-			
-			if (offset > 0x100) 
+			bool possible_switch =
+				(offset == 0 && is_out &&
+				 desc_with_info->desc_info.desc_idx == 0 &&
+				 !queue->vdev->is_scsi);
+
+			if (offset > 0x100)
 				return 0;
 
 			/* ingest random data */
 			bool overwrite = !replay;
-			uint8_t* buf = request_buffer_get()->ingest_data(
+			uint8_t *buf = request_buffer_get()->ingest_data(
 				len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
-			if (no_double_fetch && overlapped_size) 
-				BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), addr, overlapped_size, buf);
-			
+			if (no_double_fetch && overlapped_size)
+				BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), addr,
+							    overlapped_size,
+							    buf);
+
 			if (queue->vdev->is_scsi && is_out) {
-				const uint8_t valid_lun[8] = {1, 1, 0, 0, 0, 0, 0, 0};
+				const uint8_t valid_lun[8] = { 1, 1, 0, 0,
+							       0, 0, 0, 0 };
 				if (queue->type == VQueue::QUEUE_NORMAL) {
 					if (offset == 0) {
-						buf[0] = 1; // just fix lun[0] to 1
+						buf[0] = 1; // just fix lun[0]
+							    // to 1
 					}
 				} else if (queue->type == VQueue::QUEUE_CTRL) {
 					// lun should be [8, 16) or [4, 12)
 				}
 			}
-			
-			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
-			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, (void *)buf);
+
+			/* adjust addr = addr + len - remaining_len to avoid
+			 * duplicated region */
+			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len,
+						     (void *)buf);
 			memcpy(data, buf, len);
 			get_vqueue_manager().add_seen_buffer(gpa, len);
-			update_virtio_req_counter(desc_with_info->desc_info.queue_id,
-									  desc_with_info->desc_info.desc_idx,
-									  is_out);
+			update_virtio_req_counter(
+				desc_with_info->desc_info.queue_id,
+				desc_with_info->desc_info.desc_idx, is_out);
 			return 0;
 		} else { /* the DMA is not issued by fuzzer, do nothing */
 			return 0;
@@ -205,8 +229,10 @@ static int ingest_vring_split(unsigned cpu, bx_address addr, size_t len, void* d
 	return 1;
 }
 
-/* packed queue variant mirroring ingest_vring_split for future packed ring support */
-static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* data) {
+/* packed queue variant mirroring ingest_vring_split for future packed ring
+ * support */
+static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len,
+			       void *data) {
 	static bool replay = replay_enabled();
 	if (get_vqueue_manager().hooks_disabled()) {
 		return 0;
@@ -216,13 +242,14 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 	int rc;
 	bx_address off_in_elem = 0;
 	if (vring) {
-		if (vring->queue && vring->queue->vdev && !vring->queue->vdev->to_fuzz) {
+		if (vring->queue && vring->queue->vdev &&
+		    !vring->queue->vdev->to_fuzz) {
 			// device is not being fuzzed
 			// just ignore
 			return 0;
 		}
 		uint16_t vring_idx = 0;
-		uint8_t vring_elem[16] = {0};
+		uint8_t vring_elem[16] = { 0 };
 		switch (vring->filed_type(gpa)) {
 		case VRing::FILED_TYPE::FLAGS:
 			return 0;
@@ -231,13 +258,14 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 				vring->queue->update_polling_count();
 			}
 			rc = vring->ingest_idx(cpu, &vring_idx);
-			if (rc == -1) {  
+			if (rc == -1) {
 				// -1, ingest error
 				// -2, queue locates at page 0
 				// if (rc == -1) // ingest error
-				/* here we should not call fuzz_emu_stop_unhealthy */
+				/* here we should not call
+				 * fuzz_emu_stop_unhealthy */
 				// fuzz_emu_stop_unhealthy();
-				return rc;				
+				return rc;
 			}
 			if (rc == -2) {
 				fuzz_emu_stop_polling();
@@ -247,21 +275,29 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 				// just mark the region, do nothing
 				return 0;
 			}
-			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, (void*)&vring_idx);
+			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len,
+						     (void *)&vring_idx);
 			memcpy(data, &vring_idx, len);
 			return 0;
 		case VRing::FILED_TYPE::VRING_ELEM:
-			rc = vring->ingest_elem(cpu, (void*)vring_elem, vring->element_index(gpa));
-			off_in_elem = gpa - (vring->start() + vring->ring_offset() + vring->element_index(gpa) * vring->element_size());
+			rc = vring->ingest_elem(cpu, (void *)vring_elem,
+						vring->element_index(gpa));
+			off_in_elem =
+				gpa - (vring->start() + vring->ring_offset() +
+				       vring->element_index(gpa) *
+					       vring->element_size());
 			if (rc == -1) {
-				/* here we should not call fuzz_emu_stop_unhealthy */
+				/* here we should not call
+				 * fuzz_emu_stop_unhealthy */
 				// fuzz_emu_stop_unhealthy();
 				return -1;
 			} else if (rc == -2) {
 				fuzz_emu_stop_polling();
 				return -2;
 			} else if (rc == 0) {
-				vring->write_elem(cpu, vring->element_index(gpa), vring_elem);
+				vring->write_elem(cpu,
+						  vring->element_index(gpa),
+						  vring_elem);
 				memcpy(data, vring_elem + off_in_elem, len);
 			} else if (rc == 1) { // genereted elem, already written
 				// just mark the region, do nothing
@@ -278,45 +314,57 @@ static int ingest_vring_packed(unsigned cpu, bx_address addr, size_t len, void* 
 		auto desc_with_info = get_vqueue_manager().get_desc_by_gpa(gpa);
 		if (desc_with_info) {
 			static bool no_double_fetch = no_double_fetch_enabled();
-			auto overlapped_size = get_vqueue_manager().overlapped_size(gpa, len);
-			auto* queue = get_vqueue_manager().get_queue_by_id(desc_with_info->desc_info.queue_id);
+			auto overlapped_size =
+				get_vqueue_manager().overlapped_size(gpa, len);
+			auto *queue = get_vqueue_manager().get_queue_by_id(
+				desc_with_info->desc_info.queue_id);
 			assert(overlapped_size <= len);
-			
-			size_t offset = queue->desc_chain_fsm.get_request_offset(gpa);
+
+			size_t offset =
+				queue->desc_chain_fsm.get_request_offset(gpa);
 			bool is_out = desc_with_info->desc_info.is_out;
-			bool possible_switch = (offset == 0 && is_out && desc_with_info->desc_info.desc_idx == 0 && !queue->vdev->is_scsi);
-			
-			if (offset > 0x100) 
+			bool possible_switch =
+				(offset == 0 && is_out &&
+				 desc_with_info->desc_info.desc_idx == 0 &&
+				 !queue->vdev->is_scsi);
+
+			if (offset > 0x100)
 				return 0;
 
 			/* ingest random data */
 			bool overwrite = !replay;
-			uint8_t* buf = request_buffer_get()->ingest_data(
+			uint8_t *buf = request_buffer_get()->ingest_data(
 				len, possible_switch, overwrite);
 			if (!buf)
 				return -1;
 			/* fetch overlapped data */
-				if (no_double_fetch && overlapped_size) 
-					BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), addr, overlapped_size, buf);
-			
+			if (no_double_fetch && overlapped_size)
+				BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), addr,
+							    overlapped_size,
+							    buf);
+
 			if (queue->vdev->is_scsi && is_out) {
-				const uint8_t valid_lun[8] = {1, 1, 0, 0, 0, 0, 0, 0};
+				const uint8_t valid_lun[8] = { 1, 1, 0, 0,
+							       0, 0, 0, 0 };
 				if (queue->type == VQueue::QUEUE_NORMAL) {
 					if (offset == 0) {
-						buf[0] = 1; // just fix lun[0] to 1
+						buf[0] = 1; // just fix lun[0]
+							    // to 1
 					}
 				} else if (queue->type == VQueue::QUEUE_CTRL) {
 					// lun should be [8, 16) or [4, 12)
 				}
 			}
-			
-			/* adjust addr = addr + len - remaining_len to avoid duplicated region */
-				BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, (void *)buf);
+
+			/* adjust addr = addr + len - remaining_len to avoid
+			 * duplicated region */
+			BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len,
+						     (void *)buf);
 			memcpy(data, buf, len);
 			get_vqueue_manager().add_seen_buffer(gpa, len);
-			update_virtio_req_counter(desc_with_info->desc_info.queue_id,
-									  desc_with_info->desc_info.desc_idx,
-									  is_out);
+			update_virtio_req_counter(
+				desc_with_info->desc_info.queue_id,
+				desc_with_info->desc_info.desc_idx, is_out);
 			return 0;
 		} else { /* the DMA is not issued by fuzzer, do nothing */
 			return 0;
@@ -329,7 +377,8 @@ void clear_seen_dma() {
 	seen_dma.clear();
 }
 
-void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void *data) {
+void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len,
+		      void *data) {
 	static bool bypass_virtio_core = virtio_core_enabled();
 	uint8_t *buf;
 	int rc;
@@ -355,15 +404,15 @@ void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void *dat
 	// 		} else {
 	// 			return;
 	// 		}
-	// 	} 	
+	// 	}
 	// }
 
 	if (bypass_virtio_core) {
 		int rc = ingest_vring(cpu, addr, len, data);
-		if (rc <= 0) 
+		if (rc <= 0)
 			return;
 	}
-	
+
 	if (seen_dma.find(addr - 1) != seen_dma.end()) {
 		seen_dma[addr + len - 1] = seen_dma[addr - 1] + len;
 		seen_dma.erase(addr - 1);
@@ -394,10 +443,9 @@ void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len, void *dat
 		BX_MEM(0)->readPhysicalPage(BX_CPU(cpu), source, len, buf);
 
 		// if (BX_CPU(id)->fuzztrace || log_ops) {
-		// 	printf("!(medium size)dma inject: [HPA: %lx, GPA: %lx] len: %lx data: ",
-		// 	       addr, lookup_gpa_by_hpa(addr), len);
-		// 	for (int i = 0; i < len; i++)
-		// 		printf("%02x ", buf[i]);
+		// 	printf("!(medium size)dma inject: [HPA: %lx, GPA: %lx]
+		// len: %lx data: ", 	       addr, lookup_gpa_by_hpa(addr), len); 	for
+		// (int i = 0; i < len; i++) 		printf("%02x ", buf[i]);
 		// 	printf("\n");
 		// }
 		BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, buf);
@@ -458,7 +506,8 @@ bool inject_halt() {
 bool inject_write(bx_address addr, int size, uint64_t val) {
 	enum Sizes { Byte, Word, Long, Quad, end_sizes };
 	BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
-	uint32_t exit_reason = vmcs_translate_guest_physical_ept(addr, NULL, NULL);
+	uint32_t exit_reason =
+		vmcs_translate_guest_physical_ept(addr, NULL, NULL);
 	/* printf("Exit reason: %lx\n", exit_reason); */
 	if (!exit_reason)
 		return false;
@@ -527,15 +576,19 @@ bool inject_read(bx_address addr, int size) {
 	}
 	switch (size) {
 	case Byte:
-		cpu_physical_memory_write(phy, "\x8a\x01", 2); // mov al,BYTE PTR [rcx]
+		cpu_physical_memory_write(phy, "\x8a\x01", 2); // mov al,BYTE
+							       // PTR [rcx]
 		BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		break;
 	case Word:
-		cpu_physical_memory_write(phy, "\x66\x8b\x01", 3); // mov ax,WORD PTR [rcx]
+		cpu_physical_memory_write(phy, "\x66\x8b\x01", 3); // mov
+								   // ax,WORD
+								   // PTR [rcx]
 		BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
 		break;
 	case Long:
-		cpu_physical_memory_write(phy, "\x8b\x01", 2); // mov eax,DWORD PTR [rcx]
+		cpu_physical_memory_write(phy, "\x8b\x01", 2); // mov eax,DWORD
+							       // PTR [rcx]
 		BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
 		break;
 	case Quad:
@@ -587,7 +640,7 @@ bool inject_in(uint16_t addr, uint16_t size) {
 		break;
 	}
 	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
-			      VMX_VMEXIT_IO_INSTRUCTION);
+			     VMX_VMEXIT_IO_INSTRUCTION);
 
 	field_64 |= (addr << 16); // port number
 	field_64 |= (1 << 3); // //IN
@@ -635,7 +688,7 @@ bool inject_out(uint16_t addr, uint16_t size, uint32_t value) {
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RAX, value);
 
 	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
-			      VMX_VMEXIT_IO_INSTRUCTION);
+			     VMX_VMEXIT_IO_INSTRUCTION);
 
 	field_64 |= (addr << 16);
 	BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
@@ -718,11 +771,11 @@ bool op_write() {
 	if (ic_ingest8(&base, 0, num_mmio_regions() - 1))
 		return false;
 	bx_address addr = mmio_region(base);
-	
+
 	if (ic_ingest32(&offset, 0, mmio_region_size(addr) - 1))
 		return false;
 	addr += offset;
-	
+
 	input_off = ic_get_offset();
 	switch (size) {
 	case Byte:
@@ -962,8 +1015,8 @@ void insert_register_value_into_fuzz_input(int idx) {
  * [the corresponding registers in natural order]
  */
 bool op_vmcall() {
-	static bool disable_with_virtio_core_nocov =
-		virtio_core_enabled() && nocov_enabled();
+	static bool disable_with_virtio_core_nocov = virtio_core_enabled() &&
+						     nocov_enabled();
 	if (disable_with_virtio_core_nocov)
 		return false;
 
@@ -1024,12 +1077,12 @@ bool op_vmcall() {
 	uint8_t *dma_start = ic_get_cursor();
 
 	if (BX_CPU(0)->fuzztrace || log_ops) {
-		printf("!hypercall inject: [RAX: %lx, RBX: %lx, RCX: %lx, RDX: %lx, RSI: %lx]\n", 
-			vmcall_gpregs[BX_64BIT_REG_RAX].rrx, 
-			vmcall_gpregs[BX_64BIT_REG_RBX].rrx,
-			vmcall_gpregs[BX_64BIT_REG_RCX].rrx,
-			vmcall_gpregs[BX_64BIT_REG_RDX].rrx,
-			vmcall_gpregs[BX_64BIT_REG_RSI].rrx);
+		printf("!hypercall inject: [RAX: %lx, RBX: %lx, RCX: %lx, RDX: %lx, RSI: %lx]\n",
+		       vmcall_gpregs[BX_64BIT_REG_RAX].rrx,
+		       vmcall_gpregs[BX_64BIT_REG_RBX].rrx,
+		       vmcall_gpregs[BX_64BIT_REG_RCX].rrx,
+		       vmcall_gpregs[BX_64BIT_REG_RDX].rrx,
+		       vmcall_gpregs[BX_64BIT_REG_RSI].rrx);
 	}
 	start_cpu();
 	/* printf("Hypercall %lx Result: %lx\n",vmcall_gpregs[BX_64BIT_REG_RCX],
@@ -1039,7 +1092,7 @@ bool op_vmcall() {
 
 	local_dma_len = dma_end - dma_start;
 	if (local_dma_len > sizeof(local_dma)) {
-	    fuzz_emu_stop_unhealthy();
+		fuzz_emu_stop_unhealthy();
 		return false;
 	}
 	memcpy(local_dma, dma_start, local_dma_len);
@@ -1048,31 +1101,31 @@ bool op_vmcall() {
 	vmcall_enabled_regs &= fuzzable_regs_bitmap;
 	uint8_t opcode = OP_VMCALL;
 	if (!ic_append(&opcode, sizeof(opcode)))
-	    fuzz_emu_stop_unhealthy();
+		fuzz_emu_stop_unhealthy();
 	if (!ic_append(&vmcall_enabled_regs, sizeof(vmcall_enabled_regs)))
-	    fuzz_emu_stop_unhealthy();
+		fuzz_emu_stop_unhealthy();
 	for (int i = 0; i < 16; i++) {
 		if ((vmcall_enabled_regs >> i) & 1) {
 			if (!ic_append(&vmcall_gpregs[i],
 				       sizeof(vmcall_gpregs[i])))
-	            fuzz_emu_stop_unhealthy();
+				fuzz_emu_stop_unhealthy();
 		}
 	}
-		for (int i = 0; i < BX_XMM_REGISTERS; i++) {
-			if ((vmcall_enabled_regs >> (16 + i)) & 1) {
-				if (!ic_append(&vmcall_xmmregs[i],
-					       sizeof(BX_CPU(0)->vmm[i])))
-	                fuzz_emu_stop_unhealthy();
-			}
+	for (int i = 0; i < BX_XMM_REGISTERS; i++) {
+		if ((vmcall_enabled_regs >> (16 + i)) & 1) {
+			if (!ic_append(&vmcall_xmmregs[i],
+				       sizeof(BX_CPU(0)->vmm[i])))
+				fuzz_emu_stop_unhealthy();
 		}
+	}
 
 	if (!ic_append(local_dma, local_dma_len))
-        fuzz_emu_stop_unhealthy();
+		fuzz_emu_stop_unhealthy();
 	return true;
 }
 
 bool op_notify() {
-	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	VirtioDev *vdev = get_vqueue_manager().get_fuzzed_dev();
 	if (!vdev || vdev->queue_num < 1) {
 		return false;
 	}
@@ -1081,7 +1134,7 @@ bool op_notify() {
 	if (ic_ingest16(&queue_sel, 0, (uint16_t)(vdev->queue_num - 1)) < 0) {
 		return false;
 	}
-	auto* model = SyntaxModel::CreateOrGet(*vdev);
+	auto *model = SyntaxModel::CreateOrGet(*vdev);
 	if (!model) {
 		return false;
 	}
@@ -1104,10 +1157,10 @@ static void virtio_select_driver_features_for_input() {
 	if (!log_enabled_inited) {
 		log_enabled_inited = true;
 		log_enabled = virtio_feature_log_enabled() ||
-			virtio_ring_format_log_enabled();
+			      virtio_ring_format_log_enabled();
 	}
 
-	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	VirtioDev *vdev = get_vqueue_manager().get_fuzzed_dev();
 	if (!vdev) {
 		return;
 	}
@@ -1131,14 +1184,15 @@ static void virtio_select_driver_features_for_input() {
 		int want_packed = (candidate & packed_bit) != 0;
 		int want_indirect = (candidate & indirect_bit) != 0;
 		printf("virtio feature select: dev=%s mask=%lx dev=%lx -> guest=%lx (packed=%d indirect=%d)\n",
-		       vdev->name, mask, device_features, candidate, want_packed, want_indirect);
+		       vdev->name, mask, device_features, candidate,
+		       want_packed, want_indirect);
 	}
 
 	vdev->renegotiate_features(candidate);
 }
 
 static void virtio_select_ring_format_for_input() {
-	VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+	VirtioDev *vdev = get_vqueue_manager().get_fuzzed_dev();
 	if (!vdev) {
 		return;
 	}
@@ -1157,14 +1211,14 @@ static void virtio_select_ring_format_for_input() {
 	}
 	bool want_packed = (byte & 1) != 0;
 
-	auto* active = vdev->active_syntax_model();
+	auto *active = vdev->active_syntax_model();
 	if (active && !active->all_completed()) {
 		return;
 	}
 
 	vdev->set_packed_queue(want_packed);
 
-	auto* model = vdev->get_syntax_model();
+	auto *model = vdev->get_syntax_model();
 	assert(model);
 	assert(model->matched(vdev->current_features()));
 }
@@ -1181,28 +1235,18 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		[OP_NOTIFY] = op_notify,
 	};
 	static const uint8_t virtio_core_ops[] = {
-		OP_READ,
-		OP_WRITE,
-		OP_IN,
-		OP_OUT,
-		OP_PCI_WRITE,
-		OP_MSR_WRITE,
-		OP_VMCALL,
-		OP_NOTIFY,
+		OP_READ,      OP_WRITE,	    OP_IN,     OP_OUT,
+		OP_PCI_WRITE, OP_MSR_WRITE, OP_VMCALL, OP_NOTIFY,
 	};
 	static const uint8_t virtio_core_ops_nocov[] = {
-		OP_READ,
-		OP_WRITE,
-		OP_IN,
-		OP_OUT,
-		OP_PCI_WRITE,
-		OP_NOTIFY,
+		OP_READ, OP_WRITE, OP_IN, OP_OUT, OP_PCI_WRITE, OP_NOTIFY,
 	};
 	static const uint8_t nr_ops = sizeof(ops) / sizeof((ops)[0]);
 	static const uint8_t nr_virtio_core_ops =
 		sizeof(virtio_core_ops) / sizeof((virtio_core_ops)[0]);
 	static const uint8_t nr_virtio_core_ops_nocov =
-		sizeof(virtio_core_ops_nocov) / sizeof((virtio_core_ops_nocov)[0]);
+		sizeof(virtio_core_ops_nocov) /
+		sizeof((virtio_core_ops_nocov)[0]);
 	uint8_t op;
 
 	static bool fuzz_legacy;
@@ -1221,9 +1265,8 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 
 	if (virtio_core) {
 		reset_input_output();
-			input_deserialize(Data, Size, input_get(), input_len_get(),
-					  request_buffer_get(),
-					  desc_pool_get());
+		input_deserialize(Data, Size, input_get(), input_len_get(),
+				  request_buffer_get(), desc_pool_get());
 	} else {
 		ic_new_input(Data, Size);
 	}
@@ -1247,10 +1290,12 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 				continue;
 			}
 		} else if (virtio_core) {
-			const uint8_t *virtio_ops = nocov_mode ?
-				virtio_core_ops_nocov : virtio_core_ops;
-			uint8_t virtio_nr_ops = nocov_mode ?
-				nr_virtio_core_ops_nocov : nr_virtio_core_ops;
+			const uint8_t *virtio_ops =
+				nocov_mode ? virtio_core_ops_nocov :
+						   virtio_core_ops;
+			uint8_t virtio_nr_ops =
+				nocov_mode ? nr_virtio_core_ops_nocov :
+						   nr_virtio_core_ops;
 			uint8_t op_idx;
 
 			if (ic_ingest8(&op_idx, 0, virtio_nr_ops - 1, true)) {
@@ -1273,15 +1318,14 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 		}
 		if (fuzz_unhealthy_input || fuzz_do_not_continue)
 			break;
-		// if (new_op(op, start, ic_get_cursor() - input_start, dma_start,
-		// 	   dma_len) >= 8)
-		// 	break;
+		// if (new_op(op, start, ic_get_cursor() - input_start,
+		// dma_start, 	   dma_len) >= 8) 	break;
 	} while (ic_advance_until_token(SEPARATOR, 4));
 
 	if (virtio_core && !fuzz_unhealthy_input) {
-		VirtioDev* vdev = get_vqueue_manager().get_fuzzed_dev();
+		VirtioDev *vdev = get_vqueue_manager().get_fuzzed_dev();
 		if (vdev) {
-			auto* model = vdev->get_syntax_model();
+			auto *model = vdev->get_syntax_model();
 			if (!model)
 				return;
 #if BX_SUPPORT_SMP
@@ -1294,7 +1338,8 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			}
 #endif
 			size_t cnt = 0;
-			while (!fuzz_unhealthy_input && !model->all_completed()) {
+			while (!fuzz_unhealthy_input &&
+			       !model->all_completed()) {
 				cnt++;
 				start_cpu();
 			}
@@ -1315,20 +1360,19 @@ void add_mmio_range_alt(uint64_t addr, uint64_t end) {
 	add_mmio_region(addr, end - addr);
 }
 void add_ram_region(uint64_t addr, uint64_t size) {
-	ram_regions.push_back({addr, size});
+	ram_regions.push_back({ addr, size });
 }
 void init_regions(const char *path) {
 	open_db(path);
 	if (fuzz_enum_enabled()) {
 		enum_pio_regions();
 		enum_mmio_regions();
-        exit(0);
+		exit(0);
 	}
 	if (manual_ranges_path()) {
 		load_manual_ranges(const_cast<char *>(manual_ranges_path()),
 				   const_cast<char *>(range_regex()),
-				   pio_regions,
-				   mmio_regions);
+				   pio_regions, mmio_regions);
 		load_ram_regions_from_iomem(const_cast<char *>(iomem_path()));
 	} else {
 		load_regions(pio_regions, mmio_regions);
@@ -1398,22 +1442,25 @@ unsigned bx_kernel_cpu() {
 	return 0;
 }
 
-bx_phy_address bx_kernel_translate_linear(unsigned cpu, bx_address laddr, int rw) { 
+bx_phy_address bx_kernel_translate_linear(unsigned cpu, bx_address laddr,
+					  int rw) {
 	Bit32u lpf_mask = 0xfff;
 	Bit32u pkey = 0;
-	// Bochs encodes access/memtype bits in the low bits of the returned value.
-	// Mask those out and apply the offset bits from the original linear address.
-	bx_phy_address xlated =
-		BX_CPU(cpu)->translate_linear_long_mode(laddr, lpf_mask, pkey, 0, rw);
+	// Bochs encodes access/memtype bits in the low bits of the returned
+	// value. Mask those out and apply the offset bits from the original
+	// linear address.
+	bx_phy_address xlated = BX_CPU(cpu)->translate_linear_long_mode(
+		laddr, lpf_mask, pkey, 0, rw);
 	return (xlated & ~((bx_phy_address)lpf_mask)) | (laddr & lpf_mask);
 }
 
 void bx_kernel_read(unsigned cpu, bx_address laddr, void *buf, size_t len) {
-	// we should consider paging 
+	// we should consider paging
 	bx_address kpage = laddr & ~0xfff;
 	bx_address offset = laddr & 0xfff;
 	for (; kpage < laddr + len; kpage += 0x1000) {
-		bx_phy_address paddr = bx_kernel_translate_linear(cpu, kpage, BX_READ);
+		bx_phy_address paddr =
+			bx_kernel_translate_linear(cpu, kpage, BX_READ);
 		size_t to_read = std::min((size_t)(0x1000 - offset), len);
 		cpu_physical_memory_read(paddr + offset, (char *)buf, to_read);
 		buf = (char *)buf + to_read;
@@ -1423,13 +1470,15 @@ void bx_kernel_read(unsigned cpu, bx_address laddr, void *buf, size_t len) {
 }
 
 void bx_kernel_write(unsigned cpu, bx_address laddr, void *buf, size_t len) {
-	// we should consider paging 
+	// we should consider paging
 	bx_address kpage = laddr & ~0xfff;
 	bx_address offset = laddr & 0xfff;
 	for (; kpage < laddr + len; kpage += 0x1000) {
-		bx_phy_address paddr = bx_kernel_translate_linear(cpu, kpage, BX_WRITE);
+		bx_phy_address paddr =
+			bx_kernel_translate_linear(cpu, kpage, BX_WRITE);
 		size_t to_write = std::min((size_t)(0x1000 - offset), len);
-		cpu_physical_memory_write(paddr + offset, (const char *)buf, to_write);
+		cpu_physical_memory_write(paddr + offset, (const char *)buf,
+					  to_write);
 		buf = (uint8_t *)buf + to_write;
 		len -= to_write;
 		offset = 0;

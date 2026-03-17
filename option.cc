@@ -95,13 +95,13 @@ void option_init(void) {
 	};
 
 	static const required_env required[] = {
-		{"ICP_DB_PATH", &icp_db_path_value, &icp_db_path_init},
-		{"ICP_MEM_PATH", &icp_mem_path_value, &icp_mem_path_init},
-		{"ICP_REGS_PATH", &icp_regs_path_value, &icp_regs_path_init},
-		{"ICP_VMCS_LAYOUT_PATH", &icp_vmcs_layout_path_value,
-		 &icp_vmcs_layout_path_init},
-		{"ICP_VMCS_ADDR", &icp_vmcs_addr_env_value,
-		 &icp_vmcs_addr_env_init},
+		{ "ICP_DB_PATH", &icp_db_path_value, &icp_db_path_init },
+		{ "ICP_MEM_PATH", &icp_mem_path_value, &icp_mem_path_init },
+		{ "ICP_REGS_PATH", &icp_regs_path_value, &icp_regs_path_init },
+		{ "ICP_VMCS_LAYOUT_PATH", &icp_vmcs_layout_path_value,
+		  &icp_vmcs_layout_path_init },
+		{ "ICP_VMCS_ADDR", &icp_vmcs_addr_env_value,
+		  &icp_vmcs_addr_env_init },
 	};
 
 	for (const auto &entry : required) {
@@ -110,8 +110,7 @@ void option_init(void) {
 	}
 
 	if (!missing.empty()) {
-		fprintf(stderr,
-			"Missing required environment variables:\n");
+		fprintf(stderr, "Missing required environment variables:\n");
 		for (const char *name : missing)
 			fprintf(stderr, "  %s\n", name);
 		exit(1);
@@ -121,16 +120,16 @@ void option_init(void) {
 	option_checking = false;
 }
 
-	#define DEFINE_BOOL_OPTION(func, env)                                          \
-		bool func(void) {                                                      \
-			static bool init = false;                                      \
-			static bool value = false;                                     \
-			if (!init) {                                                   \
-				init = true;                                           \
-				value = parse_bool_value(getenv(env), false);          \
-			}                                                              \
-			return value;                                                  \
-		}
+#define DEFINE_BOOL_OPTION(func, env)                                 \
+	bool func(void) {                                             \
+		static bool init = false;                             \
+		static bool value = false;                            \
+		if (!init) {                                          \
+			init = true;                                  \
+			value = parse_bool_value(getenv(env), false); \
+		}                                                     \
+		return value;                                         \
+	}
 
 DEFINE_BOOL_OPTION(replay_enabled, "REPLAY")
 DEFINE_BOOL_OPTION(no_double_fetch_enabled, "NO_DOUBLE_FETCH")
