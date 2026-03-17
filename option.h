@@ -8,6 +8,7 @@ void option_init(void);
 
 bool replay_enabled(void);
 bool no_double_fetch_enabled(void);
+bool sync_enabled(void);
 bool virtio_core_enabled(void);
 bool virtio_feature_log_enabled(void);
 bool virtio_ring_format_log_enabled(void);

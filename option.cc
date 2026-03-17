@@ -163,6 +163,16 @@ DEFINE_BOOL_OPTION(sgl_size_infer_enabled, "SGL_SIZE_INFER")
 
 #undef DEFINE_BOOL_OPTION
 
+bool sync_enabled(void) {
+	static bool init = false;
+	static bool value = true;
+	if (!init) {
+		init = true;
+		value = parse_bool_value(getenv("SYNC"), true);
+	}
+	return value;
+}
+
 size_t nocov_scale(void) {
 	static bool init = false;
 	static size_t value = 1;

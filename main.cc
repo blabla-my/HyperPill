@@ -55,8 +55,12 @@ static struct {
 	size_t pred_tick_interval;
 } drain_state = {};
 
+static bool drain_mode_enabled() {
+	return virtio_core_enabled() && sync_enabled();
+}
+
 void drain_begin(drain_predicate_t pred, void *ctx) {
-	if (!virtio_core_enabled()) {
+	if (!drain_mode_enabled()) {
 		drain_state.active = false;
 		drain_state.pred = nullptr;
 		drain_state.ctx = nullptr;
@@ -89,7 +93,7 @@ DrainStats drain_end() {
 }
 
 bool drain_active() {
-	return virtio_core_enabled() && drain_state.active;
+	return drain_mode_enabled() && drain_state.active;
 }
 
 // Ensure pc_system (and its null timer) is constructed before the CPU/LAPIC.
