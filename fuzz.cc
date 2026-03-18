@@ -26,6 +26,10 @@ static bool syntax_model_completed_pred(void *ctx) {
 	return ((SyntaxModel *)ctx)->all_completed();
 }
 
+static bool syntax_model_sync_enabled() {
+	return sync_enabled();
+}
+
 enum cmds {
 	OP_READ,
 	OP_WRITE,
@@ -1212,7 +1216,8 @@ static void virtio_select_ring_format_for_input() {
 	bool want_packed = (byte & 1) != 0;
 
 	auto *active = vdev->active_syntax_model();
-	if (active && !active->all_completed()) {
+	if (syntax_model_sync_enabled() && active &&
+	    !active->all_completed()) {
 		return;
 	}
 
@@ -1328,21 +1333,25 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 			auto *model = vdev->get_syntax_model();
 			if (!model)
 				return;
+			if (syntax_model_sync_enabled()) {
 #if BX_SUPPORT_SMP
-			if (sync_enabled() && bx_cpu_count > 1 &&
-			    !model->all_completed()) {
-				drain_begin(syntax_model_completed_pred, model);
-				inject_halt();
-				start_cpu();
-				DrainStats stats = drain_end();
-				return;
-			}
+				if (bx_cpu_count > 1 &&
+				    !model->all_completed()) {
+					drain_begin(
+						syntax_model_completed_pred,
+						model);
+					inject_halt();
+					start_cpu();
+					DrainStats stats = drain_end();
+					return;
+				}
 #endif
-			size_t cnt = 0;
-			while (!fuzz_unhealthy_input &&
-			       !model->all_completed()) {
-				cnt++;
-				start_cpu();
+				size_t cnt = 0;
+				while (!fuzz_unhealthy_input &&
+				       !model->all_completed()) {
+					cnt++;
+					start_cpu();
+				}
 			}
 		}
 	}
