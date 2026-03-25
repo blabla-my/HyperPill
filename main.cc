@@ -917,7 +917,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		if (kernel_dma_enabled())
 			add_pc_range(0x0, 0xffffffffffffffff);
 		else
-			add_pc_range(0, 0x5fffffffffff);
+			add_pc_range(0, 0x7fffffffffff);
 		apply_breakpoints_linux();
 	}
 	/*

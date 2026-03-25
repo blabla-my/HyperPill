@@ -2848,7 +2848,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::VMXON(bxInstruction_c *i)
 
     // not allowed to be shadow VMCS
     Bit32u revision = VMXReadRevisionID((bx_phy_address) pAddr);
-    if (revision != BX_CPU_THIS_PTR vmcs_map->get_vmcs_revision_id()) {
+    if (0 && revision != BX_CPU_THIS_PTR vmcs_map->get_vmcs_revision_id()) {
       BX_ERROR(("VMXON: not expected (%d != %d) VMCS revision id !", revision, BX_CPU_THIS_PTR vmcs_map->get_vmcs_revision_id()));
       VMfailInvalid();
       BX_NEXT_INSTR(i);

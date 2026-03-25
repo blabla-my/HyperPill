@@ -66,6 +66,19 @@ static bool parse_hex_u64(const std::string &hex, uint64_t *out)
     return true;
 }
 
+static bool parse_named_hex_u64(const std::string &s, const char *name,
+                                uint64_t *out)
+{
+    std::regex re(std::string("\\b") + name + "\\s*=\\s*([0-9A-Fa-f]+)");
+    std::smatch match;
+
+    if (!std::regex_search(s, match, re) || match.size() < 2) {
+        return false;
+    }
+
+    return parse_hex_u64(match[1].str(), out);
+}
+
 static bool parse_fpu_header(const std::string &s, uint16_t *fcw,
                              uint16_t *fsw, uint8_t *ftw, uint32_t *mxcsr)
 {
@@ -530,7 +543,26 @@ void icp_init_regs_cpu(const char* filename, unsigned cpu) {
     
     BX_CPU(cpu)->msr.pat._u64 = GETREG64(pat);
     BX_CPU(cpu)->msr.apicbase = GETREG64(apicbase);
-    
+
+#if BX_SUPPORT_VMX
+    uint64_t ia32_feature_ctrl = 0;
+    if (parse_named_hex_u64(s, "ia32_feature_ctrl",
+                            &ia32_feature_ctrl) ||
+        parse_named_hex_u64(s, "msr_ia32_feature_control",
+                            &ia32_feature_ctrl) ||
+        parse_named_hex_u64(s, "IA32_FEATURE_CONTROL",
+                            &ia32_feature_ctrl)) {
+        BX_CPU(cpu)->msr.ia32_feature_ctrl =
+            static_cast<Bit32u>(ia32_feature_ctrl) &
+            BX_IA32_FEATURE_CONTROL_BITS;
+    } else {
+        BX_CPU(cpu)->msr.ia32_feature_ctrl =
+            BX_IA32_FEATURE_CONTROL_LOCK_BIT |
+            BX_IA32_FEATURE_CONTROL_VMX_ENABLE_BIT;
+        printf(".info ia32_feature_ctrl: defaulting to %x on cpu %u\n",
+               BX_CPU(cpu)->msr.ia32_feature_ctrl, cpu);
+    }
+#endif
 
     BX_CPU(cpu)->TLB_flush();
 #if BX_CPU_LEVEL >= 4

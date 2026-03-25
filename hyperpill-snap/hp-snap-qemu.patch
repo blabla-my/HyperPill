@@ -101,6 +101,8 @@ index 40697064d..4450321f0 100644
 +
 +
 +    dumpmsr(pat);
++    qemu_fprintf(f, "ia32_feature_ctrl = %lx\n",
++                 env->msr_ia32_feature_control);
 +    dumpmsr(xcr0);
 +
 +
