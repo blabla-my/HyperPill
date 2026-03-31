@@ -868,6 +868,7 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 		 * back to the db, then exit*/
 		store_sym_back_to_db(icp_db_path_str);
 		exit(0);
+		load_symbol_map_from_vbox_dmesg(snapshot_base());
 	}
 
 	/* For symbol - > addr (for breakpoints)*/

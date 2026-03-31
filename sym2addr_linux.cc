@@ -350,6 +350,30 @@ static std::string resolve_symbols_file(const std::string& symbols_dir,
 	return std::string();
 }
 
+static std::string normalize_symbol_name(std::string name) {
+	name.erase(std::find(name.begin(), name.end(), '('), name.end());
+	return name;
+}
+
+static void load_symbol_map_from_binary(const std::string& full_path,
+	unsigned long base, int pid) {
+	auto symbols = get_symbol_map(full_path);
+	for (const auto& it : symbols) {
+		if (!it.second)
+			continue;
+
+		sym_info_t sym_info = {
+			it.second + base,
+			pid,
+			full_path,
+			normalize_symbol_name(it.first)
+		};
+		set_addr2sym(sym_info);
+		set_sym2addr(sym_info);
+	}
+	bins.insert(full_path);
+}
+
 void load_symbol_map_from_maps(const char* maps_path) {
     const char* symbols_dir = symbols_dir_path();
     if (!symbols_dir) {
@@ -405,25 +429,59 @@ void load_symbol_map_from_maps(const char* maps_path) {
         }
 
         printf("loading symbols from %s\n", full_path.c_str());
-        auto m = get_symbol_map(full_path);
-        for (auto it : m) {
-            if (it.second) {
-                std::string name = it.first;
-                name.erase(std::find(name.begin(), name.end(), '('), name.end());
-                sym_info_t sym_info = {
-                    it.second + start,
-                    pid,
-                    full_path,
-                    name 
-                };
-                set_addr2sym(sym_info);
-                set_sym2addr(sym_info);
-            }
-        }
-        bins.insert(full_path);
+        load_symbol_map_from_binary(full_path, start, pid);
         strcpy(last_path, path);
     }
 }
+
+void load_symbol_map_from_vbox_dmesg(const char *snapshot_base) {
+	const char *symbols_dir = symbols_dir_path();
+	if (!snapshot_base || !symbols_dir)
+		return;
+
+	std::string dmesg_path = std::string(snapshot_base) + "/vbox_dmesg";
+	std::ifstream file(dmesg_path);
+	if (!file.is_open())
+		return;
+
+	static const std::regex vbox_dmesg_regex(
+		"vboxdrv:\\s+0x([0-9a-fA-F]+)\\s+"
+		"(VMMR0\\.r0|VBoxDDR0\\.r0)");
+	std::map<std::string, unsigned long> module_bases;
+	std::string line;
+
+	while (std::getline(file, line)) {
+		std::smatch match;
+		if (!std::regex_search(line, match, vbox_dmesg_regex))
+			continue;
+
+		module_bases[match[2].str()] =
+			strtoull(match[1].str().c_str(), NULL, 16);
+	}
+
+	for (const auto &it : module_bases) {
+		const char *debug_file = NULL;
+		if (it.first == "VMMR0.r0")
+			debug_file = "VMMR0.debug";
+		else if (it.first == "VBoxDDR0.r0")
+			debug_file = "VBoxDDR0.debug";
+		if (!debug_file)
+			continue;
+
+		std::string full_path = std::string(symbols_dir) + "/" +
+					debug_file;
+		if (access(full_path.c_str(), F_OK)) {
+			fprintf(stderr, "Missing VBox symbol file: %s\n",
+				full_path.c_str());
+			continue;
+		}
+
+		printf("loading VBox symbols from %s @ %lx\n",
+		       full_path.c_str(), it.second);
+		load_symbol_map_from_binary(full_path, it.second, 0);
+	}
+}
+
 void load_symbol_map_from_maps(int pid){
     std::string filename = std::to_string(pid) + "-maps";
     load_symbol_map_from_maps(filename.c_str());
