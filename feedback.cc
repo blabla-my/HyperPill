@@ -27,20 +27,20 @@ struct Hasher {
 tsl::robin_set<std::tuple<uint64_t, uint64_t, uint64_t>, Hasher> structset;
 
 bool fuzz_hook_vmlaunch(unsigned cpu) {
-    /* printf("Vmlaunch:%lx\n", BX_CPU(id)->vmcsptr); */
-    if (drain_active())
-        return false;
-    if(vmcs_addr == BX_CPU(cpu)->vmcsptr){
-        pause_cpu();
-        return true;
-    } else {
-        verbose_printf("Warning: vmcsptr has been changed from 0x%08lx to 0x%08lx\n",
-            vmcs_addr, BX_CPU(cpu)->vmcsptr);
-        fuzz_emu_stop_unhealthy();
-        return true;
-    }
+	if (drain_active())
+		return false;
+	if (vmcs_addr == BX_CPU(cpu)->vmcsptr) {
+		pause_cpu();
+		return true;
+	} else {
+		verbose_printf("Warning: vmcsptr has been changed from "
+			       "0x%08lx to 0x%08lx\n",
+			       vmcs_addr, BX_CPU(cpu)->vmcsptr);
+		fuzz_emu_stop_unhealthy();
+		return true;
+	}
 
-    return false;
+	return false;
 }
 
 extern "C" void __sanitizer_cov_trace_cmp1_pc(uint64_t PC, uint8_t Arg1, uint8_t Arg2);

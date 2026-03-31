@@ -69,4 +69,19 @@ void bx_instr_outp(Bit16u addr, unsigned len, unsigned val) {}
 
 void bx_instr_wrmsr(unsigned cpu, unsigned addr, Bit64u value) {}
 
-void bx_instr_vmexit(unsigned cpu, Bit32u reason, Bit64u qualification) {}
+void bx_instr_vmexit(unsigned cpu, Bit32u reason, Bit64u qualification) {
+  Bit32u basic_reason = reason & 0xffff;
+  unsigned failed_vmentry = (reason >> 31) & 1;
+  Bit32u vmentry_intr_info =
+      BX_CPU(cpu)->VMread32(VMCS_32BIT_CONTROL_VMENTRY_INTERRUPTION_INFO);
+  Bit64u guest_rip = BX_CPU(cpu)->VMread64(VMCS_GUEST_RIP);
+  Bit64u rip = BX_CPU(cpu)->gen_reg[BX_64BIT_REG_RIP].rrx;
+
+  printf("VMEXIT: reason=%x basic_reason=%u failed_vmentry=%u "
+         "qualification=%llx rip=%llx vmcs_guest_rip=%llx "
+         "vmentry_intr_info=%x vmcsptr=%llx\n",
+         reason, basic_reason, failed_vmentry,
+         (unsigned long long)qualification, (unsigned long long)rip,
+         (unsigned long long)guest_rip, vmentry_intr_info,
+         (unsigned long long)BX_CPU(cpu)->vmcsptr);
+}
