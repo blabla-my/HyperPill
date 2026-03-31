@@ -83,6 +83,10 @@ export MANUAL_RANGES=$SNAPSHOT_BASE/mtree
 export RANGE_REGEX="nvme"
 ```
 
+For supported virtio targets, HyperPill now tries `MANUAL_RANGES` first and
+falls back to `$SNAPSHOT_BASE/lspci` only if the requested virtio device is
+not discovered in `mtree`.
+
 Step 2: start fuzzing
 
 ``` bash

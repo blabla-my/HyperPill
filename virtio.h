@@ -303,7 +303,7 @@ struct VQueue {
     void reset();
     void add_desc(vring_desc *desc);
     const vring_desc* get_belonging_desc(unsigned long addr, size_t size);
-    bool inited();
+    bool inited() const;
     void submit_request(uint16_t head);
     void complete_request(uint16_t head);
     bool all_request_completed();
@@ -387,7 +387,7 @@ struct VirtioDev {
 	uint64_t current_features() const;
 
     void enumerate_queues_from_common_cfg();
-    bool inited();
+    bool inited() const;
     void set_status(uint8_t status);
     void set_device_features(uint64_t features);
     void set_guest_features(uint64_t features);

@@ -426,7 +426,7 @@ void VQueue::add_desc(vring_desc *desc) {
 		generated_descs.push_back(*desc);
 }
 
-bool VQueue::inited() {
+bool VQueue::inited() const {
 	return desc_ring->start() != 0;
 }
 
@@ -500,11 +500,13 @@ unsigned long ConfigSpace::read(size_t offset, size_t sz) const {
 		printf("Failed to inject read in ConfigSpace::read to %lx size %lx\n", addr, sz);
 		return 0;
 	}
-    start_cpu(true);
-    
+	start_cpu(true);
+	assert(!fuzz_do_not_continue);
+	assert(!fuzz_unhealthy_input);
+
 	unsigned long mask = (1ULL << (sz * 8)) - 1;
-    unsigned long value = BX_CPU(0)->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
-    return value;
+    	unsigned long value = BX_CPU(0)->gen_reg[BX_64BIT_REG_RAX].rrx & mask;
+    	return value;
 }
 
 bx_address ConfigSpace::get_avail_ring_addr() const {
@@ -665,10 +667,11 @@ bool ConfigSpace::write(size_t offset, size_t sz, unsigned long value) const {
 		printf("Failed to inject write in ConfigSpace::write to %lx size %lx\n", addr, sz);
 		return false;
 	}
+	start_cpu(true);
+	assert(!fuzz_do_not_continue);
+	assert(!fuzz_unhealthy_input);
 
-    start_cpu(true);
-    
-    return true;
+	return true;
 }
 
 bool ConfigSpace::contains(unsigned long addr) const {
@@ -998,7 +1001,7 @@ void VirtioDev::enumerate_queues_from_common_cfg() {
 	common_cfg.set_queue_sel(old_queue_sel);
 }
 
-bool VirtioDev::inited() {
+bool VirtioDev::inited() const {
 	for (int i = 0; i < queue_num; i++) {
 		if (!queues[i]->inited()) {
 			return false;
@@ -1123,6 +1126,9 @@ void VQueueManager::group_vrings_by_page() {
 		const auto& vdev = it.second;
 		for (size_t i = 0; i < vdev->queue_num; i++ ) {
 			const auto* queue = vdev->queues[i];
+			if (!queue || !queue->inited()) {
+				continue;
+			}
 			group_vring_by_page(queue->avail_ring);
 			group_vring_by_page(queue->used_ring);
 			group_vring_by_page(queue->desc_ring);
@@ -1131,6 +1137,9 @@ void VQueueManager::group_vrings_by_page() {
 }
 
 void VQueueManager::group_vring_by_page(const VRing* vring) {
+	if (!vring || vring->start() == 0 || vring->end() <= vring->start()) {
+		return;
+	}
 	for (auto pn = vring->start_pagenum(); pn <= vring->end_pagenum(); pn++){
 		if (!pn) continue;
 		if (!rings_grouped_by_page.contains(pn)) {
