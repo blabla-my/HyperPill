@@ -448,9 +448,9 @@ void fuzz_dma_read_cb(unsigned cpu, bx_phy_address addr, unsigned len,
 
 		// if (BX_CPU(id)->fuzztrace || log_ops) {
 		// 	printf("!(medium size)dma inject: [HPA: %lx, GPA: %lx]
-		// len: %lx data: ", 	       addr, lookup_gpa_by_hpa(addr), len); 	for
-		// (int i = 0; i < len; i++) 		printf("%02x ", buf[i]);
-		// 	printf("\n");
+		// len: %lx data: ", 	       addr, lookup_gpa_by_hpa(addr),
+		// len); 	for (int i = 0; i < len; i++)
+		// printf("%02x ", buf[i]); 	printf("\n");
 		// }
 		BX_MEM(0)->writePhysicalPage(BX_CPU(cpu), addr, len, buf);
 	}
@@ -491,6 +491,25 @@ static uint16_t pio_region_size(uint16_t addr) {
 	return pio_regions[addr];
 }
 
+static void clear_synthetic_vmexit_sideband() {
+	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INTERRUPTION_INFO, 0);
+	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INTERRUPTION_ERR_CODE, 0);
+	BX_CPU(0)->VMwrite32(VMCS_32BIT_IDT_VECTORING_INFO, 0);
+	BX_CPU(0)->VMwrite32(VMCS_32BIT_IDT_VECTORING_ERR_CODE, 0);
+	BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, 0);
+	BX_CPU(0)->VMwrite_natural(VMCS_GUEST_LINEAR_ADDR, 0);
+}
+
+static void prepare_synthetic_vmexit(uint32_t exit_reason,
+				     bx_address qualification,
+				     uint32_t instruction_length) {
+	clear_synthetic_vmexit_sideband();
+	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
+	BX_CPU(0)->VMwrite_natural(VMCS_VMEXIT_QUALIFICATION, qualification);
+	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH,
+			     instruction_length);
+}
+
 bool inject_halt() {
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
@@ -499,30 +518,55 @@ bool inject_halt() {
 		       BX_CPU(0)->VMread64(VMCS_GUEST_RIP), phy);
 		return false;
 	}
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_HLT);
-	BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 1);
+	prepare_synthetic_vmexit(VMX_VMEXIT_HLT, 0, 1);
 	cpu_physical_memory_write(phy, "\xf4", 1);
 	return true;
+}
+
+static void warn_missing_mmio_linear(const char *op, bx_address addr,
+				     int size) {
+	fprintf(stderr,
+		"Warning: failed to find guest linear address for MMIO %s "
+		"gpa=%lx size=%d\n",
+		op, addr, size);
 }
 
 // INJECTORS
 bool inject_write(bx_address addr, int size, uint64_t val) {
 	enum Sizes { Byte, Word, Long, Quad, end_sizes };
-	BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
-	uint32_t exit_reason =
-		vmcs_translate_guest_physical_ept(addr, NULL, NULL);
-	/* printf("Exit reason: %lx\n", exit_reason); */
+	Bit32u combined_access = 0;
+	bx_address guest_linear_addr;
+	uint32_t exit_reason = vmcs_walk_guest_physical_ept(addr,
+							    &combined_access);
+	if (!exit_reason && (combined_access & BX_EPT_WRITE) != BX_EPT_WRITE)
+		exit_reason = VMX_VMEXIT_EPT_VIOLATION;
 	if (!exit_reason)
 		return false;
+	if (!vmcs_guest_phy2linear(addr, &guest_linear_addr, true)) {
+		warn_missing_mmio_linear("write", addr, size);
+		return false;
+	}
+
+	bx_address qualification = 0;
+	if (exit_reason == VMX_VMEXIT_EPT_VIOLATION) {
+		qualification = static_cast<bx_address>(BX_EPT_WRITE |
+							(combined_access
+							 << 3));
+		qualification |= static_cast<bx_address>(1) << 7;
+		if (BX_CPU(0)->nmi_unblocking_iret)
+			qualification |= static_cast<bx_address>(1) << 12;
+	}
+
+	clear_synthetic_vmexit_sideband();
 	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
-
+	BX_CPU(0)->VMwrite_natural(VMCS_VMEXIT_QUALIFICATION,
+				   qualification);
+	BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
 	if (exit_reason == VMX_VMEXIT_EPT_VIOLATION)
-		BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 2);
-	else
-		BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
+		BX_CPU(0)->VMwrite_natural(VMCS_GUEST_LINEAR_ADDR,
+					   guest_linear_addr);
 
-	BX_CPU(0)->set_reg64(BX_64BIT_REG_RDX, addr);
+	BX_CPU(0)->set_reg64(BX_64BIT_REG_RDX, guest_linear_addr);
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RAX, val);
 
 	bx_address phy;
@@ -555,21 +599,39 @@ bool inject_write(bx_address addr, int size, uint64_t val) {
 
 bool inject_read(bx_address addr, int size) {
 	enum Sizes { Byte, Word, Long, Quad, end_sizes };
-
-	uint32_t exit_reason =
-		vmcs_translate_guest_physical_ept(addr, NULL, NULL);
+	Bit32u combined_access = 0;
+	bx_address guest_linear_addr;
+	uint32_t exit_reason = vmcs_walk_guest_physical_ept(addr,
+							    &combined_access);
+	if (!exit_reason && (combined_access & BX_EPT_READ) != BX_EPT_READ)
+		exit_reason = VMX_VMEXIT_EPT_VIOLATION;
 	if (!exit_reason)
 		return false;
+	if (!vmcs_guest_phy2linear(addr, &guest_linear_addr, false)) {
+		warn_missing_mmio_linear("read", addr, size);
+		return false;
+	}
+
+	bx_address qualification = 0;
+	if (exit_reason == VMX_VMEXIT_EPT_VIOLATION) {
+		qualification = static_cast<bx_address>(BX_EPT_READ |
+							(combined_access
+							 << 3));
+		qualification |= static_cast<bx_address>(1) << 7;
+		if (BX_CPU(0)->nmi_unblocking_iret)
+			qualification |= static_cast<bx_address>(1) << 12;
+	}
+
+	clear_synthetic_vmexit_sideband();
 	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, exit_reason);
-
+	BX_CPU(0)->VMwrite_natural(VMCS_VMEXIT_QUALIFICATION,
+				   qualification);
 	BX_CPU(0)->VMwrite64(VMCS_64BIT_GUEST_PHYSICAL_ADDR, addr);
-
 	if (exit_reason == VMX_VMEXIT_EPT_VIOLATION)
-		BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 1);
-	else
-		BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, 0);
+		BX_CPU(0)->VMwrite_natural(VMCS_GUEST_LINEAR_ADDR,
+					   guest_linear_addr);
 
-	BX_CPU(0)->set_reg64(BX_64BIT_REG_RCX, addr);
+	BX_CPU(0)->set_reg64(BX_64BIT_REG_RCX, guest_linear_addr);
 
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
@@ -643,12 +705,12 @@ bool inject_in(uint16_t addr, uint16_t size) {
 		field_64 |= 3; // access size
 		break;
 	}
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
-			     VMX_VMEXIT_IO_INSTRUCTION);
 
 	field_64 |= (addr << 16); // port number
 	field_64 |= (1 << 3); // //IN
-	BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
+	prepare_synthetic_vmexit(VMX_VMEXIT_IO_INSTRUCTION, field_64,
+				 BX_CPU(0)->VMread32(
+					 VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH));
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RDX, addr);
 	return true;
 }
@@ -691,11 +753,10 @@ bool inject_out(uint16_t addr, uint16_t size, uint32_t value) {
 	// write value for out
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RAX, value);
 
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON,
-			     VMX_VMEXIT_IO_INSTRUCTION);
-
 	field_64 |= (addr << 16);
-	BX_CPU(0)->VMwrite32(VMCS_VMEXIT_QUALIFICATION, field_64);
+	prepare_synthetic_vmexit(VMX_VMEXIT_IO_INSTRUCTION, field_64,
+				 BX_CPU(0)->VMread32(
+					 VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH));
 	return true;
 }
 
@@ -732,8 +793,7 @@ bool inject_wrmsr(bx_address msr, uint64_t value) {
 		return false;
 	}
 	cpu_physical_memory_write(phy, "\x0f\x30", 2);
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_WRMSR);
+	prepare_synthetic_vmexit(VMX_VMEXIT_WRMSR, 0, 2);
 
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RCX, msr);
 	start_cpu();
@@ -749,8 +809,7 @@ uint64_t inject_rdmsr(bx_address msr) {
 		return false;
 	}
 	cpu_physical_memory_write(phy, "\x0f\x32", 2);
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 2);
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_RDMSR);
+	prepare_synthetic_vmexit(VMX_VMEXIT_RDMSR, 0, 2);
 
 	BX_CPU(0)->set_reg64(BX_64BIT_REG_RCX, msr);
 	start_cpu();
@@ -1063,8 +1122,7 @@ bool op_vmcall() {
 		}
 	}
 
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_REASON, VMX_VMEXIT_VMCALL);
-	BX_CPU(0)->VMwrite32(VMCS_32BIT_VMEXIT_INSTRUCTION_LENGTH, 3);
+	prepare_synthetic_vmexit(VMX_VMEXIT_VMCALL, 0, 3);
 
 	bx_address phy;
 	int res = vmcs_linear2phy(BX_CPU(0)->VMread64(VMCS_GUEST_RIP), &phy);
@@ -1216,8 +1274,7 @@ static void virtio_select_ring_format_for_input() {
 	bool want_packed = (byte & 1) != 0;
 
 	auto *active = vdev->active_syntax_model();
-	if (syntax_model_sync_enabled() && active &&
-	    !active->all_completed()) {
+	if (syntax_model_sync_enabled() && active && !active->all_completed()) {
 		return;
 	}
 
@@ -1337,9 +1394,8 @@ void fuzz_run_input(const uint8_t *Data, size_t Size) {
 #if BX_SUPPORT_SMP
 				if (bx_cpu_count > 1 &&
 				    !model->all_completed()) {
-					drain_begin(
-						syntax_model_completed_pred,
-						model);
+					drain_begin(syntax_model_completed_pred,
+						    model);
 					inject_halt();
 					start_cpu();
 					DrainStats stats = drain_end();

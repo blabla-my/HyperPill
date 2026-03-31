@@ -238,8 +238,9 @@ static void init_cpu(void) {
 }
 
 void start_cpu(bool enumerating) {
-	if (fuzzing && (fuzz_unhealthy_input || fuzz_do_not_continue))
+	if (fuzzing && (fuzz_unhealthy_input || fuzz_do_not_continue)) {
 		return;
+	}
 	if (fuzz_timeout_pending()) {
 		fuzz_handle_timeout_request(0);
 		return;
@@ -367,10 +368,12 @@ void start_cpu(bool enumerating) {
 #endif
 	}
 	pause_cpu();
-	if (fuzz_unhealthy_input || fuzz_do_not_continue)
+	if (fuzz_unhealthy_input || fuzz_do_not_continue) {
 		return;
-	if (drain_state.active)
+	}
+	if (drain_state.active) {
 		return;
+	}
 	BX_CPU(0)->gen_reg[BX_64BIT_REG_RIP].rrx = guest_rip; // reset $RIP
 
 	bx_address phy;
@@ -378,9 +381,11 @@ void start_cpu(bool enumerating) {
 	// assert(res == 1); // Guest page table should be guarded
 	if (res != 1) {
 		fuzz_emu_stop_unhealthy();
+		return;
 	}
-	if (phy > maxaddr || !res) {
+	if (phy > maxaddr) {
 		fuzz_do_not_continue = true;
+		return;
 	}
 }
 
@@ -863,12 +868,12 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 					entry.path().string().c_str());
 			}
 		}
+		load_symbol_map_from_vbox_dmesg(snapshot_base());
 
 		/* Since we are in infer stage, after doing this, we write sym
 		 * back to the db, then exit*/
 		store_sym_back_to_db(icp_db_path_str);
 		exit(0);
-		load_symbol_map_from_vbox_dmesg(snapshot_base());
 	}
 
 	/* For symbol - > addr (for breakpoints)*/
